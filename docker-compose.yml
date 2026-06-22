@@ -1,0 +1,26 @@
+# Local infrastructure for the Core API — the only thing this service needs to run.
+# Usage:  docker compose up -d
+# Flyway (in the Core) applies the schema on startup against this database.
+services:
+  postgres:
+    image: postgres:15
+    container_name: ctl-core-postgres
+    environment:
+      POSTGRES_USER: ctl
+      POSTGRES_PASSWORD: ctl
+      POSTGRES_DB: campustours
+    # Published on the standard 5432 to match the DB_URL default in application.properties,
+    # so `./mvnw spring-boot:run` works with no env override. If you already run a local
+    # Postgres on 5432, change the host side, e.g. "5433:5432", and set DB_URL accordingly.
+    ports:
+      - "5432:5432"
+    volumes:
+      - ctl_core_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ctl -d campustours"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  ctl_core_pgdata:

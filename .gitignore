@@ -1,0 +1,23 @@
+# --- Build output ---
+target/
+*.class
+
+# --- Logs ---
+*.log
+
+# --- Environment / secrets (no committed .env — set vars via the environment) ---
+.env
+.env.*
+
+# --- IDEs / editors ---
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# NOTE: the Maven wrapper (mvnw, mvnw.cmd, .mvn/wrapper/maven-wrapper.properties) IS
+# committed on purpose so `./mvnw` works on a fresh clone — do not ignore .mvn/.

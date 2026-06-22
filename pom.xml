@@ -8,8 +8,8 @@
 		<version>3.4.7</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
-	<groupId>com.CampusToursLive.ai</groupId>
-	<artifactId>bankend</artifactId>
+	<groupId>com.CampusToursLive</groupId>
+	<artifactId>backend</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>backend</name>
 	<description>CampusTours</description>
@@ -27,15 +27,14 @@
 		<url/>
 	</scm>
 	<properties>
-		<java.version>17</java.version>
+		<java.version>21</java.version>
+		<!-- Docker Engine API version handed to Testcontainers' docker-java. Engine 25+
+		     raised the minimum supported API to 1.44; docker-java's built-in default is
+		     older and the daemon rejects it with HTTP 400. 1.44 is accepted by every
+		     engine >= 25.0 (Jan 2024). Override with -Ddocker.api.version=… if needed. -->
+		<docker.api.version>1.44</docker.api.version>
 	</properties>
 	<dependencies>
-		<!-- Core Spring Boot starter -->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter</artifactId>
-		</dependency>
-
 		<!-- Web / REST support -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -48,13 +47,38 @@
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
 		</dependency>
 
-		<!-- GraphQL (if you really need it now) -->
-		<!--
+		<!-- Actuator: health/info endpoints + k8s liveness/readiness probes + Micrometer metrics -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-graphql</artifactId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
-		-->
+
+		<!-- Security + Google OIDC JWT resource server -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+		</dependency>
+
+		<!-- Flyway migrations (owns the PostgreSQL schema: V1..V6) -->
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-core</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-postgresql</artifactId>
+		</dependency>
+
+		<!-- PostgreSQL driver -->
+		<dependency>
+			<groupId>org.postgresql</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>runtime</scope>
+		</dependency>
 
 		<!-- Lombok -->
 		<dependency>
@@ -69,20 +93,30 @@
 			<artifactId>spring-boot-starter-test</artifactId>
 			<scope>test</scope>
 		</dependency>
-
-		<!--
 		<dependency>
-			<groupId>org.springframework.graphql</groupId>
-			<artifactId>spring-graphql-test</artifactId>
+			<groupId>org.springframework.security</groupId>
+			<artifactId>spring-security-test</artifactId>
 			<scope>test</scope>
 		</dependency>
-		-->
 
-		<!-- H2 in-memory database for local development -->
+		<!-- Testcontainers: a real PostgreSQL for repository / Flyway integration tests
+		     (H2 can't emulate the PG enum types + jsonb this schema uses). Versions are
+		     managed by the Spring Boot dependency BOM. @ServiceConnection auto-wires the
+		     container's datasource (Spring Boot 3.1+). -->
 		<dependency>
-			<groupId>com.h2database</groupId>
-			<artifactId>h2</artifactId>
-			<scope>runtime</scope>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<scope>test</scope>
 		</dependency>
 	</dependencies>
 
@@ -105,6 +139,98 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 				<!-- no configuration needed here for Lombok -->
+			</plugin>
+
+			<!-- Surefire: pin the Docker Engine API version for Testcontainers' docker-java
+			     via the `api.version` system property it reads (see docker.api.version above).
+			     Without this, docker-java sends an API older than Engine 25+'s minimum (1.44)
+			     and every Testcontainers test fails with "Could not find a valid Docker
+			     environment" (the daemon rejects the ping with HTTP 400). -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<systemPropertyVariables>
+						<api.version>${docker.api.version}</api.version>
+					</systemPropertyVariables>
+				</configuration>
+			</plugin>
+
+			<!-- Code formatting: google-java-format (AOSP = 4-space, matches this codebase).
+			     Run `./mvnw spotless:apply` once to normalise, then it's enforced by `verify`. -->
+			<plugin>
+				<groupId>com.diffplug.spotless</groupId>
+				<artifactId>spotless-maven-plugin</artifactId>
+				<version>2.44.0</version>
+				<configuration>
+					<java>
+						<googleJavaFormat>
+							<version>1.24.0</version>
+							<style>AOSP</style>
+						</googleJavaFormat>
+						<removeUnusedImports/>
+						<trimTrailingWhitespace/>
+						<endWithNewline/>
+					</java>
+				</configuration>
+				<executions>
+					<execution>
+						<goals>
+							<goal>check</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+
+			<!-- Test coverage. `./mvnw verify` writes target/site/jacoco/index.html. -->
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>0.8.12</version>
+				<executions>
+					<execution>
+						<id>prepare-agent</id>
+						<goals>
+							<goal>prepare-agent</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>report</goal>
+						</goals>
+					</execution>
+					<!-- Coverage gate. Modest starter bar over the logic-bearing code
+					     (boilerplate excluded). Raise the minimum as tests grow. -->
+					<execution>
+						<id>check</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>check</goal>
+						</goals>
+						<configuration>
+							<excludes>
+								<exclude>**/BackendApplication.*</exclude>
+								<exclude>**/config/**</exclude>
+								<exclude>**/web/dto/**</exclude>
+								<exclude>**/*Entity.*</exclude>
+							</excludes>
+							<rules>
+								<rule>
+									<element>BUNDLE</element>
+									<limits>
+										<limit>
+											<counter>LINE</counter>
+											<value>COVEREDRATIO</value>
+											<minimum>0.30</minimum>
+										</limit>
+									</limits>
+								</rule>
+							</rules>
+						</configuration>
+					</execution>
+				</executions>
 			</plugin>
 		</plugins>
 	</build>
