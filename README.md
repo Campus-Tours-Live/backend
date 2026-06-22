@@ -191,6 +191,18 @@ $env:GOOGLE_CLIENT_ID="<your-google-client-id>"; .\mvnw.cmd spring-boot:run
 > The default `DB_URL` already points at `localhost:5432`, matching the bundled compose — no
 > override needed. Set `DB_URL` only if you run Postgres elsewhere.
 
+**Hot reload (Spring Boot DevTools).** While `spring-boot:run` is running, **DevTools auto-restarts**
+the app whenever the compiled classes change (a fast two-classloader restart, ~1–2s — much quicker
+than a cold boot). DevTools watches `target/classes`, so you just need something to recompile on save:
+
+- **In an IDE** (IntelliJ / VS Code with the Java extension) — enable build/compile on save
+  (IntelliJ: _Settings → Build, Execution, Deployment → Compiler → Build project automatically_).
+  Save a `.java` file → the IDE recompiles → DevTools restarts.
+- **Plain terminal** — keep `spring-boot:run` in one terminal and run `./mvnw compile` in another
+  after edits to trigger the restart.
+
+DevTools is dev-only: it's excluded from a packaged/`java -jar` run, so it never ships to production.
+
 ### 4. Verify it's up
 
 ```bash

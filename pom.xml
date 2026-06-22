@@ -87,6 +87,17 @@
 			<optional>true</optional>
 		</dependency>
 
+		<!-- DevTools: automatic application restart when classpath files change during local
+		     dev (a fast two-classloader restart, not a full JVM boot). `optional=true` keeps it
+		     off the dependency graph of anything that depends on this module, and it is disabled
+		     automatically in a packaged/`java -jar` run, so it never ships to production. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-devtools</artifactId>
+			<scope>runtime</scope>
+			<optional>true</optional>
+		</dependency>
+
 		<!-- Test -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
