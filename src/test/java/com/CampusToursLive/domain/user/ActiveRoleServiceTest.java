@@ -75,4 +75,12 @@ class ActiveRoleServiceTest {
         assertEquals(UserRole.GUIDE, u.getLastActiveRole());
         verify(users).save(u);
     }
+
+    @Test
+    void switch_throws422_whenRoleIsBlank() {
+        // Non-null but blank → covers the isBlank() arm of the guard.
+        assertThrows(
+                ValidationException.class,
+                () -> service().switchActiveRole(user(UUID.randomUUID()), "   "));
+    }
 }

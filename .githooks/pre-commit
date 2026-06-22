@@ -1,0 +1,3 @@
+#!/bin/sh
+# Pre-commit: fail if the code isn't formatted. Run `./mvnw spotless:apply` to fix.
+exec ./mvnw -q spotless:check

@@ -34,6 +34,7 @@ stateless Spring Boot service that validates a Google OIDC `id_token` on every r
   - [API overview](#api-overview)
   - [Authentication \& roles](#authentication--roles)
   - [Code quality (format \& coverage)](#code-quality-format--coverage)
+  - [Git hooks \& commit conventions](#git-hooks--commit-conventions)
   - [Build \& package](#build--package)
   - [Troubleshooting](#troubleshooting)
 
@@ -44,7 +45,7 @@ stateless Spring Boot service that validates a Google OIDC `id_token` on every r
 | Area             | Choice                                                                            |
 | ---------------- | --------------------------------------------------------------------------------- |
 | Language / build | **Java 21**, Maven (via the `./mvnw` wrapper)                                     |
-| Framework        | **Spring Boot 3.4.7** (Web MVC)                                       |
+| Framework        | **Spring Boot 3.4.7** (Web MVC)                                                   |
 | Persistence      | Spring Data JPA + **PostgreSQL 15**; **Flyway** owns the schema (`ddl-auto=none`) |
 | Security         | Spring Security **OAuth2 Resource Server** — Google OIDC `id_token` (JWT)         |
 | Observability    | Spring Boot **Actuator** (health + k8s liveness/readiness probes)                 |
@@ -234,7 +235,7 @@ The full set of variables (all optional for local dev; some required in prod):
 
 ```bash
 ./mvnw test          # unit + slice + repository tests (Surefire)
-./mvnw verify        # the above + JaCoCo coverage report + Spotless check
+./mvnw verify        # the above + JaCoCo coverage report + Spotless check (Recommended)
 ```
 
 - **Docker must be running** — `UniversityRepositoryTest` uses **Testcontainers** to spin up a
@@ -345,8 +346,52 @@ envelope; errors are `application/problem+json`.
 ```
 
 - **Spotless** enforces formatting; run `spotless:apply` once before your first `verify`.
-- **JaCoCo** has a modest coverage gate (bundle line ≥ 30%, boilerplate excluded) — raise it as
-  tests grow.
+- **JaCoCo** enforces a coverage gate on the in-scope code — bundle **line, branch, and method
+  coverage each ≥ 90%** (the Spring bootstrap, config/security wiring, DTO records, and JPA
+  entities are excluded; see the `<excludes>` in `pom.xml`). Actual coverage is 100%.
+
+---
+
+## Git hooks & commit conventions
+
+The repo enforces formatting, tests, and a commit-message convention through **git hooks**, kept in
+sync with Maven so every contributor gets them automatically (the parallel of the BFF's husky
+setup). The `git-build-hook-maven-plugin` points git's `core.hooksPath` at the version-controlled
+`.githooks/` directory on any build.
+
+**Enable once** (after cloning) — run any Maven goal, or explicitly:
+
+```bash
+./mvnw validate            # runs the plugin's `configure` goal → sets core.hooksPath=.githooks/
+```
+
+The hooks (`.githooks/`, all POSIX `sh`):
+
+| Hook         | Runs                | Purpose                                                      |
+| ------------ | ------------------- | ----------------------------------------------------------- |
+| `pre-commit` | `./mvnw spotless:check` | Blocks the commit if code isn't formatted (fix: `spotless:apply`). |
+| `commit-msg` | message-format check | Enforces the commit convention below.                       |
+| `pre-push`   | `./mvnw verify`     | Runs the full test suite + coverage gate before pushing.    |
+
+**Commit message format** (identical to the BFF):
+
+```
+<type>: <BOARD>-<NUMBER> <description>
+```
+
+- `<type>` — one of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`,
+  `chore`, `revert` (an optional scope is allowed: `fix(security): …`).
+- `<BOARD>` — the Jira board key, uppercase (e.g. `CTL`).
+- `<NUMBER>` — the Jira ticket number.
+
+Examples: `feat: CTL-1234 validate id_token audience`, `fix(security): CTL-987 reject expired JWT`.
+Commits missing the type or the `<BOARD>-<NUMBER>` ticket are rejected.
+
+> **Monorepo note:** `core.hooksPath` resolves relative to the git repo root. While this Core lives
+> inside the umbrella monorepo (single `.git` at the root), the hooks bind to the repo root, not
+> `backend/`. Once the Core is its own repository (its root = this directory), the hooks apply
+> exactly as described. To bypass a hook in an emergency, use `git commit --no-verify` /
+> `git push --no-verify`.
 
 ---
 

@@ -22,6 +22,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -143,5 +144,36 @@ class CurrentUserTest {
         authenticate("sub-1");
 
         assertSame(winnerRow, currentUser().resolve("signup"));
+    }
+
+    // ---- currentJwt() rejection branches -------------------------------------------------
+
+    @Test
+    void require_throws401_whenAuthenticationIsNotAuthenticated() {
+        // Present but not authenticated (2-arg token has isAuthenticated() == false).
+        SecurityContextHolder.getContext()
+                .setAuthentication(new UsernamePasswordAuthenticationToken("u", "p"));
+        assertThrows(UnauthorizedException.class, () -> currentUser().require());
+    }
+
+    @Test
+    void require_throws401_whenPrincipalIsNotAJwt() {
+        // Authenticated, but the principal is not a Jwt → still rejected.
+        SecurityContextHolder.getContext()
+                .setAuthentication(
+                        new UsernamePasswordAuthenticationToken("u", "p", Collections.emptyList()));
+        assertThrows(UnauthorizedException.class, () -> currentUser().require());
+    }
+
+    @Test
+    void resolve_rethrowsRaceError_whenRecoveryFindsNothing() {
+        // provisioning loses the race AND the recovery lookup also misses → the original
+        // DataIntegrityViolationException is rethrown (covers the orElseThrow lambda).
+        when(users.findByOidcSubject("sub-1")).thenReturn(Optional.empty(), Optional.empty());
+        when(provisioning.provisionFromJwt(any()))
+                .thenThrow(new DataIntegrityViolationException("dup"));
+        authenticate("sub-1");
+
+        assertThrows(DataIntegrityViolationException.class, () -> currentUser().resolve("signup"));
     }
 }

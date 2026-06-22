@@ -110,4 +110,55 @@ class GuideOfferingControllerTest {
                 .andExpect(jsonPath("$.status").value(422))
                 .andExpect(jsonPath("$.title").value("title is required"));
     }
+
+    @Test
+    void create_returnsEnvelope_whenValid() throws Exception {
+        UserEntity u = user();
+        TourOfferingResponse o =
+                new TourOfferingResponse(
+                        "o9",
+                        "CS Lab Life",
+                        "cs-lab-life",
+                        "DRAFT",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(offerings.create(eq(u), any())).thenReturn(o);
+
+        mvc.perform(
+                        post("/guide/offerings")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"title\":\"CS Lab Life\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value("o9"))
+                .andExpect(jsonPath("$.data.status").value("DRAFT"));
+    }
+
+    @Test
+    void activate_returnsEnvelope_whenValid() throws Exception {
+        UserEntity u = user();
+        UUID id = UUID.randomUUID();
+        TourOfferingResponse o =
+                new TourOfferingResponse(
+                        id.toString(),
+                        "CS Lab Life",
+                        "cs-lab-life",
+                        "ACTIVE",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(offerings.activate(u, id)).thenReturn(o);
+
+        mvc.perform(post("/guide/offerings/{id}/activate", id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"));
+    }
 }

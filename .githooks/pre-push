@@ -1,0 +1,3 @@
+#!/bin/sh
+# Pre-push: run the full verification (tests + JaCoCo + Spotless). Requires Docker (Testcontainers).
+exec ./mvnw -q verify

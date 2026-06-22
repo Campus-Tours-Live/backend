@@ -1,0 +1,15 @@
+#!/bin/sh
+# Conventional Commits + required Jira ticket.
+# Format:  <type>: <BOARD>-<NUMBER> <description>
+# Example: feat: CTL-1234 add Google OIDC validation
+first_line=$(head -n1 "$1")
+pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9-]+\))?!?: [A-Z][A-Z0-9]+-[0-9]+ .+'
+if ! printf '%s\n' "$first_line" | grep -Eq "$pattern"; then
+  echo "[commit-msg] Invalid commit message:"
+  echo "    $first_line"
+  echo
+  echo "  Required: <type>: <BOARD>-<NUMBER> <description>"
+  echo "  <type>:   feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert"
+  echo "  Example:  feat: CTL-1234 add Google OIDC validation"
+  exit 1
+fi

@@ -375,4 +375,138 @@ class TourOfferingServiceTest {
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
         assertThrows(ValidationException.class, () -> service().listOwn(user(uid)));
     }
+
+    // ---------- create: remaining null-input branches ----------
+
+    @Test
+    void create_throws422_whenTitleNull() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        when(universities.existsById(any())).thenReturn(true);
+        CreateOfferingRequest req =
+                new CreateOfferingRequest(null, UNI, "GENERAL_CAMPUS", 60, 5000L, null, null);
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
+    }
+
+    @Test
+    void create_throws422_whenDurationNull() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        when(universities.existsById(any())).thenReturn(true);
+        CreateOfferingRequest req =
+                new CreateOfferingRequest("Walk", UNI, "GENERAL_CAMPUS", null, 5000L, null, null);
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
+    }
+
+    @Test
+    void create_throws422_whenPriceNull() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        when(universities.existsById(any())).thenReturn(true);
+        CreateOfferingRequest req =
+                new CreateOfferingRequest("Walk", UNI, "GENERAL_CAMPUS", 60, null, null, null);
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
+    }
+
+    @Test
+    void create_skipsLanguages_whenAllBlank() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        when(universities.existsById(any())).thenReturn(true);
+        when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
+        when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        // languages present but all blank → filtered to empty → setLanguages skipped.
+        CreateOfferingRequest req =
+                new CreateOfferingRequest(
+                        "Langless Walk",
+                        UNI,
+                        "GENERAL_CAMPUS",
+                        60,
+                        5000L,
+                        null,
+                        java.util.Arrays.asList("", null));
+
+        TourOfferingResponse res = service().create(user(uid), req);
+        assertEquals("DRAFT", res.status());
+    }
+
+    @Test
+    void create_succeeds_whenLanguagesNull() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        when(universities.existsById(any())).thenReturn(true);
+        when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
+        when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        // languages == null → the setLanguages block is skipped (the `!= null` false arm).
+        CreateOfferingRequest req =
+                new CreateOfferingRequest("Walk", UNI, "GENERAL_CAMPUS", 60, 5000L, null, null);
+        assertEquals("DRAFT", service().create(user(uid), req).status());
+    }
+
+    @Test
+    void create_throws422_whenUniversityIdNull() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        CreateOfferingRequest req =
+                new CreateOfferingRequest("Walk", null, "GENERAL_CAMPUS", 60, 5000L, null, null);
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
+    }
+
+    @Test
+    void create_throws422_whenTopicNull() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        when(universities.existsById(any())).thenReturn(true);
+        CreateOfferingRequest req =
+                new CreateOfferingRequest("Walk", UNI, null, 60, 5000L, null, null);
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
+    }
+
+    @Test
+    void create_throws422_whenTopicBlank() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        when(universities.existsById(any())).thenReturn(true);
+        // Non-null but blank topic → covers the isBlank() arm of parseTopic's guard.
+        CreateOfferingRequest req =
+                new CreateOfferingRequest("Walk", UNI, "   ", 60, 5000L, null, null);
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
+    }
+
+    @Test
+    void create_recoversFromJsonError_whenMapperThrows() throws Exception {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        var mapper = org.mockito.Mockito.mock(ObjectMapper.class);
+        when(mapper.writeValueAsString(any())).thenThrow(new RuntimeException("boom"));
+        var svc = new TourOfferingService(offerings, guides, universities, mapper);
+        stubPendingGuide(uid, gid);
+        when(universities.existsById(any())).thenReturn(true);
+        when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
+        when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        // Non-empty languages → writeJson(...) runs and its catch swallows the mapper error.
+        CreateOfferingRequest req =
+                new CreateOfferingRequest(
+                        "Walk", UNI, "GENERAL_CAMPUS", 60, 5000L, null, List.of("en-US"));
+        assertEquals("DRAFT", svc.create(user(uid), req).status());
+    }
+
+    @Test
+    void listOwn_mapsNullStatus() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        // An offering with a null status exercises the ": null" arm of toResponse.
+        when(offerings.findByGuideId(gid)).thenReturn(List.of(offering(oid, gid, null)));
+        assertEquals(null, service().listOwn(user(uid)).get(0).status());
+    }
 }

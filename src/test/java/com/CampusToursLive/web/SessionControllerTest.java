@@ -108,4 +108,24 @@ class SessionControllerTest {
         verify(activeRole).switchActiveRole(u, "GUIDE");
         assertEquals(List.of("GUIDE"), me.roles());
     }
+
+    @Test
+    void userinfo_handlesProfilesWithNullInnerEnums() {
+        // Profiles exist but their enum fields are null → me() maps both to null (the ": null"
+        // arm).
+        UUID uid = UUID.randomUUID();
+        UserEntity u = user(uid);
+        when(currentUser.require()).thenReturn(u);
+        when(userRoles.findByUserId(uid)).thenReturn(List.of());
+        when(participants.findByUserId(uid))
+                .thenReturn(Optional.of(new ParticipantProfileEntity())); // participantType null
+        GuideProfileEntity gp = new GuideProfileEntity();
+        gp.setApplicationStatus(null); // override the DRAFT default → exercise the ": null" arm
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(gp));
+
+        MeResponse me = controller().userinfo().data();
+
+        assertEquals(null, me.participantType());
+        assertEquals(null, me.guideStatus());
+    }
 }

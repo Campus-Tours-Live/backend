@@ -102,4 +102,11 @@ class UserProvisioningServiceTest {
         assertNull(u.getLastActiveRole()); // role acquired later, at onboarding
         verify(users).save(u);
     }
+
+    @Test
+    void fallsBackToGivenNameOnly_whenFamilyMissing() {
+        // given_name present, family_name absent → trimmed "First " == "First".
+        UserEntity u = service().provisionFromJwt(base().claim("given_name", "Jordan").build());
+        assertEquals("Jordan", u.getDisplayName());
+    }
 }

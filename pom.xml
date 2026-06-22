@@ -63,7 +63,7 @@
 			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
 		</dependency>
 
-		<!-- Flyway migrations (owns the PostgreSQL schema: V1..V6) -->
+		<!-- Flyway migrations (owns the PostgreSQL schema: V1..V2) -->
 		<dependency>
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-core</artifactId>
@@ -122,6 +122,26 @@
 
 	<build>
 		<plugins>
+			<!-- Git hooks (parity with the BFF's husky setup). On build, point git at .githooks/:
+			     pre-commit → spotless:check, commit-msg → Conventional Commits + Jira ticket,
+			     pre-push → mvn verify. Hooks live under .githooks/ and are version-controlled. -->
+			<plugin>
+				<groupId>com.rudikershaw.gitbuildhook</groupId>
+				<artifactId>git-build-hook-maven-plugin</artifactId>
+				<version>3.6.0</version>
+				<configuration>
+					<gitConfig>
+						<core.hooksPath>.githooks/</core.hooksPath>
+					</gitConfig>
+				</configuration>
+				<executions>
+					<execution>
+						<goals>
+							<goal>configure</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>
@@ -187,6 +207,23 @@
 				<groupId>org.jacoco</groupId>
 				<artifactId>jacoco-maven-plugin</artifactId>
 				<version>0.8.12</version>
+				<!-- Plugin-level excludes apply to BOTH the report and the check, so the HTML
+				     report and the gate measure exactly the same (logic-bearing) code. Excluded:
+				     the Spring bootstrap, framework wiring (config + SecurityConfig — the filter
+				     chain / JwtDecoder bean fetch Google's JWKS and aren't unit-testable), the
+				     wire DTOs (records), and JPA entities + their nested @IdClass PKs (Lombok /
+				     boilerplate). Everything else (services, controllers, security logic) is
+				     covered to 100%. -->
+				<configuration>
+					<excludes>
+						<exclude>**/BackendApplication.*</exclude>
+						<exclude>**/config/**</exclude>
+						<exclude>**/web/dto/**</exclude>
+						<exclude>**/*Entity.*</exclude>
+						<exclude>**/*Entity$*.*</exclude>
+						<exclude>**/security/SecurityConfig.*</exclude>
+					</excludes>
+				</configuration>
 				<executions>
 					<execution>
 						<id>prepare-agent</id>
@@ -201,8 +238,9 @@
 							<goal>report</goal>
 						</goals>
 					</execution>
-					<!-- Coverage gate. Modest starter bar over the logic-bearing code
-					     (boilerplate excluded). Raise the minimum as tests grow. -->
+					<!-- Coverage gate (bound to `verify`): line, branch, and method coverage of
+					     the in-scope code must each be >= 90%. Actual coverage is 100%; the 90%
+					     floor leaves a small margin for incidental dips. -->
 					<execution>
 						<id>check</id>
 						<phase>verify</phase>
@@ -210,12 +248,6 @@
 							<goal>check</goal>
 						</goals>
 						<configuration>
-							<excludes>
-								<exclude>**/BackendApplication.*</exclude>
-								<exclude>**/config/**</exclude>
-								<exclude>**/web/dto/**</exclude>
-								<exclude>**/*Entity.*</exclude>
-							</excludes>
 							<rules>
 								<rule>
 									<element>BUNDLE</element>
@@ -223,7 +255,17 @@
 										<limit>
 											<counter>LINE</counter>
 											<value>COVEREDRATIO</value>
-											<minimum>0.30</minimum>
+											<minimum>0.90</minimum>
+										</limit>
+										<limit>
+											<counter>BRANCH</counter>
+											<value>COVEREDRATIO</value>
+											<minimum>0.90</minimum>
+										</limit>
+										<limit>
+											<counter>METHOD</counter>
+											<value>COVEREDRATIO</value>
+											<minimum>0.90</minimum>
 										</limit>
 									</limits>
 								</rule>
