@@ -14,26 +14,50 @@ permissions:
   contents: read
 
 jobs:
-  ci:
+  lint:
+    name: Lint & Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # full history so diff-cover can diff against the base branch
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
+      - name: Spotless (google-java-format) check
+        run: ./mvnw -B spotless:check
 
+  test:
+    name: Unit & Integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
       # Unit + Testcontainers integration tests + JaCoCo 90% project gate.
-      # Docker is preinstalled on ubuntu-latest, so Testcontainers works out of the box.
-      - name: Build, test, coverage gate
-        run: ./mvnw -B verify
+      # (Spotless is checked in the lint job; skip it here to keep this signal test-only.)
+      - run: ./mvnw -B verify -Dspotless.check.skip=true
 
-      # Patch coverage: lines changed in this PR must be >= 80% covered.
-      - name: Patch coverage (changed lines >= 80%)
+  patch-coverage:
+    name: Patch Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so diff-cover can diff against the base branch
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: ./mvnw -B verify -Dspotless.check.skip=true
+      - name: Enforce patch coverage on changed lines (>= 80%)
         run: |
           python -m pip install --quiet diff-cover
           BASE="${{ github.base_ref || 'main' }}"
