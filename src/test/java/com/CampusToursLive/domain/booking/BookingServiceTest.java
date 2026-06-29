@@ -140,7 +140,7 @@ class BookingServiceTest {
 
         BookingDetailResponse resp = service().getNextTour(uid).orElseThrow();
         assertEquals(bookingId.toString(), resp.id());
-        assertEquals("CONFIRMED", resp.displayStatus());
+        assertEquals("CONFIRMED", resp.status());
         assertEquals(start.toString(), resp.scheduledAt());
         assertEquals("America/Los_Angeles", resp.timezone());
         assertEquals(offeringId.toString(), resp.offeringId());
@@ -218,7 +218,7 @@ class BookingServiceTest {
 
         List<BookingDetailResponse> result = service().getUpcomingBookings(uid);
         assertEquals(1, result.size());
-        assertEquals("WAITING_FOR_GUIDE", result.get(0).displayStatus());
+        assertEquals("WAITING_FOR_GUIDE", result.get(0).status());
         assertEquals(45, result.get(0).durationMin());
         assertEquals("Lab Tour", result.get(0).offeringTitle());
         assertEquals("Alex Guide", result.get(0).guideName());
