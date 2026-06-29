@@ -329,9 +329,43 @@ envelope; errors are `application/problem+json`.
 | `GET` `PATCH` | `/guide/profile`                  | Read / upsert the guide profile (+ submit application)    |
 | `GET` `POST`  | `/guide/offerings`                | List / create a guide's tour offerings                    |
 | `POST`        | `/guide/offerings/{id}/activate`  | Publish a draft offering (requires an APPROVED guide)     |
+| `GET`         | `/tours`                          | Public marketplace catalog (ACTIVE offerings only)        |
+| `GET`         | `/tours/{tourId}`                 | Single discoverable tour detail                           |
 | `GET`         | `/universities`                   | University catalog search (`q`, `limit`)                  |
 | `GET`         | `/meta/tour-topics`               | Controlled vocabulary for tour topics                     |
 | `POST`        | `/admin/guides/{userId}/decision` | Admin approve/reject a guide application                  |
+
+### Tour catalog (`GET /tours`)
+
+Public browse endpoint for **available** tour offerings. BFF: `GET /v1/tours` (passthrough — no
+custom BFF handler). Returns only offerings that are **ACTIVE**, owned by an **APPROVED** guide, at
+an **ACTIVE** university. Draft / paused / archived offerings are excluded.
+
+This is **not** `GET /guide/offerings`, which lists the signed-in guide's **own** products (all
+statuses) and requires the **GUIDE** role.
+
+**Query parameters** (`GET /tours`):
+
+| Param          | Default       | Description                                                      |
+| -------------- | ------------- | ---------------------------------------------------------------- |
+| `universityId` | —             | Filter by university UUID                                        |
+| `topic`        | —             | Filter by `tour_topic` enum (see `/meta/tour-topics`)            |
+| `q`            | `""`          | Search title, description, or university name                    |
+| `sort`         | `RECOMMENDED` | `RECOMMENDED` \| `PRICE_ASC` \| `PRICE_DESC` \| `RATING`         |
+| `limit`        | `20`          | Page size (max **50**)                                           |
+
+**Responses:** `TourSummaryResponse[]` (list) or `TourDetailResponse` (by id). Invalid `sort` →
+`422`. Unknown or non-discoverable id → `404`.
+
+**Manual test (via BFF, signed in):**
+
+```bash
+curl -s "http://localhost:4000/v1/tours?sort=RECOMMENDED&limit=20" \
+  -H "Cookie: ctl_sess=<session-cookie>" | jq .
+```
+
+See the repo-root [`API.md`](../API.md) for the full contract, frontend integration, and testing
+guide.
 
 ---
 
