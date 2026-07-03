@@ -21,3 +21,6 @@ Thumbs.db
 
 # NOTE: the Maven wrapper (mvnw, mvnw.cmd, .mvn/wrapper/maven-wrapper.properties) IS
 # committed on purpose so `./mvnw` works on a fresh clone — do not ignore .mvn/.
+
+# Claude Code — personal settings (do not commit); share .claude/settings.json
+.claude/settings.local.json
