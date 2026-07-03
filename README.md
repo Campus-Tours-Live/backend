@@ -364,20 +364,42 @@ envelope; errors are `application/problem+json`.
 
 ---
 
-## Claude Code skills
+## Agent skills (Codex & Claude)
 
-This repo commits a `.claude/` config (plugin marketplace + the skills this stack needs — Spring
-Boot/JVM, database design + Flyway migrations, API design, security, QA, review) and a self-contained
-`.claude/hooks/ensure-plugins.mjs` that installs any missing Claude Code plugin.
+This repo commits a `.claude/settings.json` (plugin marketplace + the skills this stack needs) and
+a self-contained `.claude/hooks/ensure-plugins.mjs` that installs and keeps them updated for
+**whichever agent CLI you have** — `claude` and/or `codex`. The `wshobson/agents` marketplace ships
+dual Codex + Claude plugin manifests, so the same plugin ids work for both.
 
-**Opening the repo in Claude Code** installs them automatically (a `SessionStart` hook) — no extra
-command, and `pom.xml` / the Maven build are intentionally untouched (no `node` step is injected into
-the Java build). It's a no-op when the `claude` CLI is absent. Which skill to use per situation — and
-the cross-repo observation rules (this repo owns the REST/DTO and OAuth2 token contracts) — are in
-`CLAUDE.md`.
+Auto-install (no extra command):
 
-> A few skills (`superpowers:*`, `doc-coauthoring`) are **user-level** and are **not**
-> auto-installed here — install them once (see `../campus-tours-live/CLAUDE.md` → "One-time setup").
+- **Claude Code** — opening the repo installs them (a `SessionStart` hook that emits `reloadSkills`,
+  so a first-time install is usable in the same session). `pom.xml` / the Maven build are
+  intentionally untouched — no `node` step is injected into the Java build.
+- **Codex** — running the launcher (`npm run start:backend` / `start:all`) or `codex plugin add`.
+
+Manual, **this repo only** (no npm here): `./skills` (install missing) or `./skills --force-update`
+(update to latest); `skills.cmd` on Windows. It's a no-op when neither CLI is present.
+
+Skills this repo enables (both agents unless noted):
+
+| Skill / plugin | Used for |
+| --- | --- |
+| `jvm-languages` | Spring Boot / Java 21 / layered architecture |
+| `database-design` | schema, queries, indexes, performance |
+| `database-migrations` | Flyway migrations |
+| `api-scaffolding` | REST endpoints / DTO contracts |
+| `backend-api-security` | Spring Security / OAuth2 resource server / JWT |
+| `security-scanning` | authz, injection, dependency CVEs, OWASP |
+| `qa-orchestra` | QA / test automation — **Codex: use `unit-testing` + `api-testing-observability`** |
+| `comprehensive-review` | multi-perspective code review |
+
+> Process skills — `superpowers:*` (plan / TDD / debug) and `doc-coauthoring` — are **Claude-only**
+> user-level installs (see `../campus-tours-live/README.md`). In Codex, follow the same discipline
+> with its built-in flow.
+
+Which skill for which situation, and the cross-repo rules (this repo owns the REST/DTO and OAuth2
+token contracts), are in `AGENTS.md` (Codex) and `CLAUDE.md` (Claude).
 
 ---
 
