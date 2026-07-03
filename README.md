@@ -364,6 +364,23 @@ envelope; errors are `application/problem+json`.
 
 ---
 
+## Claude Code skills
+
+This repo commits a `.claude/` config (plugin marketplace + the skills this stack needs — Spring
+Boot/JVM, database design + Flyway migrations, API design, security, QA, review) and a self-contained
+`.claude/hooks/ensure-plugins.mjs` that installs any missing Claude Code plugin.
+
+**Opening the repo in Claude Code** installs them automatically (a `SessionStart` hook) — no extra
+command, and `pom.xml` / the Maven build are intentionally untouched (no `node` step is injected into
+the Java build). It's a no-op when the `claude` CLI is absent. Which skill to use per situation — and
+the cross-repo observation rules (this repo owns the REST/DTO and OAuth2 token contracts) — are in
+`CLAUDE.md`.
+
+> A few skills (`superpowers:*`, `doc-coauthoring`) are **user-level** and are **not**
+> auto-installed here — install them once (see `../campus-tours-live/CLAUDE.md` → "One-time setup").
+
+---
+
 ## Git hooks & commit conventions
 
 The repo enforces formatting, tests, and a commit-message convention through **git hooks**, kept in
