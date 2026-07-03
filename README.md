@@ -376,6 +376,9 @@ the Java build). It's a no-op when the `claude` CLI is absent. Which skill to us
 the cross-repo observation rules (this repo owns the REST/DTO and OAuth2 token contracts) — are in
 `CLAUDE.md`.
 
+> A few skills (`superpowers:*`, `doc-coauthoring`) are **user-level** and are **not**
+> auto-installed here — install them once (see `../campus-tours-live/CLAUDE.md` → "One-time setup").
+
 ---
 
 ## Git hooks & commit conventions
