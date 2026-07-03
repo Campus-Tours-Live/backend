@@ -54,6 +54,9 @@ command** (e.g. `/code-review`).
 >   (`npm run start:backend` / `start:all`) or `codex plugin add <name>@claude-code-workflows`.
 >   `qa-orchestra` isn't in the Codex snapshot — for tests use `unit-testing` /
 >   `api-testing-observability`.
+> - **Cursor (2.5+)** — no plugin CLI or auto-install; install once **in the editor** (add
+>   `wshobson/agents`, then `/plugin install <name>`). A committed `.cursor/rules/agent-skills.mdc`
+>   gives Cursor the per-repo guidance automatically; Cursor doesn't honor a skill's `tools:` allowlist.
 >
 > `pom.xml` and the Maven build are intentionally untouched. Both agents also keep enabled
 > plugins **updated to latest** (throttled to ~once/day; update everything now with the launcher's
