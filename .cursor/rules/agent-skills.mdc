@@ -1,0 +1,44 @@
+---
+description: Which agent skill to use per situation for the backend, plus the Cursor install steps and cross-repo rules. Applies to Cursor, Codex, and Claude.
+alwaysApply: true
+---
+
+# Agent skills (backend)
+
+This repo is the **core API + data** (`:8080`, Java 21 / Spring Boot / JPA / OAuth2 resource server
+/ Flyway / PostgreSQL). It is the **contract owner**: `frontend → bff → backend`.
+
+## Skills this repo uses (from `claude-code-workflows` = `wshobson/agents`)
+
+- `jvm-languages` — Spring Boot / Java 21 / layered architecture
+- `database-design` — schema, queries, indexes, performance
+- `database-migrations` — Flyway migrations
+- `api-scaffolding` — REST endpoints / DTO contracts
+- `backend-api-security` — Spring Security / OAuth2 resource server / JWT
+- `security-scanning` — authz, injection, dependency CVEs, OWASP
+- `qa-orchestra` — QA / test automation (Cursor & Claude; Codex uses `unit-testing` +
+  `api-testing-observability`)
+- `comprehensive-review` — multi-perspective code review
+
+Planning / TDD / systematic debugging are process disciplines (Claude: `superpowers:*`) — apply
+them regardless of agent.
+
+## Using these in Cursor (2.5+)
+
+Cursor has **no plugin CLI and no auto-install** (unlike Claude Code / Codex), so it's a one-time
+manual step **inside the editor**:
+
+1. Add the marketplace `wshobson/agents`.
+2. `/plugin install <name>` for the skills above (Cursor generates `.cursor/rules/` +
+   `.cursor-plugin/` pointing at the marketplace source).
+
+Notes: Cursor does **not** honor a skill's `tools:` allowlist. The project auto-install (the
+SessionStart hook, the launcher, `./skills`) only covers Claude/Codex — Cursor is manual.
+
+## Cross-repo rule (read before changing backend)
+
+backend is the **contract origin** — a change to the REST contract / DTO / returned fields flows to
+**bff** then **frontend**; prefer **additive/backward-compatible** changes. OAuth2 token changes
+must agree with bff (`GOOGLE_CLIENT_ID`, audience/scope). Flyway migrations are **forward-only**.
+The full Situation → skill table and cross-repo coordination rules are in `AGENTS.md` (Cursor reads
+it).
