@@ -45,8 +45,11 @@ command** (e.g. `/code-review`); `/plugin` only installs/manages plugins — it 
 
 > **Setup is automatic.** This repo's plugins are declared in `.claude/settings.json` and get
 > installed for you on first use by a `SessionStart` hook (every Claude session), which runs
-> `.claude/hooks/ensure-plugins.mjs`. `pom.xml` and the Maven build are intentionally untouched.
-> Accept the workspace-trust dialog once so they load.
+> `.claude/hooks/ensure-plugins.mjs`. It also emits `reloadSkills`, so a first-time install is
+> usable in the **same** session (from the first prompt). It also keeps enabled plugins
+> **updated to latest** (throttled to ~once/day; update everything now with the launcher's
+> `npm run update:skills`). `pom.xml` and the Maven build are intentionally untouched. Accept
+> the workspace-trust dialog once so they load.
 >
 > **`†` = user-level skill.** Rows marked `†` (`superpowers:*`, `doc-coauthoring`) come from the
 > **user-level** `superpowers` / `example-skills` plugins — this repo does **not** auto-install
