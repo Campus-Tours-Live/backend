@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# Check and install this repo's agent skills for whichever CLI you have (Claude and/or Codex).
+# backend has no npm, so this is the equivalent of `npm run skills` in the Node repos.
+#
+#   ./skills                  install any missing enabled plugins
+#   ./skills --force-update    also update everything to the latest version now
+#   ./skills --check           report what's missing, install nothing
+exec node "$(dirname "$0")/.claude/hooks/ensure-plugins.mjs" "$@"
