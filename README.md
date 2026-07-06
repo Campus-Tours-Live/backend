@@ -333,6 +333,10 @@ envelope; errors are `application/problem+json`.
 | `GET` `PATCH` | `/guide/profile`                  | Read / upsert the guide profile (+ submit application)    |
 | `GET` `POST`  | `/guide/offerings`                | List / create a guide's tour offerings                    |
 | `POST`        | `/guide/offerings/{id}/activate`  | Publish a draft offering (requires an APPROVED guide)     |
+| `GET`         | `/guide/availability`             | Availability summary: rules, exceptions, booking settings |
+| `POST` `PATCH` `DELETE` | `/guide/availability/rules` (+ `{ruleId}`) | CRUD recurring weekly hours (**GUIDE**)          |
+| `POST` `PATCH` `DELETE` | `/guide/availability/exceptions` (+ `{exceptionId}`) | CRUD date-specific overrides (**GUIDE**) |
+| `PATCH`       | `/guide/availability/booking-settings` | Update booking policy (notice, window, buffers)    |
 | `GET`         | `/tours`                          | Public marketplace catalog (ACTIVE offerings only)        |
 | `GET`         | `/tours/{tourId}`                 | Single discoverable tour detail                           |
 | `GET`         | `/bookings/next-tour`             | Soonest upcoming CONFIRMED booking (dashboard card)       |
@@ -386,6 +390,25 @@ curl -s "http://localhost:4000/v1/tours?sort=RECOMMENDED&limit=20" \
 
 See the endpoint tables above for the full request/response contract. Cross-repo integration (BFF
 `/v1` passthrough, frontend) is described in the PR that introduced this endpoint.
+
+### Guide availability (`/guide/availability`)
+
+Guide-side configuration for bookable time slots (Phase 1): recurring weekly hours, one-off
+exceptions (`UNAVAILABLE_ALL_DAY`, `UNAVAILABLE_RANGE`, `ADDITIONAL`), and per-guide booking
+policy. All paths require the **GUIDE** role. BFF: `GET /v1/guide/availability` (passthrough).
+
+Does **not** yet expose participant slot discovery (`GET /tours/{tourId}/slots`) — that computes
+open times from rules, exceptions, bookings, and buffers in a follow-up.
+
+See [`API_BookableTimeSlots.md`](../API_BookableTimeSlots.md) for request/response shapes,
+validation rules, and **V4** (`TIME` → `VARCHAR(8)` on rules/exceptions wall-clock columns —
+application-layer validation plus explicit DB CHECK constraints; see wall-clock convention below).
+
+**Wall-clock convention:** Availability `start_local` / `end_local` values are guide-local
+wall-clock times stored as `VARCHAR(8)` (`HH:mm:ss`) via `LocalWallClockTimeConverter`. This
+avoids Hibernate shifting `LocalTime` when `hibernate.jdbc.time_zone=UTC`. We intentionally do
+**not** use JDBC `TIME` columns or a custom native `TIME` Hibernate type for these fields.
+UTC remains correct for `TIMESTAMPTZ` / `Instant` columns elsewhere.
 
 ---
 
