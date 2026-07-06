@@ -4,6 +4,7 @@ import jakarta.persistence.AttributeConverter;
 import jakarta.persistence.Converter;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 
 /**
@@ -13,11 +14,15 @@ import java.time.temporal.ChronoUnit;
 @Converter
 public class LocalWallClockTimeConverter implements AttributeConverter<LocalTime, String> {
 
-    private static final DateTimeFormatter FORMAT = DateTimeFormatter.ISO_LOCAL_TIME;
+    private static final DateTimeFormatter WRITE_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final DateTimeFormatter READ_HH_MM_SS = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final DateTimeFormatter READ_HH_MM = DateTimeFormatter.ofPattern("HH:mm");
 
     @Override
     public String convertToDatabaseColumn(LocalTime attribute) {
-        return attribute == null ? null : attribute.truncatedTo(ChronoUnit.SECONDS).format(FORMAT);
+        return attribute == null
+                ? null
+                : attribute.truncatedTo(ChronoUnit.SECONDS).format(WRITE_FORMAT);
     }
 
     @Override
@@ -30,9 +35,16 @@ public class LocalWallClockTimeConverter implements AttributeConverter<LocalTime
         if (dot > 0) {
             normalized = normalized.substring(0, dot);
         }
-        if (normalized.length() == 5) {
-            normalized = normalized + ":00";
+        try {
+            if (normalized.length() == 8) {
+                return LocalTime.parse(normalized, READ_HH_MM_SS);
+            }
+            if (normalized.length() == 5) {
+                return LocalTime.parse(normalized, READ_HH_MM);
+            }
+        } catch (DateTimeParseException ex) {
+            throw new IllegalArgumentException("Invalid wall-clock time: " + dbData, ex);
         }
-        return LocalTime.parse(normalized, FORMAT);
+        throw new IllegalArgumentException("Invalid wall-clock time: " + dbData);
     }
 }

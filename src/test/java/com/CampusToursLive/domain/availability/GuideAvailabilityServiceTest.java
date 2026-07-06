@@ -27,6 +27,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.stubbing.Answer;
+import org.springframework.dao.DataIntegrityViolationException;
 
 @ExtendWith(MockitoExtension.class)
 class GuideAvailabilityServiceTest {
@@ -259,7 +260,7 @@ class GuideAvailabilityServiceTest {
     }
 
     @Test
-    void getSummary_createsDefaultBookingSettingsWhenMissing() {
+    void getSummary_returnsDefaultBookingSettingsWhenMissingWithoutPersisting() {
         UUID userId = UUID.randomUUID();
         UUID guideId = UUID.randomUUID();
         stubGuide(userId, guideId);
@@ -267,13 +268,10 @@ class GuideAvailabilityServiceTest {
         when(exceptions.findByGuideIdOrderByExceptionDateAscCreatedAtAsc(guideId))
                 .thenReturn(List.of());
         when(bookingSettings.findById(guideId)).thenReturn(Optional.empty());
-        GuideBookingSettingsEntity created = new GuideBookingSettingsEntity();
-        created.setGuideId(guideId);
-        when(settingsService.getOrCreate(guideId)).thenReturn(created);
 
         AvailabilitySummaryResponse summary = service().getSummary(user(userId));
         assertEquals(1440, summary.bookingSettings().minNoticeMin());
-        verify(settingsService).getOrCreate(guideId);
+        verify(settingsService, never()).getOrCreate(any());
         verify(bookingSettings, never()).save(any());
     }
 
@@ -417,10 +415,52 @@ class GuideAvailabilityServiceTest {
 
         CreateAvailabilityRuleRequest req =
                 new CreateAvailabilityRuleRequest(
-                        1, "09:00:00", "10:00:00", "America/Los_Angeles", "2026-06-01", null, true);
+                        1, "09:15:45", "10:00:00", "America/Los_Angeles", "2026-06-01", null, true);
 
         var resp = service().createRule(user(userId), req);
-        assertEquals("09:00", resp.startLocal());
+        assertEquals("09:15", resp.startLocal());
+
+        ArgumentCaptor<GuideAvailabilityRuleEntity> captor =
+                ArgumentCaptor.forClass(GuideAvailabilityRuleEntity.class);
+        verify(rules).save(captor.capture());
+        assertEquals(LocalTime.of(9, 15, 45), captor.getValue().getStartLocal());
+    }
+
+    @Test
+    void createRule_mapsTimeRangeIntegrityViolation() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+        when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
+                .thenReturn(List.of());
+        when(rules.save(any()))
+                .thenThrow(
+                        new DataIntegrityViolationException(
+                                "violates check constraint start_local end_local"));
+
+        CreateAvailabilityRuleRequest req =
+                new CreateAvailabilityRuleRequest(
+                        1, "09:00", "10:00", "America/Los_Angeles", "2026-06-01", null, true);
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class, () -> service().createRule(user(userId), req));
+        assertEquals("End time must be after start time on the same day.", ex.getMessage());
+    }
+
+    @Test
+    void createRule_rejectsMalformedSeconds() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+
+        CreateAvailabilityRuleRequest req =
+                new CreateAvailabilityRuleRequest(
+                        1, "09:15:4", "10:00", "America/Los_Angeles", "2026-06-01", null, true);
+
+        assertThrows(ValidationException.class, () -> service().createRule(user(userId), req));
     }
 
     @Test

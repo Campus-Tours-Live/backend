@@ -25,8 +25,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +43,8 @@ public class GuideAvailabilityService {
     private static final int MAX_BUFFER_MIN = 1_440; // 24 hours
     private static final DateTimeFormatter TIME_HH_MM = DateTimeFormatter.ofPattern("HH:mm");
     private static final DateTimeFormatter TIME_HH_MM_SS = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final Pattern TIME_PATTERN =
+            Pattern.compile("^(\\d{2}:\\d{2}|\\d{2}:\\d{2}:\\d{2})$");
 
     private final GuideAvailabilityRuleRepository rules;
     private final AvailabilityExceptionRepository exceptions;
@@ -113,7 +117,7 @@ public class GuideAvailabilityService {
                 "createRule saving startLocal={} endLocal={}",
                 rule.getStartLocal(),
                 rule.getEndLocal());
-        rules.save(rule);
+        persistRule(rule);
         return toRuleResponse(rule);
     }
 
@@ -167,7 +171,7 @@ public class GuideAvailabilityService {
                 "updateRule saving startLocal={} endLocal={}",
                 rule.getStartLocal(),
                 rule.getEndLocal());
-        rules.save(rule);
+        persistRule(rule);
         return toRuleResponse(rule);
     }
 
@@ -193,7 +197,7 @@ public class GuideAvailabilityService {
         applyExceptionTimes(ex, req.startLocal(), req.endLocal());
         ex.setReason(trimToNull(req.reason()));
 
-        exceptions.save(ex);
+        persistException(ex);
         return toExceptionResponse(ex);
     }
 
@@ -219,7 +223,7 @@ public class GuideAvailabilityService {
         }
         if (req.reason() != null) ex.setReason(trimToNull(req.reason()));
 
-        exceptions.save(ex);
+        persistException(ex);
         return toExceptionResponse(ex);
     }
 
@@ -276,7 +280,7 @@ public class GuideAvailabilityService {
             settings.setTimezone(AvailabilityTimezones.validateTimezone(req.timezone()));
         }
 
-        bookingSettings.save(settings);
+        persistBookingSettings(settings);
         return toSettingsResponse(settings);
     }
 
@@ -289,13 +293,54 @@ public class GuideAvailabilityService {
     }
 
     private GuideBookingSettingsEntity loadSettings(UUID guideId) {
-        return bookingSettings
-                .findById(guideId)
-                .orElseGet(() -> settingsService.getOrCreate(guideId));
+        return bookingSettings.findById(guideId).orElseGet(() -> defaultSettings(guideId));
     }
 
     private GuideBookingSettingsEntity requireSettings(UUID guideId) {
         return settingsService.getOrCreate(guideId);
+    }
+
+    private static GuideBookingSettingsEntity defaultSettings(UUID guideId) {
+        GuideBookingSettingsEntity settings = new GuideBookingSettingsEntity();
+        settings.setGuideId(guideId);
+        return settings;
+    }
+
+    private void persistRule(GuideAvailabilityRuleEntity rule) {
+        try {
+            rules.save(rule);
+        } catch (DataIntegrityViolationException ex) {
+            throw mapAvailabilityIntegrityViolation(ex, "availability rule");
+        }
+    }
+
+    private void persistException(AvailabilityExceptionEntity ex) {
+        try {
+            exceptions.save(ex);
+        } catch (DataIntegrityViolationException dive) {
+            throw mapAvailabilityIntegrityViolation(dive, "availability exception");
+        }
+    }
+
+    private void persistBookingSettings(GuideBookingSettingsEntity settings) {
+        try {
+            bookingSettings.save(settings);
+        } catch (DataIntegrityViolationException ex) {
+            throw mapAvailabilityIntegrityViolation(ex, "booking settings");
+        }
+    }
+
+    private static ValidationException mapAvailabilityIntegrityViolation(
+            DataIntegrityViolationException ex, String resource) {
+        String cause = ex.getMostSpecificCause().getMessage();
+        if (cause != null) {
+            String lower = cause.toLowerCase();
+            if (lower.contains("start_local") && lower.contains("end_local")) {
+                return new ValidationException(
+                        "End time must be after start time on the same day.");
+            }
+        }
+        return new ValidationException("Could not save " + resource + ".");
     }
 
     private void assertNoRuleOverlap(GuideAvailabilityRuleEntity candidate, UUID excludeRuleId) {
@@ -426,14 +471,14 @@ public class GuideAvailabilityService {
             throw new ValidationException(field + " is required");
         }
         String trimmed = raw.trim();
+        if (!TIME_PATTERN.matcher(trimmed).matches()) {
+            throw new ValidationException("Invalid " + field + ": " + raw);
+        }
         try {
             if (trimmed.length() == 8) {
                 return LocalTime.parse(trimmed, TIME_HH_MM_SS);
             }
-            if (trimmed.length() == 5) {
-                return LocalTime.parse(trimmed, TIME_HH_MM);
-            }
-            throw new ValidationException("Invalid " + field + ": " + raw);
+            return LocalTime.parse(trimmed, TIME_HH_MM);
         } catch (DateTimeParseException ex) {
             throw new ValidationException("Invalid " + field + ": " + raw);
         }
