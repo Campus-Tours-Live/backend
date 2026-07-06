@@ -706,4 +706,199 @@ class GuideAvailabilityServiceTest {
                 ValidationException.class,
                 () -> service().updateBookingSettings(user(userId), req));
     }
+
+    @Test
+    void createRule_rejectsNullDayOfWeek() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+
+        CreateAvailabilityRuleRequest req =
+                new CreateAvailabilityRuleRequest(
+                        null, "10:00", "12:00", "America/Los_Angeles", "2026-06-01", null, true);
+
+        assertThrows(ValidationException.class, () -> service().createRule(user(userId), req));
+    }
+
+    @Test
+    void createRule_rejectsBlankStartTime() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+
+        CreateAvailabilityRuleRequest req =
+                new CreateAvailabilityRuleRequest(
+                        1, " ", "12:00", "America/Los_Angeles", "2026-06-01", null, true);
+
+        assertThrows(ValidationException.class, () -> service().createRule(user(userId), req));
+    }
+
+    @Test
+    void createRule_rejectsInvalidEffectiveFrom() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+
+        CreateAvailabilityRuleRequest req =
+                new CreateAvailabilityRuleRequest(
+                        1, "10:00", "12:00", "America/Los_Angeles", "not-a-date", null, true);
+
+        assertThrows(ValidationException.class, () -> service().createRule(user(userId), req));
+    }
+
+    @Test
+    void createRule_allowsAdjacentNonOverlappingBlocks() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+
+        GuideAvailabilityRuleEntity existing = new GuideAvailabilityRuleEntity();
+        existing.setId(UUID.randomUUID());
+        existing.setGuideId(guideId);
+        existing.setDayOfWeek((short) 1);
+        existing.setStartLocal(LocalTime.of(10, 0));
+        existing.setEndLocal(LocalTime.of(13, 0));
+        existing.setEffectiveFrom(LocalDate.parse("2026-01-01"));
+        existing.setActive(true);
+        when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
+                .thenReturn(List.of(existing));
+        when(rules.save(any())).thenAnswer(echoSave());
+
+        CreateAvailabilityRuleRequest req =
+                new CreateAvailabilityRuleRequest(
+                        1, "13:00", "17:00", "America/Los_Angeles", "2026-06-01", null, true);
+
+        var resp = service().createRule(user(userId), req);
+        assertEquals("13:00", resp.startLocal());
+    }
+
+    @Test
+    void updateRule_throwsWhenNotFound() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        when(rules.findByIdAndGuideId(any(), eq(guideId))).thenReturn(Optional.empty());
+
+        assertThrows(
+                NotFoundException.class,
+                () ->
+                        service()
+                                .updateRule(
+                                        user(userId),
+                                        UUID.randomUUID(),
+                                        new UpdateAvailabilityRuleRequest(
+                                                null, null, null, null, null, null, null)));
+    }
+
+    @Test
+    void updateException_throwsWhenNotFound() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        when(exceptions.findByIdAndGuideId(any(), eq(guideId))).thenReturn(Optional.empty());
+
+        assertThrows(
+                NotFoundException.class,
+                () ->
+                        service()
+                                .updateException(
+                                        user(userId),
+                                        UUID.randomUUID(),
+                                        new UpdateAvailabilityExceptionRequest(
+                                                null, null, null, null, null)));
+    }
+
+    @Test
+    void createException_rejectsBlankDate() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+
+        CreateAvailabilityExceptionRequest req =
+                new CreateAvailabilityExceptionRequest(
+                        " ", "UNAVAILABLE_ALL_DAY", null, null, null);
+
+        assertThrows(ValidationException.class, () -> service().createException(user(userId), req));
+    }
+
+    @Test
+    void createException_rejectsRangeEndBeforeStart() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+
+        CreateAvailabilityExceptionRequest req =
+                new CreateAvailabilityExceptionRequest(
+                        "2026-07-04", "UNAVAILABLE_RANGE", "14:00", "10:00", null);
+
+        assertThrows(ValidationException.class, () -> service().createException(user(userId), req));
+    }
+
+    @Test
+    void createException_trimsBlankReasonToNull() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        when(exceptions.save(any())).thenAnswer(echoSave());
+
+        CreateAvailabilityExceptionRequest req =
+                new CreateAvailabilityExceptionRequest(
+                        "2026-07-04", "UNAVAILABLE_ALL_DAY", null, null, "   ");
+
+        var resp = service().createException(user(userId), req);
+        assertNull(resp.reason());
+    }
+
+    @Test
+    void updateBookingSettings_rejectsNullDurationEntry() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+
+        UpdateBookingSettingsRequest req =
+                new UpdateBookingSettingsRequest(
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        java.util.Arrays.asList(60, null),
+                        null);
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().updateBookingSettings(user(userId), req));
+    }
+
+    @Test
+    void getSummary_returnsNullCreatedAtWhenUnset() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+
+        GuideAvailabilityRuleEntity rule = new GuideAvailabilityRuleEntity();
+        rule.setId(UUID.randomUUID());
+        rule.setGuideId(guideId);
+        rule.setDayOfWeek((short) 1);
+        rule.setStartLocal(LocalTime.of(10, 0));
+        rule.setEndLocal(LocalTime.of(13, 0));
+        rule.setTimezone("America/Los_Angeles");
+        rule.setEffectiveFrom(LocalDate.parse("2026-06-01"));
+        rule.setActive(true);
+
+        when(rules.findByGuideIdOrderByDayOfWeekAscStartLocalAsc(guideId))
+                .thenReturn(List.of(rule));
+        when(exceptions.findByGuideIdOrderByExceptionDateAscCreatedAtAsc(guideId))
+                .thenReturn(List.of());
+        stubSettings(guideId);
+
+        AvailabilitySummaryResponse summary = service().getSummary(user(userId));
+        assertNull(summary.rules().get(0).createdAt());
+    }
 }
