@@ -29,8 +29,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Participant booking domain: dashboard reads (CTL-13) and the create/cancel writes (CTL-19). Guide
- * accept/decline, reschedule proposals, and payment integration are still deferred.
+ * Participant booking domain: dashboard reads (CTL-13), the create/cancel writes (CTL-19), and the
+ * booking cart (CTL-31 — DRAFT bookings assembled item by item, submitted atomically at checkout).
+ * Guide accept/decline, reschedule proposals, and payment integration are still deferred.
  *
  * <p>The {@code guideId} on both {@code BookingEntity} and {@code TourOfferingEntity} is the {@code
  * guide_profiles.id} primary key, not the user id — resolving to a display name requires a two-step
@@ -81,6 +82,9 @@ public class BookingService {
 
     /** Cap on free-text fields (participant notes, cancellation reason) — the columns are TEXT. */
     private static final int MAX_FREE_TEXT_LENGTH = 1000;
+
+    /** Cap on DRAFT items per participant — keeps carts (and checkout batches) bounded. */
+    private static final int MAX_CART_ITEMS = 10;
 
     private static final String BOOKING_NUMBER_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final int BOOKING_NUMBER_LENGTH = 10;
@@ -162,56 +166,9 @@ public class BookingService {
      */
     @Transactional
     public BookingDetailResponse createBooking(UserEntity participant, CreateBookingRequest req) {
-        TourOfferingEntity offering = requireBookableOffering(req.tourOfferingId());
-        GuideProfileEntity guide = requireApprovedGuide(offering.getGuideId());
-        requireActiveUniversity(offering.getUniversityId());
-        if (guide.getUserId().equals(participant.getId())) {
-            throw new ValidationException("You cannot book your own tour");
-        }
-
-        Instant now = Instant.now();
-        Instant start = parseStart(req.scheduledStartAt(), now);
-        Instant end = start.plus(Duration.ofMinutes(offering.getDurationMin()));
-        Instant reservedEnd = end.plus(RESERVED_BUFFER_AFTER);
-        String timezone = parseTimezone(req.displayTimezone());
-
-        if (bookings
-                .existsByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
-                        offering.getGuideId(), SLOT_HOLDING_STATUSES, reservedEnd, start)) {
-            throw new ValidationException("The guide already has a booking at that time");
-        }
-        if (bookings
-                .existsByParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
-                        participant.getId(), SLOT_HOLDING_STATUSES, end, start)) {
-            throw new ValidationException("You already have a booking that overlaps this time");
-        }
-
-        BookingEntity b = new BookingEntity();
-        b.setId(UUID.randomUUID());
-        b.setBookingNumber(generateBookingNumber());
-        b.setParticipantUserId(participant.getId());
-        b.setGuideId(offering.getGuideId());
-        b.setTourOfferingId(offering.getId());
-        b.setUniversityId(offering.getUniversityId());
-        b.setStatus(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
-        b.setAcceptanceModeSnap(AcceptanceMode.MANUAL);
-        b.setScheduledStartAt(start);
-        b.setScheduledEndAt(end);
-        b.setDisplayTimezone(timezone);
-        b.setReservedStartAt(start);
-        b.setReservedEndAt(reservedEnd);
-        b.setGuideResponseDeadlineAt(now.plus(GUIDE_RESPONSE_WINDOW));
-        // Price snapshot — no payments yet, so fees and taxes are zero and the guide
-        // amount equals the total (see class javadoc).
-        b.setBasePriceCents(offering.getPriceCents());
-        b.setServiceFeeCents(0L);
-        b.setTaxCents(0L);
-        b.setTotalCents(offering.getPriceCents());
-        b.setPlatformFeeCents(0L);
-        b.setGuideAmountCents(offering.getPriceCents());
-        b.setCurrency(offering.getCurrency());
-        b.setParticipantNotes(cleanFreeText(req.participantNotes(), "participantNotes"));
-
+        BookingEntity b = buildDraftBooking(participant, req);
+        requireNoHeldOverlaps(b);
+        promoteToPending(b);
         try {
             // Flush now (id is assigned, so save() alone would defer the INSERT to commit):
             // the audit row's FK needs the booking row in place, and flushing here is what
@@ -263,8 +220,220 @@ public class BookingService {
     }
 
     // ---------------------------------------------------------------------------
+    // Cart (CTL-31)
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Add an item to the cart. Runs the full booking validation but saves the row as a DRAFT
+     * booking — DRAFT is outside the DB exclusion constraints, so a carted item does NOT hold its
+     * slot; the slot is only claimed at {@link #checkout}. Conflicts with held bookings and other
+     * cart items are still rejected here for early feedback.
+     */
+    @Transactional
+    public BookingDetailResponse addCartItem(UserEntity participant, CreateBookingRequest req) {
+        if (bookings.countByParticipantUserIdAndStatus(participant.getId(), BookingStatus.DRAFT)
+                >= MAX_CART_ITEMS) {
+            throw new ValidationException("Your cart is full (max " + MAX_CART_ITEMS + " items)");
+        }
+        BookingEntity b = buildDraftBooking(participant, req);
+        requireNoHeldOverlaps(b);
+        requireNoCartOverlaps(b, cartItems(participant.getId()));
+        // Flush so the audit row's FK sees the booking row (assigned id → deferred insert).
+        bookings.saveAndFlush(b);
+        recordTransition(b, null, participant.getId(), "CART_ITEM_ADDED");
+        return toDetailResponse(b);
+    }
+
+    /** The participant's cart: their DRAFT bookings, oldest first. */
+    @Transactional(readOnly = true)
+    public List<BookingDetailResponse> getCart(UUID participantUserId) {
+        return cartItems(participantUserId).stream().map(this::toDetailResponse).toList();
+    }
+
+    /**
+     * Remove one cart item (hard delete — a DRAFT was never a commitment; its audit rows go with it
+     * via ON DELETE CASCADE). Returns the remaining cart.
+     */
+    @Transactional
+    public List<BookingDetailResponse> removeCartItem(UserEntity participant, UUID itemId) {
+        BookingEntity b =
+                bookings.findByIdAndParticipantUserIdAndStatus(
+                                itemId, participant.getId(), BookingStatus.DRAFT)
+                        .orElseThrow(() -> new NotFoundException("Cart item not found"));
+        bookings.delete(b);
+        return getCart(participant.getId());
+    }
+
+    /**
+     * Submit the whole cart atomically. Every DRAFT is re-validated (offerings can go inactive and
+     * items can go stale while carted) and flipped to PENDING_GUIDE_ACCEPTANCE inside this one
+     * transaction; the DB exclusion constraints check the batch on flush, so if any slot was taken
+     * concurrently the whole checkout rolls back — all or nothing.
+     */
+    @Transactional
+    public List<BookingDetailResponse> checkout(UserEntity participant) {
+        List<BookingEntity> items = cartItems(participant.getId());
+        if (items.isEmpty()) {
+            throw new ValidationException("Your cart is empty");
+        }
+        Instant now = Instant.now();
+        for (BookingEntity b : items) {
+            revalidateCartItem(b, now);
+            requireNoHeldOverlaps(b);
+            requireNoCartOverlaps(b, items);
+        }
+        for (BookingEntity b : items) {
+            promoteToPending(b);
+        }
+        try {
+            bookings.saveAllAndFlush(items);
+        } catch (DataIntegrityViolationException raceLost) {
+            throw new ValidationException(
+                    "One or more time slots were just taken — please review your cart");
+        }
+        for (BookingEntity b : items) {
+            recordTransition(b, BookingStatus.DRAFT, participant.getId(), "CART_CHECKOUT");
+        }
+        return items.stream().map(this::toDetailResponse).toList();
+    }
+
+    // ---------------------------------------------------------------------------
     // Private helpers
     // ---------------------------------------------------------------------------
+
+    /**
+     * Validates a booking request end-to-end (bookable offering, approved guide, active university,
+     * not the guide's own tour, time window, timezone) and builds the unsaved booking in DRAFT
+     * status with the price snapshot. No slot is checked or claimed here.
+     */
+    private BookingEntity buildDraftBooking(UserEntity participant, CreateBookingRequest req) {
+        TourOfferingEntity offering = requireBookableOffering(req.tourOfferingId());
+        GuideProfileEntity guide = requireApprovedGuide(offering.getGuideId());
+        requireActiveUniversity(offering.getUniversityId());
+        if (guide.getUserId().equals(participant.getId())) {
+            throw new ValidationException("You cannot book your own tour");
+        }
+
+        Instant start = parseStart(req.scheduledStartAt(), Instant.now());
+        Instant end = start.plus(Duration.ofMinutes(offering.getDurationMin()));
+        String timezone = parseTimezone(req.displayTimezone());
+
+        BookingEntity b = new BookingEntity();
+        b.setId(UUID.randomUUID());
+        b.setBookingNumber(generateBookingNumber());
+        b.setParticipantUserId(participant.getId());
+        b.setGuideId(offering.getGuideId());
+        b.setTourOfferingId(offering.getId());
+        b.setUniversityId(offering.getUniversityId());
+        b.setStatus(BookingStatus.DRAFT);
+        b.setAcceptanceModeSnap(AcceptanceMode.MANUAL);
+        b.setScheduledStartAt(start);
+        b.setScheduledEndAt(end);
+        b.setDisplayTimezone(timezone);
+        b.setReservedStartAt(start);
+        b.setReservedEndAt(end.plus(RESERVED_BUFFER_AFTER));
+        // Price snapshot — no payments yet, so fees and taxes are zero and the guide
+        // amount equals the total (see class javadoc).
+        b.setBasePriceCents(offering.getPriceCents());
+        b.setServiceFeeCents(0L);
+        b.setTaxCents(0L);
+        b.setTotalCents(offering.getPriceCents());
+        b.setPlatformFeeCents(0L);
+        b.setGuideAmountCents(offering.getPriceCents());
+        b.setCurrency(offering.getCurrency());
+        b.setParticipantNotes(cleanFreeText(req.participantNotes(), "participantNotes"));
+        return b;
+    }
+
+    /** DRAFT → PENDING_GUIDE_ACCEPTANCE: the transition that claims the slot. */
+    private static void promoteToPending(BookingEntity b) {
+        b.setStatus(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
+        b.setGuideResponseDeadlineAt(Instant.now().plus(GUIDE_RESPONSE_WINDOW));
+    }
+
+    /** Friendly 422s for conflicts with slot-holding bookings (DB constraints are the backstop). */
+    private void requireNoHeldOverlaps(BookingEntity b) {
+        if (bookings
+                .existsByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
+                        b.getGuideId(),
+                        SLOT_HOLDING_STATUSES,
+                        b.getReservedEndAt(),
+                        b.getReservedStartAt())) {
+            throw new ValidationException("The guide already has a booking at that time");
+        }
+        if (bookings
+                .existsByParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
+                        b.getParticipantUserId(),
+                        SLOT_HOLDING_STATUSES,
+                        b.getScheduledEndAt(),
+                        b.getScheduledStartAt())) {
+            throw new ValidationException("You already have a booking that overlaps this time");
+        }
+    }
+
+    /**
+     * In-memory overlap check against other cart items: a participant can't be in two tours at once
+     * (scheduled intervals), and two items with the same guide must respect the reserved buffer.
+     * DRAFTs don't hold DB slots, so the exclusion constraints can't do this for us until checkout.
+     */
+    private static void requireNoCartOverlaps(BookingEntity b, List<BookingEntity> cart) {
+        for (BookingEntity other : cart) {
+            if (other.getId().equals(b.getId())) {
+                continue;
+            }
+            boolean participantClash =
+                    other.getScheduledStartAt().isBefore(b.getScheduledEndAt())
+                            && other.getScheduledEndAt().isAfter(b.getScheduledStartAt());
+            boolean guideClash =
+                    other.getGuideId().equals(b.getGuideId())
+                            && other.getReservedStartAt().isBefore(b.getReservedEndAt())
+                            && other.getReservedEndAt().isAfter(b.getReservedStartAt());
+            if (participantClash || guideClash) {
+                throw new ValidationException(
+                        "This time overlaps another item in your cart ("
+                                + other.getBookingNumber()
+                                + ")");
+            }
+        }
+    }
+
+    /**
+     * Checkout-time re-validation: the offering/guide/university may have changed while the item
+     * sat in the cart, and the start may have drifted inside the minimum-notice window. (The
+     * max-advance bound can only become MORE satisfied over time, so it is not rechecked.)
+     */
+    private void revalidateCartItem(BookingEntity b, Instant now) {
+        TourOfferingEntity offering =
+                offerings
+                        .findById(b.getTourOfferingId())
+                        .filter(o -> o.getStatus() == TourStatus.ACTIVE)
+                        .orElseThrow(
+                                () ->
+                                        new ValidationException(
+                                                "Cart item "
+                                                        + b.getBookingNumber()
+                                                        + " is no longer bookable"));
+        try {
+            requireApprovedGuide(offering.getGuideId());
+            requireActiveUniversity(offering.getUniversityId());
+        } catch (ValidationException notBookable) {
+            throw new ValidationException(
+                    "Cart item " + b.getBookingNumber() + " is no longer bookable");
+        }
+        if (b.getScheduledStartAt().isBefore(now.plus(MIN_NOTICE))) {
+            throw new ValidationException(
+                    "Cart item "
+                            + b.getBookingNumber()
+                            + " starts too soon — bookings need at least "
+                            + MIN_NOTICE.toHours()
+                            + " hours notice");
+        }
+    }
+
+    private List<BookingEntity> cartItems(UUID participantUserId) {
+        return bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                participantUserId, BookingStatus.DRAFT);
+    }
 
     /** The offering must exist and be ACTIVE — anything else is invisible to participants (404). */
     private TourOfferingEntity requireBookableOffering(String rawOfferingId) {

@@ -340,6 +340,10 @@ envelope; errors are `application/problem+json`.
 | `GET`         | `/participant/bookings/pending-actions` | Outstanding-action counts (payments, guide, reviews) |
 | `POST`        | `/participant/bookings`           | Create a booking for a bookable offering                  |
 | `POST`        | `/participant/bookings/{id}/cancel` | Cancel the participant's own upcoming booking           |
+| `GET`         | `/participant/cart`               | The booking cart (DRAFT bookings — hold no slot)          |
+| `POST`        | `/participant/cart/items`         | Validate + add a cart item                                |
+| `DELETE`      | `/participant/cart/items/{id}`    | Remove a cart item                                        |
+| `POST`        | `/participant/cart/checkout`      | Submit the whole cart atomically (all-or-nothing)         |
 | `GET`         | `/universities`                   | University catalog search (`q`, `limit`)                  |
 | `GET`         | `/meta/tour-topics`               | Controlled vocabulary for tour topics                     |
 | `POST`        | `/admin/guides/{userId}/decision` | Admin approve/reject a guide application                  |
