@@ -4,15 +4,22 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
 import com.CampusToursLive.domain.tour.TourOfferingEntity;
 import com.CampusToursLive.domain.tour.TourOfferingRepository;
+import com.CampusToursLive.domain.tour.TourStatus;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
+import com.CampusToursLive.domain.university.UniversityStatus;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
+import com.CampusToursLive.error.NotFoundException;
+import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.BookingDetailResponse;
+import com.CampusToursLive.web.dto.CancelBookingRequest;
+import com.CampusToursLive.web.dto.CreateBookingRequest;
 import com.CampusToursLive.web.dto.PendingActionsResponse;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -24,6 +31,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 @ExtendWith(MockitoExtension.class)
 class BookingServiceTest {
@@ -33,9 +41,10 @@ class BookingServiceTest {
     @Mock GuideProfileRepository guides;
     @Mock UserRepository users;
     @Mock UniversityRepository universities;
+    @Mock BookingStatusHistoryRepository statusHistory;
 
     private BookingService service() {
-        return new BookingService(bookings, offerings, guides, users, universities);
+        return new BookingService(bookings, offerings, guides, users, universities, statusHistory);
     }
 
     // ── entity builders ──────────────────────────────────────────────────────
@@ -451,6 +460,528 @@ class BookingServiceTest {
         when(universities.findById(universityId)).thenReturn(Optional.empty());
 
         assertEquals("", service().getNextTour(uid).orElseThrow().universityName());
+    }
+
+    // ── createBooking ────────────────────────────────────────────────────────
+
+    @Test
+    void createBooking_happyPath_persistsSnapshotAndAuditRow() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat Participant");
+        Bookable ctx = stubBookableOffering();
+        when(users.findById(ctx.guideUserId()))
+                .thenReturn(Optional.of(user(ctx.guideUserId(), "Jane Guide")));
+        when(bookings
+                        .existsByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
+                                eq(ctx.guideProfileId()), any(), any(), any()))
+                .thenReturn(false);
+        when(bookings
+                        .existsByParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
+                                eq(participant.getId()), any(), any(), any()))
+                .thenReturn(false);
+
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
+        BookingDetailResponse resp =
+                service()
+                        .createBooking(
+                                participant,
+                                new CreateBookingRequest(
+                                        ctx.offeringId().toString(),
+                                        start.toString(),
+                                        "America/Los_Angeles",
+                                        "  meet at the fountain  "));
+
+        ArgumentCaptor<BookingEntity> saved = ArgumentCaptor.forClass(BookingEntity.class);
+        verify(bookings).save(saved.capture());
+        BookingEntity b = saved.getValue();
+        assertEquals(BookingStatus.PENDING_GUIDE_ACCEPTANCE, b.getStatus());
+        assertEquals(AcceptanceMode.MANUAL, b.getAcceptanceModeSnap());
+        assertEquals(participant.getId(), b.getParticipantUserId());
+        assertEquals(ctx.guideProfileId(), b.getGuideId());
+        assertEquals(ctx.offeringId(), b.getTourOfferingId());
+        assertEquals(ctx.universityId(), b.getUniversityId());
+        assertEquals(start, b.getScheduledStartAt());
+        assertEquals(start.plus(60, ChronoUnit.MINUTES), b.getScheduledEndAt());
+        // reserved interval = scheduled + 15-min post-tour buffer
+        assertEquals(start, b.getReservedStartAt());
+        assertEquals(start.plus(75, ChronoUnit.MINUTES), b.getReservedEndAt());
+        assertEquals("America/Los_Angeles", b.getDisplayTimezone());
+        assertNotNull(b.getGuideResponseDeadlineAt());
+        assertTrue(b.getBookingNumber().startsWith("BK-"));
+        assertEquals("BK-".length() + 10, b.getBookingNumber().length());
+        // price snapshot: no fees while payments are unbuilt
+        assertEquals(5000L, b.getBasePriceCents());
+        assertEquals(5000L, b.getTotalCents());
+        assertEquals(5000L, b.getGuideAmountCents());
+        assertEquals(0L, b.getPlatformFeeCents());
+        assertEquals(0L, b.getServiceFeeCents());
+        assertEquals(0L, b.getTaxCents());
+        assertEquals("USD", b.getCurrency());
+        assertEquals("meet at the fountain", b.getParticipantNotes());
+
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory).save(audit.capture());
+        assertEquals(b.getId(), audit.getValue().getBookingId());
+        assertNull(audit.getValue().getPreviousStatus());
+        assertEquals(BookingStatus.PENDING_GUIDE_ACCEPTANCE, audit.getValue().getNewStatus());
+        assertEquals(BookingActor.PARTICIPANT, audit.getValue().getActorType());
+        assertEquals(participant.getId(), audit.getValue().getActorUserId());
+        assertEquals("PARTICIPANT_CREATED", audit.getValue().getReasonCode());
+
+        assertEquals("WAITING_FOR_GUIDE", resp.status());
+        assertEquals(60, resp.durationMin());
+        assertEquals("Jane Guide", resp.guideName());
+    }
+
+    @Test
+    void createBooking_blankNotes_storedAsNull() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        when(users.findById(ctx.guideUserId()))
+                .thenReturn(Optional.of(user(ctx.guideUserId(), "G")));
+        stubNoOverlaps();
+
+        service().createBooking(participant, validRequest(ctx, "   "));
+
+        ArgumentCaptor<BookingEntity> saved = ArgumentCaptor.forClass(BookingEntity.class);
+        verify(bookings).save(saved.capture());
+        assertNull(saved.getValue().getParticipantNotes());
+    }
+
+    @Test
+    void createBooking_rejectsMissingOrMalformedOfferingId() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(null, null, null, null)));
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest("not-a-uuid", null, null, null)));
+        verify(bookings, never()).save(any());
+    }
+
+    @Test
+    void createBooking_unknownOffering_isNotFound() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        UUID offeringId = UUID.randomUUID();
+        when(offerings.findById(offeringId)).thenReturn(Optional.empty());
+
+        assertThrows(
+                NotFoundException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                offeringId.toString(), null, null, null)));
+    }
+
+    @Test
+    void createBooking_nonActiveOffering_isNotFound() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        UUID offeringId = UUID.randomUUID();
+        TourOfferingEntity o = offering(offeringId, "Draft Tour");
+        o.setStatus(TourStatus.DRAFT);
+        when(offerings.findById(offeringId)).thenReturn(Optional.of(o));
+
+        assertThrows(
+                NotFoundException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                offeringId.toString(), null, null, null)));
+    }
+
+    @Test
+    void createBooking_unapprovedGuide_isNotBookable() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        UUID offeringId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        TourOfferingEntity o = offering(offeringId, "Tour");
+        o.setStatus(TourStatus.ACTIVE);
+        o.setGuideId(guideProfileId);
+        when(offerings.findById(offeringId)).thenReturn(Optional.of(o));
+        GuideProfileEntity g = guideProfile(guideProfileId, UUID.randomUUID());
+        g.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
+        when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
+
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                offeringId.toString(), null, null, null)));
+    }
+
+    @Test
+    void createBooking_nonActiveUniversity_isNotBookable() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        UUID offeringId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UUID universityId = UUID.randomUUID();
+        TourOfferingEntity o = offering(offeringId, "Tour");
+        o.setStatus(TourStatus.ACTIVE);
+        o.setGuideId(guideProfileId);
+        o.setUniversityId(universityId);
+        when(offerings.findById(offeringId)).thenReturn(Optional.of(o));
+        GuideProfileEntity g = guideProfile(guideProfileId, UUID.randomUUID());
+        g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
+        UniversityEntity u = university(universityId, "Paused U");
+        u.setStatus(UniversityStatus.PAUSED);
+        when(universities.findById(universityId)).thenReturn(Optional.of(u));
+
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                offeringId.toString(), null, null, null)));
+    }
+
+    @Test
+    void createBooking_ownTour_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Guide-as-participant");
+        Bookable ctx = stubBookableOffering(participant.getId());
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().createBooking(participant, validRequest(ctx, null)));
+    }
+
+    @Test
+    void createBooking_rejectsMissingOrMalformedStart() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                ctx.offeringId().toString(), null, "UTC", null)));
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                ctx.offeringId().toString(),
+                                                "tomorrow at noon",
+                                                "UTC",
+                                                null)));
+    }
+
+    @Test
+    void createBooking_enforcesNoticeAndAdvanceWindows() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+
+        // Less than 24h notice
+        String tooSoon = Instant.now().plus(2, ChronoUnit.HOURS).toString();
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                ctx.offeringId().toString(),
+                                                tooSoon,
+                                                "UTC",
+                                                null)));
+
+        // More than 30 days out
+        String tooFar = Instant.now().plus(45, ChronoUnit.DAYS).toString();
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                ctx.offeringId().toString(), tooFar, "UTC", null)));
+    }
+
+    @Test
+    void createBooking_rejectsMissingOrInvalidTimezone() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        String start = Instant.now().plus(3, ChronoUnit.DAYS).toString();
+
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                ctx.offeringId().toString(), start, null, null)));
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                ctx.offeringId().toString(),
+                                                start,
+                                                "Mars/Olympus_Mons",
+                                                null)));
+    }
+
+    @Test
+    void createBooking_guideSlotTaken_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        when(bookings
+                        .existsByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
+                                eq(ctx.guideProfileId()), any(), any(), any()))
+                .thenReturn(true);
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().createBooking(participant, validRequest(ctx, null)));
+        verify(bookings, never()).save(any());
+    }
+
+    @Test
+    void createBooking_participantOverlap_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        when(bookings
+                        .existsByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
+                                eq(ctx.guideProfileId()), any(), any(), any()))
+                .thenReturn(false);
+        when(bookings
+                        .existsByParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
+                                eq(participant.getId()), any(), any(), any()))
+                .thenReturn(true);
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().createBooking(participant, validRequest(ctx, null)));
+        verify(bookings, never()).save(any());
+    }
+
+    @Test
+    void createBooking_lostInsertRace_surfacesAsSlotTaken_andWritesNoAudit() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        stubNoOverlaps();
+        when(bookings.save(any()))
+                .thenThrow(new DataIntegrityViolationException("excl_guide_no_overlap"));
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().createBooking(participant, validRequest(ctx, null)));
+        verifyNoInteractions(statusHistory);
+    }
+
+    // ── cancelBooking ────────────────────────────────────────────────────────
+
+    @Test
+    void cancelBooking_confirmedBooking_isCancelledWithAuditRow() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity b = upcomingBooking(participant.getId(), BookingStatus.CONFIRMED);
+        stubDetailLookups(b);
+        when(bookings.findByIdAndParticipantUserId(b.getId(), participant.getId()))
+                .thenReturn(Optional.of(b));
+
+        BookingDetailResponse resp =
+                service()
+                        .cancelBooking(
+                                participant,
+                                b.getId(),
+                                new CancelBookingRequest("  can't make it  "));
+
+        assertEquals(BookingStatus.CANCELLED_BY_PARTICIPANT, b.getStatus());
+        assertEquals(BookingActor.PARTICIPANT, b.getCancellationActor());
+        assertEquals("can't make it", b.getCancellationReason());
+        assertNotNull(b.getCancelledAt());
+        verify(bookings).save(b);
+
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory).save(audit.capture());
+        assertEquals(BookingStatus.CONFIRMED, audit.getValue().getPreviousStatus());
+        assertEquals(BookingStatus.CANCELLED_BY_PARTICIPANT, audit.getValue().getNewStatus());
+        assertEquals("PARTICIPANT_CANCELLED", audit.getValue().getReasonCode());
+
+        assertEquals("CANCELLED", resp.status());
+    }
+
+    @Test
+    void cancelBooking_pendingGuideAcceptance_isCancellable_withoutBody() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity b =
+                upcomingBooking(participant.getId(), BookingStatus.PENDING_GUIDE_ACCEPTANCE);
+        stubDetailLookups(b);
+        when(bookings.findByIdAndParticipantUserId(b.getId(), participant.getId()))
+                .thenReturn(Optional.of(b));
+
+        service().cancelBooking(participant, b.getId(), null);
+
+        assertEquals(BookingStatus.CANCELLED_BY_PARTICIPANT, b.getStatus());
+        assertNull(b.getCancellationReason());
+        verify(bookings).save(b);
+    }
+
+    @Test
+    void cancelBooking_unknownOrForeignBooking_isNotFound() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        UUID bookingId = UUID.randomUUID();
+        when(bookings.findByIdAndParticipantUserId(bookingId, participant.getId()))
+                .thenReturn(Optional.empty());
+
+        assertThrows(
+                NotFoundException.class,
+                () -> service().cancelBooking(participant, bookingId, null));
+    }
+
+    @Test
+    void cancelBooking_alreadyCancelled_isIdempotent() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity b =
+                upcomingBooking(participant.getId(), BookingStatus.CANCELLED_BY_PARTICIPANT);
+        stubDetailLookups(b);
+        when(bookings.findByIdAndParticipantUserId(b.getId(), participant.getId()))
+                .thenReturn(Optional.of(b));
+
+        BookingDetailResponse resp = service().cancelBooking(participant, b.getId(), null);
+
+        assertEquals("CANCELLED", resp.status());
+        verify(bookings, never()).save(any());
+        verifyNoInteractions(statusHistory);
+    }
+
+    @Test
+    void cancelBooking_terminalStatus_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity b = upcomingBooking(participant.getId(), BookingStatus.COMPLETED);
+        when(bookings.findByIdAndParticipantUserId(b.getId(), participant.getId()))
+                .thenReturn(Optional.of(b));
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().cancelBooking(participant, b.getId(), null));
+        verify(bookings, never()).save(any());
+    }
+
+    @Test
+    void cancelBooking_afterStart_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity b = upcomingBooking(participant.getId(), BookingStatus.CONFIRMED);
+        b.setScheduledStartAt(Instant.now().minus(10, ChronoUnit.MINUTES));
+        when(bookings.findByIdAndParticipantUserId(b.getId(), participant.getId()))
+                .thenReturn(Optional.of(b));
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().cancelBooking(participant, b.getId(), null));
+        verify(bookings, never()).save(any());
+    }
+
+    // ── write-test fixtures ──────────────────────────────────────────────────
+
+    /** Ids of a fully bookable offering wired into the lookup mocks. */
+    private record Bookable(
+            UUID offeringId, UUID guideProfileId, UUID guideUserId, UUID universityId) {}
+
+    private Bookable stubBookableOffering() {
+        return stubBookableOffering(UUID.randomUUID());
+    }
+
+    /**
+     * Stubs an ACTIVE 60-min $50 offering by an APPROVED guide (owned by {@code guideUserId}) at an
+     * ACTIVE university.
+     */
+    private Bookable stubBookableOffering(UUID guideUserId) {
+        UUID offeringId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UUID universityId = UUID.randomUUID();
+
+        TourOfferingEntity o = offering(offeringId, "Campus Walk");
+        o.setStatus(TourStatus.ACTIVE);
+        o.setGuideId(guideProfileId);
+        o.setUniversityId(universityId);
+        o.setDurationMin(60);
+        o.setPriceCents(5000L);
+        when(offerings.findById(offeringId)).thenReturn(Optional.of(o));
+
+        GuideProfileEntity g = guideProfile(guideProfileId, guideUserId);
+        g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
+
+        UniversityEntity u = university(universityId, "Test University");
+        u.setStatus(UniversityStatus.ACTIVE);
+        when(universities.findById(universityId)).thenReturn(Optional.of(u));
+
+        return new Bookable(offeringId, guideProfileId, guideUserId, universityId);
+    }
+
+    private void stubNoOverlaps() {
+        when(bookings
+                        .existsByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
+                                any(), any(), any(), any()))
+                .thenReturn(false);
+        when(bookings
+                        .existsByParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
+                                any(), any(), any(), any()))
+                .thenReturn(false);
+    }
+
+    private static CreateBookingRequest validRequest(Bookable ctx, String notes) {
+        return new CreateBookingRequest(
+                ctx.offeringId().toString(),
+                Instant.now().plus(3, ChronoUnit.DAYS).toString(),
+                "UTC",
+                notes);
+    }
+
+    /** A booking 3 days out owned by the participant, in the given status. */
+    private static BookingEntity upcomingBooking(UUID participantUserId, BookingStatus status) {
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS);
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        status,
+                        start,
+                        start.plus(60, ChronoUnit.MINUTES));
+        b.setParticipantUserId(participantUserId);
+        return b;
+    }
+
+    /** Stubs the three name-resolution lookups used by toDetailResponse for this booking. */
+    private void stubDetailLookups(BookingEntity b) {
+        UUID guideUserId = UUID.randomUUID();
+        when(offerings.findById(b.getTourOfferingId()))
+                .thenReturn(Optional.of(offering(b.getTourOfferingId(), "Campus Walk")));
+        when(guides.findById(b.getGuideId()))
+                .thenReturn(Optional.of(guideProfile(b.getGuideId(), guideUserId)));
+        when(users.findById(guideUserId)).thenReturn(Optional.of(user(guideUserId, "Jane Guide")));
+        when(universities.findById(b.getUniversityId()))
+                .thenReturn(Optional.of(university(b.getUniversityId(), "Test University")));
     }
 
     // ── private helpers ──────────────────────────────────────────────────────

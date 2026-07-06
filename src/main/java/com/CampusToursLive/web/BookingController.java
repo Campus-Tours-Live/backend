@@ -6,6 +6,8 @@ import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
 import com.CampusToursLive.web.dto.BookingDetailResponse;
+import com.CampusToursLive.web.dto.CancelBookingRequest;
+import com.CampusToursLive.web.dto.CreateBookingRequest;
 import com.CampusToursLive.web.dto.PendingActionsResponse;
 import com.CampusToursLive.web.dto.Problem;
 import io.swagger.v3.oas.annotations.Operation;
@@ -15,13 +17,18 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Participant booking read endpoints (BFF maps /v1/participant/bookings/* → here). All endpoints
- * require the PARTICIPANT role.
+ * Participant booking endpoints (BFF maps /v1/participant/bookings/* → here): dashboard reads plus
+ * the create/cancel writes. All endpoints require the PARTICIPANT role; ownership of a specific
+ * booking is enforced in the service.
  */
 @RestController
 @RequestMapping("/participant/bookings")
@@ -148,5 +155,20 @@ public class BookingController {
     public ApiEnvelope<PendingActionsResponse> getPendingActions() {
         var user = currentUser.requireRole(UserRole.PARTICIPANT);
         return ApiEnvelope.of(bookingService.getPendingActions(user.getId()));
+    }
+
+    /** Book a tour: creates a PENDING_GUIDE_ACCEPTANCE booking for a bookable offering. */
+    @PostMapping
+    public ApiEnvelope<BookingDetailResponse> create(@RequestBody CreateBookingRequest req) {
+        var user = currentUser.requireRole(UserRole.PARTICIPANT);
+        return ApiEnvelope.of(bookingService.createBooking(user, req));
+    }
+
+    /** Cancel the participant's own upcoming booking. The body (a reason) is optional. */
+    @PostMapping("/{id}/cancel")
+    public ApiEnvelope<BookingDetailResponse> cancel(
+            @PathVariable UUID id, @RequestBody(required = false) CancelBookingRequest req) {
+        var user = currentUser.requireRole(UserRole.PARTICIPANT);
+        return ApiEnvelope.of(bookingService.cancelBooking(user, id, req));
     }
 }

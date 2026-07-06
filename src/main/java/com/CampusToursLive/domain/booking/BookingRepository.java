@@ -33,6 +33,29 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
      */
     long countByParticipantUserIdAndStatusIn(UUID participantUserId, List<BookingStatus> statuses);
 
+    /** A participant's own booking — scopes every write so users can only touch their own rows. */
+    Optional<BookingEntity> findByIdAndParticipantUserId(UUID id, UUID participantUserId);
+
+    /**
+     * Does any slot-holding booking already reserve part of [{@code newStart}, {@code newEnd}) for
+     * this guide? Two intervals overlap iff existing.start &lt; new.end AND existing.end &gt;
+     * new.start — hence the (end, start) argument order. Pre-checks the DB exclusion constraint
+     * {@code excl_guide_no_overlap} so the common case fails with a friendly 422 instead of a
+     * constraint violation.
+     */
+    boolean existsByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
+            UUID guideId, List<BookingStatus> statuses, Instant newEnd, Instant newStart);
+
+    /**
+     * Participant-side twin of the guide overlap check (constraint: excl_participant_no_overlap).
+     */
+    boolean
+            existsByParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
+                    UUID participantUserId,
+                    List<BookingStatus> statuses,
+                    Instant newEnd,
+                    Instant newStart);
+
     /**
      * Count COMPLETED bookings for a participant that have no review yet. Uses a native SQL NOT
      * EXISTS subquery because ReviewEntity does not exist in the JPA model yet.
