@@ -16,6 +16,12 @@ class LocalWallClockTimeConverterTest {
     }
 
     @Test
+    void convertToDatabaseColumn_truncatesNanoseconds() {
+        assertEquals(
+                "09:00:00", converter.convertToDatabaseColumn(LocalTime.of(9, 0, 0, 500_000_000)));
+    }
+
+    @Test
     void convertToDatabaseColumn_null() {
         assertNull(converter.convertToDatabaseColumn(null));
     }

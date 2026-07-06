@@ -4,6 +4,7 @@ import jakarta.persistence.AttributeConverter;
 import jakarta.persistence.Converter;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 
 /**
  * Persists wall-clock times as {@code HH:mm:ss} strings so {@code hibernate.jdbc.time_zone=UTC}
@@ -16,7 +17,7 @@ public class LocalWallClockTimeConverter implements AttributeConverter<LocalTime
 
     @Override
     public String convertToDatabaseColumn(LocalTime attribute) {
-        return attribute == null ? null : attribute.format(FORMAT);
+        return attribute == null ? null : attribute.truncatedTo(ChronoUnit.SECONDS).format(FORMAT);
     }
 
     @Override

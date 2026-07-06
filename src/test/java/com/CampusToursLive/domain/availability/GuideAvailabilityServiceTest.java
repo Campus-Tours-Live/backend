@@ -998,4 +998,55 @@ class GuideAvailabilityServiceTest {
                         () -> service().updateRule(user(userId), ruleId, req));
         assertEquals("Rule timezone must match booking settings timezone", ex.getMessage());
     }
+
+    @Test
+    void updateBookingSettings_deduplicatesDurations() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        GuideBookingSettingsEntity settings = stubSettings(guideId);
+        when(bookingSettings.save(any())).thenAnswer(echoSave());
+
+        UpdateBookingSettingsRequest req =
+                new UpdateBookingSettingsRequest(
+                        null, null, null, null, null, null, List.of(30, 30, 60), null);
+
+        var resp = service().updateBookingSettings(user(userId), req);
+        assertEquals(List.of(30, 60), resp.durationsOffered());
+        assertEquals("[30,60]", settings.getDurationsOffered());
+    }
+
+    @Test
+    void updateBookingSettings_rejectsExcessiveMaxAdvanceDays() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+
+        UpdateBookingSettingsRequest req =
+                new UpdateBookingSettingsRequest(null, null, null, 366, null, null, null, null);
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().updateBookingSettings(user(userId), req));
+        assertEquals("maxAdvanceDays must be at most 365", ex.getMessage());
+    }
+
+    @Test
+    void updateBookingSettings_rejectsExcessiveBuffer() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+
+        UpdateBookingSettingsRequest req =
+                new UpdateBookingSettingsRequest(null, null, null, null, 1441, null, null, null);
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().updateBookingSettings(user(userId), req));
+        assertEquals("bufferBeforeMin must be at most 1440", ex.getMessage());
+    }
 }

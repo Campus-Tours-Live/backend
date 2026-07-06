@@ -20,6 +20,8 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -33,6 +35,10 @@ public class GuideAvailabilityService {
 
     private static final Logger log = LoggerFactory.getLogger(GuideAvailabilityService.class);
     private static final Set<Integer> ALLOWED_DURATIONS = Set.of(30, 45, 60, 90);
+    private static final int MAX_RESPONSE_DEADLINE_MIN = 10_080; // 7 days
+    private static final int MAX_MIN_NOTICE_MIN = 525_600; // 365 days
+    private static final int MAX_MAX_ADVANCE_DAYS = 365;
+    private static final int MAX_BUFFER_MIN = 1_440; // 24 hours
     private static final DateTimeFormatter TIME_HH_MM = DateTimeFormatter.ofPattern("HH:mm");
     private static final DateTimeFormatter TIME_HH_MM_SS = DateTimeFormatter.ofPattern("HH:mm:ss");
 
@@ -239,22 +245,28 @@ public class GuideAvailabilityService {
         }
         if (req.responseDeadlineMin() != null) {
             validatePositive(req.responseDeadlineMin(), "responseDeadlineMin");
+            validateMax(
+                    req.responseDeadlineMin(), MAX_RESPONSE_DEADLINE_MIN, "responseDeadlineMin");
             settings.setResponseDeadlineMin(req.responseDeadlineMin());
         }
         if (req.minNoticeMin() != null) {
             validateNonNegative(req.minNoticeMin(), "minNoticeMin");
+            validateMax(req.minNoticeMin(), MAX_MIN_NOTICE_MIN, "minNoticeMin");
             settings.setMinNoticeMin(req.minNoticeMin());
         }
         if (req.maxAdvanceDays() != null) {
             validatePositive(req.maxAdvanceDays(), "maxAdvanceDays");
+            validateMax(req.maxAdvanceDays(), MAX_MAX_ADVANCE_DAYS, "maxAdvanceDays");
             settings.setMaxAdvanceDays(req.maxAdvanceDays());
         }
         if (req.bufferBeforeMin() != null) {
             validateNonNegative(req.bufferBeforeMin(), "bufferBeforeMin");
+            validateMax(req.bufferBeforeMin(), MAX_BUFFER_MIN, "bufferBeforeMin");
             settings.setBufferBeforeMin(req.bufferBeforeMin());
         }
         if (req.bufferAfterMin() != null) {
             validateNonNegative(req.bufferAfterMin(), "bufferAfterMin");
+            validateMax(req.bufferAfterMin(), MAX_BUFFER_MIN, "bufferAfterMin");
             settings.setBufferAfterMin(req.bufferAfterMin());
         }
         if (req.durationsOffered() != null) {
@@ -380,13 +392,24 @@ public class GuideAvailabilityService {
         if (durations == null || durations.isEmpty()) {
             throw new ValidationException("durationsOffered must not be empty");
         }
+        if (durations.size() > 16) {
+            throw new ValidationException("durationsOffered must have at most 16 entries");
+        }
+        LinkedHashSet<Integer> unique = new LinkedHashSet<>();
         for (Integer d : durations) {
             if (d == null || !ALLOWED_DURATIONS.contains(d)) {
                 throw new ValidationException("durationsOffered must be subset of 30, 45, 60, 90");
             }
+            unique.add(d);
+        }
+        if (unique.size() > ALLOWED_DURATIONS.size()) {
+            throw new ValidationException(
+                    "durationsOffered must have at most "
+                            + ALLOWED_DURATIONS.size()
+                            + " unique values");
         }
         try {
-            return mapper.writeValueAsString(durations);
+            return mapper.writeValueAsString(new ArrayList<>(unique));
         } catch (Exception ex) {
             throw new ValidationException("Invalid durationsOffered");
         }
@@ -480,5 +503,11 @@ public class GuideAvailabilityService {
 
     private static void validateNonNegative(int value, String field) {
         if (value < 0) throw new ValidationException(field + " must be non-negative");
+    }
+
+    private static void validateMax(int value, int max, String field) {
+        if (value > max) {
+            throw new ValidationException(field + " must be at most " + max);
+        }
     }
 }
