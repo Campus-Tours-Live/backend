@@ -33,6 +33,8 @@ class TourOfferingRepositoryTest {
     @Autowired private EntityManager entityManager;
 
     private String searchMarker;
+    private UUID activeUniversityId;
+    private UUID approvedGuideId;
     private UUID discoverableId;
     private UUID draftId;
     private UUID pausedId;
@@ -44,10 +46,10 @@ class TourOfferingRepositoryTest {
     void seedVisibilityFixtures() {
         searchMarker = "vis-" + UUID.randomUUID().toString().substring(0, 8);
 
-        UUID activeUniversityId = insertUniversity("active-" + searchMarker, "ACTIVE");
+        activeUniversityId = insertUniversity("active-" + searchMarker, "ACTIVE");
         UUID inactiveUniversityId = insertUniversity("archived-" + searchMarker, "ARCHIVED");
 
-        UUID approvedGuideId = insertGuide(activeUniversityId, "APPROVED");
+        approvedGuideId = insertGuide(activeUniversityId, "APPROVED");
         UUID pendingGuideUserId = UUID.randomUUID();
         insertUser(pendingGuideUserId, "Pending Guide");
         UUID pendingGuideId =
@@ -127,6 +129,119 @@ class TourOfferingRepositoryTest {
         assertThat(offerings.findDiscoverableById(inactiveUniversityOfferingId)).isEmpty();
     }
 
+    @Test
+    void findDiscoverable_matchesViaDescriptionOnly() {
+        String token = "desc-" + UUID.randomUUID().toString().substring(0, 8);
+        UUID id =
+                insertOffering(
+                        approvedGuideId,
+                        activeUniversityId,
+                        "Generic title",
+                        "generic-" + token,
+                        "ACTIVE",
+                        "Body mentions " + token + " here",
+                        "GENERAL_CAMPUS");
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(offerings.findDiscoverable(null, null, token, PageRequest.of(0, 20)))
+                .extracting(TourOfferingEntity::getId)
+                .containsExactly(id);
+    }
+
+    @Test
+    void findDiscoverable_matchesViaUniversityName() {
+        String token = "uni-" + UUID.randomUUID().toString().substring(0, 8);
+        UUID uni = insertUniversity(token, "ACTIVE"); // name is "University " + token
+        UUID guide = insertGuide(uni, "APPROVED");
+        UUID id =
+                insertOffering(
+                        guide,
+                        uni,
+                        "Plain tour",
+                        "plain-" + token,
+                        "ACTIVE",
+                        "no marker",
+                        "GENERAL_CAMPUS");
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(offerings.findDiscoverable(null, null, token, PageRequest.of(0, 20)))
+                .extracting(TourOfferingEntity::getId)
+                .containsExactly(id);
+    }
+
+    @Test
+    void findDiscoverable_filtersByUniversityIdAndTopic() {
+        String token = "flt-" + UUID.randomUUID().toString().substring(0, 8);
+        UUID targetUni = insertUniversity("target-" + token, "ACTIVE");
+        UUID targetGuide = insertGuide(targetUni, "APPROVED");
+        UUID match =
+                insertOffering(
+                        targetGuide,
+                        targetUni,
+                        token + " dorm",
+                        "dorm-" + token,
+                        "ACTIVE",
+                        "",
+                        "DORM_HOUSING");
+        // same university, different topic -> excluded by the topic filter
+        insertOffering(
+                targetGuide,
+                targetUni,
+                token + " general",
+                "gen-" + token,
+                "ACTIVE",
+                "",
+                "GENERAL_CAMPUS");
+        // different university, same topic -> excluded by the universityId filter
+        UUID otherUni = insertUniversity("other-" + token, "ACTIVE");
+        UUID otherGuide = insertGuide(otherUni, "APPROVED");
+        insertOffering(
+                otherGuide,
+                otherUni,
+                token + " dorm",
+                "dorm2-" + token,
+                "ACTIVE",
+                "",
+                "DORM_HOUSING");
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(
+                        offerings.findDiscoverable(
+                                targetUni, TourTopic.DORM_HOUSING, token, PageRequest.of(0, 20)))
+                .extracting(TourOfferingEntity::getId)
+                .containsExactly(match);
+    }
+
+    @Test
+    void findDiscoverable_excludesRowsNotMatchingQuery() {
+        String absent = "absent-" + UUID.randomUUID().toString().substring(0, 8);
+        assertThat(offerings.findDiscoverable(null, null, absent, PageRequest.of(0, 20))).isEmpty();
+    }
+
+    @Test
+    void findDiscoverable_escapeClauseMatchesLiteralWildcard() {
+        String token = "pct-" + UUID.randomUUID().toString().substring(0, 8);
+        UUID id =
+                insertOffering(
+                        approvedGuideId,
+                        activeUniversityId,
+                        "Save 50% on " + token,
+                        "save-" + token,
+                        "ACTIVE",
+                        "",
+                        "GENERAL_CAMPUS");
+        entityManager.flush();
+        entityManager.clear();
+
+        // Escaped "%" ("!%") matches a literal "%" via `escape '!'`; the title contains "50%".
+        assertThat(offerings.findDiscoverable(null, null, "50!%", PageRequest.of(0, 20)))
+                .extracting(TourOfferingEntity::getId)
+                .contains(id);
+    }
+
     private void insertUser(UUID userId, String displayName) {
         entityManager
                 .createNativeQuery(
@@ -180,17 +295,28 @@ class TourOfferingRepositoryTest {
 
     private UUID insertOffering(
             UUID guideId, UUID universityId, String title, String slug, String status) {
+        return insertOffering(guideId, universityId, title, slug, status, "", "GENERAL_CAMPUS");
+    }
+
+    private UUID insertOffering(
+            UUID guideId,
+            UUID universityId,
+            String title,
+            String slug,
+            String status,
+            String description,
+            String topic) {
         UUID id = UUID.randomUUID();
         entityManager
                 .createNativeQuery(
                         """
                         INSERT INTO tour_offerings (
-                          id, guide_id, university_id, title, slug, topic,
+                          id, guide_id, university_id, title, slug, description, topic,
                           duration_min, price_cents, status
                         )
                         VALUES (
-                          :id, :guideId, :universityId, :title, :slug,
-                          CAST('GENERAL_CAMPUS' AS tour_topic), 60, 5000,
+                          :id, :guideId, :universityId, :title, :slug, :description,
+                          CAST(:topic AS tour_topic), 60, 5000,
                           CAST(:status AS tour_status)
                         )
                         """)
@@ -199,6 +325,8 @@ class TourOfferingRepositoryTest {
                 .setParameter("universityId", universityId)
                 .setParameter("title", title)
                 .setParameter("slug", slug)
+                .setParameter("description", description)
+                .setParameter("topic", topic)
                 .setParameter("status", status)
                 .executeUpdate();
         return id;

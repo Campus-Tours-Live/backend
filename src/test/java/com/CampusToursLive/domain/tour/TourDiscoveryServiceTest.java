@@ -30,6 +30,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
 /** Public marketplace discovery — only ACTIVE offerings from APPROVED guides are visible. */
 @ExtendWith(MockitoExtension.class)
@@ -141,6 +142,54 @@ class TourDiscoveryServiceTest {
         assertThrows(
                 ValidationException.class,
                 () -> service().list(null, "NOT_A_TOPIC", "", TourDiscoverySort.RECOMMENDED, 20));
+    }
+
+    @Test
+    void list_acceptsLowercaseTopic() {
+        when(offerings.findDiscoverable(
+                        eq(null), eq(TourTopic.DORM_HOUSING), eq(""), any(Pageable.class)))
+                .thenReturn(List.of());
+
+        service().list(null, "dorm_housing", "", TourDiscoverySort.RECOMMENDED, 20);
+
+        verify(offerings)
+                .findDiscoverable(
+                        eq(null), eq(TourTopic.DORM_HOUSING), eq(""), any(Pageable.class));
+    }
+
+    @Test
+    void escapeLike_escapesWildcards() {
+        assertEquals("!%!_!!", TourDiscoveryService.escapeLike("%_!"));
+        assertEquals("plain text", TourDiscoveryService.escapeLike("plain text"));
+    }
+
+    @Test
+    void list_sortsByPriceAscending() {
+        assertFirstSortOrder(TourDiscoverySort.PRICE_ASC, "priceCents", Sort.Direction.ASC);
+    }
+
+    @Test
+    void list_sortsByPriceDescending() {
+        assertFirstSortOrder(TourDiscoverySort.PRICE_DESC, "priceCents", Sort.Direction.DESC);
+    }
+
+    @Test
+    void list_sortsByRating() {
+        assertFirstSortOrder(TourDiscoverySort.RATING, "avgRating", Sort.Direction.DESC);
+    }
+
+    private void assertFirstSortOrder(
+            TourDiscoverySort sort, String property, Sort.Direction direction) {
+        when(offerings.findDiscoverable(any(), any(), any(), any(Pageable.class)))
+                .thenReturn(List.of());
+
+        service().list(null, null, "", sort, 20);
+
+        ArgumentCaptor<Pageable> page = ArgumentCaptor.forClass(Pageable.class);
+        verify(offerings).findDiscoverable(eq(null), eq(null), eq(""), page.capture());
+        Sort.Order first = page.getValue().getSort().iterator().next();
+        assertEquals(property, first.getProperty());
+        assertEquals(direction, first.getDirection());
     }
 
     @Test

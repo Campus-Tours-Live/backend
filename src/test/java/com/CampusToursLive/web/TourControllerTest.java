@@ -124,4 +124,11 @@ class TourControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.status").value(404));
     }
+
+    @Test
+    void get_422_whenTourIdMalformed() throws Exception {
+        mvc.perform(get("/tours/{tourId}", "not-a-uuid"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422));
+    }
 }

@@ -350,12 +350,12 @@ statuses) and requires the **GUIDE** role.
 | -------------- | ------------- | ---------------------------------------------------------------- |
 | `universityId` | —             | Filter by university UUID                                        |
 | `topic`        | —             | Filter by `tour_topic` enum (see `/meta/tour-topics`)            |
-| `q`            | `""`          | Search title, description, or university name                    |
+| `q`            | `""`          | Search title, description, university name, or short name        |
 | `sort`         | `RECOMMENDED` | `RECOMMENDED` \| `PRICE_ASC` \| `PRICE_DESC` \| `RATING`         |
 | `limit`        | `20`          | Page size (max **50**)                                           |
 
-**Responses:** `TourSummaryResponse[]` (list) or `TourDetailResponse` (by id). Invalid `sort` →
-`422`. Unknown or non-discoverable id → `404`.
+**Responses:** `TourSummaryResponse[]` (list) or `TourDetailResponse` (by id). Invalid `sort` or
+`topic` → `422`; a malformed `tourId` (not a UUID) → `422`. Unknown or non-discoverable id → `404`.
 
 **Manual test (via BFF, signed in):**
 
@@ -364,8 +364,8 @@ curl -s "http://localhost:4000/v1/tours?sort=RECOMMENDED&limit=20" \
   -H "Cookie: ctl_sess=<session-cookie>" | jq .
 ```
 
-See the repo-root [`API.md`](../API.md) for the full contract, frontend integration, and testing
-guide.
+See the endpoint tables above for the full request/response contract. Cross-repo integration (BFF
+`/v1` passthrough, frontend) is described in the PR that introduced this endpoint.
 
 ---
 

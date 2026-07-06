@@ -17,6 +17,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -30,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class TourDiscoveryService {
 
     private static final int MAX_LIMIT = 50;
+    private static final Logger log = LoggerFactory.getLogger(TourDiscoveryService.class);
 
     private final TourOfferingRepository offerings;
     private final GuideProfileRepository guides;
@@ -55,7 +58,7 @@ public class TourDiscoveryService {
             String universityIdRaw, String topicRaw, String q, TourDiscoverySort sort, int limit) {
         UUID universityId = parseOptionalUniversityId(universityIdRaw);
         TourTopic topic = parseOptionalTopic(topicRaw);
-        String query = q == null ? "" : q.trim();
+        String query = escapeLike(q == null ? "" : q.trim());
         int capped = Math.min(Math.max(limit, 1), MAX_LIMIT);
 
         List<TourOfferingEntity> rows =
@@ -97,10 +100,18 @@ public class TourDiscoveryService {
     private TourTopic parseOptionalTopic(String raw) {
         if (raw == null || raw.isBlank()) return null;
         try {
-            return TourTopic.valueOf(raw.trim());
+            return TourTopic.valueOf(raw.trim().toUpperCase());
         } catch (IllegalArgumentException ex) {
             throw new ValidationException("Invalid topic: " + raw);
         }
+    }
+
+    /**
+     * Escape LIKE wildcards so a client-supplied {@code q} is matched literally (e.g. {@code %} and
+     * {@code _} are not treated as wildcards). Pairs with {@code escape '!'} in the JPQL.
+     */
+    static String escapeLike(String s) {
+        return s.replace("!", "!!").replace("%", "!%").replace("_", "!_");
     }
 
     private static Sort toSort(TourDiscoverySort sort) {
@@ -225,6 +236,7 @@ public class TourDiscoveryService {
                     ? List.of()
                     : langs.stream().filter(s -> s != null && !s.isBlank()).toList();
         } catch (Exception ex) {
+            log.debug("Ignoring malformed languages JSON: {}", json, ex);
             return List.of();
         }
     }

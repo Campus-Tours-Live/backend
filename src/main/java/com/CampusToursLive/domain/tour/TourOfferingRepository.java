@@ -19,7 +19,8 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
     /**
      * Active offerings from approved guides at active universities — the public marketplace
      * catalog. {@code universityId} and {@code topic} are optional filters; {@code q} matches
-     * title, description, or university name (case-insensitive).
+     * title, description, university name, or short name (case-insensitive; LIKE wildcards in
+     * {@code q} are escaped and matched literally).
      */
     @Query(
             """
@@ -33,10 +34,10 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
               and o.topic = coalesce(:topic, o.topic)
               and (
                 :q = ''
-                or lower(o.title) like lower(concat('%', :q, '%'))
-                or lower(o.description) like lower(concat('%', :q, '%'))
-                or lower(u.name) like lower(concat('%', :q, '%'))
-                or lower(coalesce(u.shortName, '')) like lower(concat('%', :q, '%'))
+                or lower(o.title) like lower(concat('%', :q, '%')) escape '!'
+                or lower(o.description) like lower(concat('%', :q, '%')) escape '!'
+                or lower(u.name) like lower(concat('%', :q, '%')) escape '!'
+                or lower(coalesce(u.shortName, '')) like lower(concat('%', :q, '%')) escape '!'
               )
             """)
     List<TourOfferingEntity> findDiscoverable(
