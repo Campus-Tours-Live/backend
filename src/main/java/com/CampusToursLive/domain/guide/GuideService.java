@@ -3,6 +3,7 @@ package com.CampusToursLive.domain.guide;
 import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
 import com.CampusToursLive.domain.participant.ParticipantType;
 import com.CampusToursLive.domain.tour.TourTopic;
+import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
@@ -225,6 +226,11 @@ public class GuideService {
     }
 
     private GuideProfileResponse toResponse(UserEntity user, GuideProfileEntity profile) {
+        UniversityEntity university =
+                profile != null && profile.getUniversityId() != null
+                        ? universities.findById(profile.getUniversityId()).orElse(null)
+                        : null;
+
         return new GuideProfileResponse(
                 user.getId().toString(),
                 user.getFirstName(),
@@ -237,6 +243,8 @@ public class GuideService {
                         : (profile.getUniversityId() != null
                                 ? profile.getUniversityId().toString()
                                 : null),
+                university != null ? university.getName() : null,
+                university != null ? university.getShortName() : null,
                 profile == null ? null : profile.getMajor(),
                 profile == null ? null : profile.getClassYear(),
                 profile == null ? null : profile.getBio(),

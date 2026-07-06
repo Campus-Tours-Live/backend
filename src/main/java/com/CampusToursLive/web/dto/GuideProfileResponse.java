@@ -14,6 +14,8 @@ public record GuideProfileResponse(
         String email,
         String accountStatus,
         String universityId,
+        String universityName,
+        String universityShortName,
         String major,
         String classYear,
         String bio,

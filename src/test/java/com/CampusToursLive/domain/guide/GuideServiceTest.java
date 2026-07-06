@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.CampusToursLive.domain.participant.ParticipantProfileEntity;
 import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
 import com.CampusToursLive.domain.participant.ParticipantType;
+import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
@@ -364,10 +365,17 @@ class GuideServiceTest {
         profile.setApplicationStatus(GuideApplicationStatus.APPROVED);
         profile.setVerificationStatus(GuideVerificationStatus.VERIFIED);
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
+        UniversityEntity university = new UniversityEntity();
+        university.setId(uni);
+        university.setName("Stanford University");
+        university.setShortName("Stanford");
+        when(universities.findById(uni)).thenReturn(Optional.of(university));
 
         GuideProfileResponse res = service().getProfile(u);
 
         assertEquals(uni.toString(), res.universityId());
+        assertEquals("Stanford University", res.universityName());
+        assertEquals("Stanford", res.universityShortName());
         assertEquals("CS", res.major());
         assertEquals("APPROVED", res.applicationStatus());
         assertEquals("VERIFIED", res.verificationStatus());
