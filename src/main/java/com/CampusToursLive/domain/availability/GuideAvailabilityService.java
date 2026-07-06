@@ -18,6 +18,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -31,10 +33,13 @@ public class GuideAvailabilityService {
 
     private static final Logger log = LoggerFactory.getLogger(GuideAvailabilityService.class);
     private static final Set<Integer> ALLOWED_DURATIONS = Set.of(30, 45, 60, 90);
+    private static final DateTimeFormatter TIME_HH_MM = DateTimeFormatter.ofPattern("HH:mm");
+    private static final DateTimeFormatter TIME_HH_MM_SS = DateTimeFormatter.ofPattern("HH:mm:ss");
 
     private final GuideAvailabilityRuleRepository rules;
     private final AvailabilityExceptionRepository exceptions;
     private final GuideBookingSettingsRepository bookingSettings;
+    private final GuideBookingSettingsService settingsService;
     private final GuideProfileRepository guides;
     private final ObjectMapper mapper;
 
@@ -42,11 +47,13 @@ public class GuideAvailabilityService {
             GuideAvailabilityRuleRepository rules,
             AvailabilityExceptionRepository exceptions,
             GuideBookingSettingsRepository bookingSettings,
+            GuideBookingSettingsService settingsService,
             GuideProfileRepository guides,
             ObjectMapper mapper) {
         this.rules = rules;
         this.exceptions = exceptions;
         this.bookingSettings = bookingSettings;
+        this.settingsService = settingsService;
         this.guides = guides;
         this.mapper = mapper;
     }
@@ -62,7 +69,7 @@ public class GuideAvailabilityService {
                 exceptions.findByGuideIdOrderByExceptionDateAscCreatedAtAsc(guideId).stream()
                         .map(this::toExceptionResponse)
                         .toList(),
-                toSettingsResponse(requireSettings(guideId)));
+                toSettingsResponse(loadSettings(guideId)));
     }
 
     @Transactional
@@ -88,7 +95,8 @@ public class GuideAvailabilityService {
                 "createRule parsed startLocal={} endLocal={}",
                 rule.getStartLocal(),
                 rule.getEndLocal());
-        rule.setTimezone(resolveTimezone(req.timezone(), settings.getTimezone()));
+        rule.setTimezone(
+                AvailabilityTimezones.resolveRuleTimezone(req.timezone(), settings.getTimezone()));
         rule.setEffectiveFrom(parseDate(req.effectiveFrom(), "effectiveFrom", LocalDate.now()));
         rule.setEffectiveTo(parseOptionalDate(req.effectiveTo(), "effectiveTo"));
         validateEffectiveRange(rule.getEffectiveFrom(), rule.getEffectiveTo());
@@ -107,6 +115,7 @@ public class GuideAvailabilityService {
     public AvailabilityRuleResponse updateRule(
             UserEntity user, UUID ruleId, UpdateAvailabilityRuleRequest req) {
         GuideProfileEntity guide = requireGuideProfile(user);
+        GuideBookingSettingsEntity settings = requireSettings(guide.getId());
         GuideAvailabilityRuleEntity rule =
                 rules.findByIdAndGuideId(ruleId, guide.getId())
                         .orElseThrow(() -> new NotFoundException("Availability rule not found"));
@@ -132,7 +141,11 @@ public class GuideAvailabilityService {
                 rule.getStartLocal(),
                 rule.getEndLocal());
         if (req.timezone() != null) {
-            rule.setTimezone(resolveTimezone(req.timezone(), rule.getTimezone()));
+            rule.setTimezone(
+                    AvailabilityTimezones.resolveRuleTimezone(
+                            req.timezone(), settings.getTimezone()));
+        } else {
+            AvailabilityTimezones.resolveRuleTimezone(rule.getTimezone(), settings.getTimezone());
         }
         if (req.effectiveFrom() != null) {
             rule.setEffectiveFrom(parseDate(req.effectiveFrom(), "effectiveFrom", null));
@@ -248,7 +261,7 @@ public class GuideAvailabilityService {
             settings.setDurationsOffered(writeDurations(req.durationsOffered()));
         }
         if (req.timezone() != null) {
-            settings.setTimezone(resolveTimezone(req.timezone(), settings.getTimezone()));
+            settings.setTimezone(AvailabilityTimezones.validateTimezone(req.timezone()));
         }
 
         bookingSettings.save(settings);
@@ -263,16 +276,14 @@ public class GuideAvailabilityService {
                                         "No guide profile — complete guide onboarding first"));
     }
 
-    private GuideBookingSettingsEntity requireSettings(UUID guideId) {
+    private GuideBookingSettingsEntity loadSettings(UUID guideId) {
         return bookingSettings
                 .findById(guideId)
-                .orElseGet(() -> bookingSettings.save(defaultSettings(guideId)));
+                .orElseGet(() -> settingsService.getOrCreate(guideId));
     }
 
-    private static GuideBookingSettingsEntity defaultSettings(UUID guideId) {
-        GuideBookingSettingsEntity s = new GuideBookingSettingsEntity();
-        s.setGuideId(guideId);
-        return s;
+    private GuideBookingSettingsEntity requireSettings(UUID guideId) {
+        return settingsService.getOrCreate(guideId);
     }
 
     private void assertNoRuleOverlap(GuideAvailabilityRuleEntity candidate, UUID excludeRuleId) {
@@ -393,11 +404,14 @@ public class GuideAvailabilityService {
         }
         String trimmed = raw.trim();
         try {
-            if (trimmed.length() >= 5 && trimmed.charAt(2) == ':') {
-                return LocalTime.parse(trimmed.substring(0, 5));
+            if (trimmed.length() == 8) {
+                return LocalTime.parse(trimmed, TIME_HH_MM_SS);
             }
-            return LocalTime.parse(trimmed);
-        } catch (Exception ex) {
+            if (trimmed.length() == 5) {
+                return LocalTime.parse(trimmed, TIME_HH_MM);
+            }
+            throw new ValidationException("Invalid " + field + ": " + raw);
+        } catch (DateTimeParseException ex) {
             throw new ValidationException("Invalid " + field + ": " + raw);
         }
     }
@@ -448,12 +462,6 @@ public class GuideAvailabilityService {
         } catch (IllegalArgumentException ex) {
             throw new ValidationException("Invalid acceptanceMode: " + raw);
         }
-    }
-
-    private String resolveTimezone(String requested, String fallback) {
-        String tz = requested == null || requested.isBlank() ? fallback : requested.trim();
-        if (tz.isBlank()) throw new ValidationException("timezone is required");
-        return tz;
     }
 
     private static String formatTime(LocalTime time) {

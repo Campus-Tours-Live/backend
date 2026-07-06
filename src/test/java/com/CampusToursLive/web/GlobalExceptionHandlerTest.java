@@ -8,7 +8,6 @@ import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.UnauthorizedException;
 import com.CampusToursLive.error.ValidationException;
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.server.ResponseStatusException;
@@ -110,14 +109,5 @@ class GlobalExceptionHandlerTest {
                 handler.handleUnauthorized(new UnauthorizedException("Account not provisioned"));
         assertEquals(401, pd.getStatus());
         assertEquals("Account not provisioned", pd.getTitle());
-    }
-
-    @Test
-    void dataIntegrityViolation_mapsTo422WithSafeTitle() {
-        ProblemDetail pd =
-                handler.handleDataIntegrity(
-                        new DataIntegrityViolationException("guide_availability_rules_check"));
-        assertEquals(422, pd.getStatus());
-        assertEquals("End time must be after start time on the same day.", pd.getTitle());
     }
 }

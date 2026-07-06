@@ -34,12 +34,14 @@ class GuideAvailabilityServiceTest {
     @Mock GuideAvailabilityRuleRepository rules;
     @Mock AvailabilityExceptionRepository exceptions;
     @Mock GuideBookingSettingsRepository bookingSettings;
+    @Mock GuideBookingSettingsService settingsService;
     @Mock GuideProfileRepository guides;
 
     private final ObjectMapper mapper = new ObjectMapper();
 
     private GuideAvailabilityService service() {
-        return new GuideAvailabilityService(rules, exceptions, bookingSettings, guides, mapper);
+        return new GuideAvailabilityService(
+                rules, exceptions, bookingSettings, settingsService, guides, mapper);
     }
 
     private static UserEntity user(UUID id) {
@@ -59,9 +61,24 @@ class GuideAvailabilityServiceTest {
         when(guides.findByUserId(userId)).thenReturn(Optional.of(guide(guideId, userId)));
     }
 
-    private GuideBookingSettingsEntity stubSettings(UUID guideId) {
+    private GuideBookingSettingsEntity newSettings(UUID guideId) {
         GuideBookingSettingsEntity settings = new GuideBookingSettingsEntity();
         settings.setGuideId(guideId);
+        return settings;
+    }
+
+    /**
+     * Writable paths (create/update rule, update settings) use {@link GuideBookingSettingsService}.
+     */
+    private GuideBookingSettingsEntity stubSettings(UUID guideId) {
+        GuideBookingSettingsEntity settings = newSettings(guideId);
+        when(settingsService.getOrCreate(guideId)).thenReturn(settings);
+        return settings;
+    }
+
+    /** Read-only summary loads settings from the repository first. */
+    private GuideBookingSettingsEntity stubSettingsRead(UUID guideId) {
+        GuideBookingSettingsEntity settings = newSettings(guideId);
         when(bookingSettings.findById(guideId)).thenReturn(Optional.of(settings));
         return settings;
     }
@@ -113,10 +130,8 @@ class GuideAvailabilityServiceTest {
     void createRule_rejectsOverlappingBlocks() {
         UUID userId = UUID.randomUUID();
         UUID guideId = UUID.randomUUID();
-        when(guides.findByUserId(userId)).thenReturn(Optional.of(guide(guideId, userId)));
-        GuideBookingSettingsEntity settings = new GuideBookingSettingsEntity();
-        settings.setGuideId(guideId);
-        when(bookingSettings.findById(guideId)).thenReturn(Optional.of(settings));
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
 
         GuideAvailabilityRuleEntity existing = new GuideAvailabilityRuleEntity();
         existing.setId(UUID.randomUUID());
@@ -141,10 +156,8 @@ class GuideAvailabilityServiceTest {
     void createRule_rejectsEndBeforeStart() {
         UUID userId = UUID.randomUUID();
         UUID guideId = UUID.randomUUID();
-        when(guides.findByUserId(userId)).thenReturn(Optional.of(guide(guideId, userId)));
-        GuideBookingSettingsEntity settings = new GuideBookingSettingsEntity();
-        settings.setGuideId(guideId);
-        when(bookingSettings.findById(guideId)).thenReturn(Optional.of(settings));
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
 
         CreateAvailabilityRuleRequest req =
                 new CreateAvailabilityRuleRequest(
@@ -159,7 +172,8 @@ class GuideAvailabilityServiceTest {
         UUID userId = UUID.randomUUID();
         UUID guideId = UUID.randomUUID();
         UUID ruleId = UUID.randomUUID();
-        when(guides.findByUserId(userId)).thenReturn(Optional.of(guide(guideId, userId)));
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
 
         GuideAvailabilityRuleEntity existing = new GuideAvailabilityRuleEntity();
         existing.setId(ruleId);
@@ -184,10 +198,8 @@ class GuideAvailabilityServiceTest {
     void createRule_persistsValidBlock() {
         UUID userId = UUID.randomUUID();
         UUID guideId = UUID.randomUUID();
-        when(guides.findByUserId(userId)).thenReturn(Optional.of(guide(guideId, userId)));
-        GuideBookingSettingsEntity settings = new GuideBookingSettingsEntity();
-        settings.setGuideId(guideId);
-        when(bookingSettings.findById(guideId)).thenReturn(Optional.of(settings));
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
         when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 2))
                 .thenReturn(List.of());
 
@@ -255,11 +267,14 @@ class GuideAvailabilityServiceTest {
         when(exceptions.findByGuideIdOrderByExceptionDateAscCreatedAtAsc(guideId))
                 .thenReturn(List.of());
         when(bookingSettings.findById(guideId)).thenReturn(Optional.empty());
-        when(bookingSettings.save(any())).thenAnswer(echoSave());
+        GuideBookingSettingsEntity created = new GuideBookingSettingsEntity();
+        created.setGuideId(guideId);
+        when(settingsService.getOrCreate(guideId)).thenReturn(created);
 
         AvailabilitySummaryResponse summary = service().getSummary(user(userId));
         assertEquals(1440, summary.bookingSettings().minNoticeMin());
-        verify(bookingSettings).save(any());
+        verify(settingsService).getOrCreate(guideId);
+        verify(bookingSettings, never()).save(any());
     }
 
     @Test
@@ -270,7 +285,7 @@ class GuideAvailabilityServiceTest {
         when(rules.findByGuideIdOrderByDayOfWeekAscStartLocalAsc(guideId)).thenReturn(List.of());
         when(exceptions.findByGuideIdOrderByExceptionDateAscCreatedAtAsc(guideId))
                 .thenReturn(List.of());
-        GuideBookingSettingsEntity settings = stubSettings(guideId);
+        GuideBookingSettingsEntity settings = stubSettingsRead(guideId);
         settings.setDurationsOffered("not-json");
 
         AvailabilitySummaryResponse summary = service().getSummary(user(userId));
@@ -283,6 +298,7 @@ class GuideAvailabilityServiceTest {
         UUID guideId = UUID.randomUUID();
         UUID ruleId = UUID.randomUUID();
         stubGuide(userId, guideId);
+        stubSettings(guideId);
 
         GuideAvailabilityRuleEntity existing = new GuideAvailabilityRuleEntity();
         existing.setId(ruleId);
@@ -298,12 +314,12 @@ class GuideAvailabilityServiceTest {
 
         UpdateAvailabilityRuleRequest req =
                 new UpdateAvailabilityRuleRequest(
-                        2, "14:00", "17:00", "America/New_York", "2026-07-01", "2026-12-31", false);
+                        2, "14:00", "17:00", null, "2026-07-01", "2026-12-31", false);
 
         var resp = service().updateRule(user(userId), ruleId, req);
         assertEquals(2, resp.dayOfWeek());
         assertEquals("14:00", resp.startLocal());
-        assertEquals("America/New_York", resp.timezone());
+        assertEquals("America/Los_Angeles", resp.timezone());
         assertEquals("2026-12-31", resp.effectiveTo());
         assertFalse(resp.active());
     }
@@ -670,6 +686,7 @@ class GuideAvailabilityServiceTest {
         UUID guideId = UUID.randomUUID();
         UUID ruleId = UUID.randomUUID();
         stubGuide(userId, guideId);
+        stubSettings(guideId);
 
         GuideAvailabilityRuleEntity existing = new GuideAvailabilityRuleEntity();
         existing.setId(ruleId);
@@ -781,6 +798,7 @@ class GuideAvailabilityServiceTest {
         UUID userId = UUID.randomUUID();
         UUID guideId = UUID.randomUUID();
         stubGuide(userId, guideId);
+        stubSettings(guideId);
         when(rules.findByIdAndGuideId(any(), eq(guideId))).thenReturn(Optional.empty());
 
         assertThrows(
@@ -896,9 +914,88 @@ class GuideAvailabilityServiceTest {
                 .thenReturn(List.of(rule));
         when(exceptions.findByGuideIdOrderByExceptionDateAscCreatedAtAsc(guideId))
                 .thenReturn(List.of());
-        stubSettings(guideId);
+        stubSettingsRead(guideId);
 
         AvailabilitySummaryResponse summary = service().getSummary(user(userId));
         assertNull(summary.rules().get(0).createdAt());
+    }
+
+    @Test
+    void createRule_rejectsRuleTimezoneMismatchWithSettings() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+
+        CreateAvailabilityRuleRequest req =
+                new CreateAvailabilityRuleRequest(
+                        1, "08:00", "10:00", "America/New_York", "2026-06-01", null, true);
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class, () -> service().createRule(user(userId), req));
+        assertEquals("Rule timezone must match booking settings timezone", ex.getMessage());
+    }
+
+    @Test
+    void createRule_rejectsTimeWithTrailingGarbage() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+
+        CreateAvailabilityRuleRequest req =
+                new CreateAvailabilityRuleRequest(
+                        1, "09:00xyz", "12:00", "America/Los_Angeles", "2026-06-01", null, true);
+
+        assertThrows(ValidationException.class, () -> service().createRule(user(userId), req));
+    }
+
+    @Test
+    void updateBookingSettings_rejectsInvalidTimezone() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+
+        UpdateBookingSettingsRequest req =
+                new UpdateBookingSettingsRequest(
+                        null, null, null, null, null, null, null, "Not/A/Timezone");
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().updateBookingSettings(user(userId), req));
+        assertEquals("Invalid timezone: Not/A/Timezone", ex.getMessage());
+    }
+
+    @Test
+    void updateRule_rejectsTimezoneMismatchWithSettings() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        UUID ruleId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+
+        GuideAvailabilityRuleEntity existing = new GuideAvailabilityRuleEntity();
+        existing.setId(ruleId);
+        existing.setGuideId(guideId);
+        existing.setDayOfWeek((short) 1);
+        existing.setStartLocal(LocalTime.of(10, 0));
+        existing.setEndLocal(LocalTime.of(13, 0));
+        existing.setTimezone("America/Los_Angeles");
+        existing.setEffectiveFrom(LocalDate.parse("2026-06-01"));
+        existing.setActive(true);
+        when(rules.findByIdAndGuideId(ruleId, guideId)).thenReturn(Optional.of(existing));
+
+        UpdateAvailabilityRuleRequest req =
+                new UpdateAvailabilityRuleRequest(
+                        null, null, null, "America/New_York", null, null, null);
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().updateRule(user(userId), ruleId, req));
+        assertEquals("Rule timezone must match booking settings timezone", ex.getMessage());
     }
 }
