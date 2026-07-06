@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
@@ -64,6 +65,12 @@ public class TourOfferingEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", columnDefinition = "tour_status", nullable = false)
     private TourStatus status = TourStatus.DRAFT;
+
+    @Column(name = "avg_rating", nullable = false, insertable = false, updatable = false)
+    private BigDecimal avgRating = BigDecimal.ZERO;
+
+    @Column(name = "review_count", nullable = false, insertable = false, updatable = false)
+    private int reviewCount;
 
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
