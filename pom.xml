@@ -53,6 +53,14 @@
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
 
+		<!-- OpenAPI 3 spec auto-generation + Swagger UI (Contract B docs). springdoc 2.8.x
+		     targets Spring Boot 3.4; serves /v3/api-docs and /swagger-ui.html. -->
+		<dependency>
+			<groupId>org.springdoc</groupId>
+			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+			<version>2.8.6</version>
+		</dependency>
+
 		<!-- Security + Google OIDC JWT resource server -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

@@ -41,7 +41,18 @@ jobs:
           cache: maven
       # Unit + Testcontainers integration tests + JaCoCo 90% project gate.
       # (Spotless is checked in the lint job; skip it here to keep this signal test-only.)
+      # `verify` also runs OpenApiDocsExportTest, which boots the app and writes the
+      # springdoc-generated Contract B spec to target/openapi.json.
       - run: ./mvnw -B verify -Dspotless.check.skip=true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Lint the springdoc-generated Contract B spec with Spectral (industry OAS linter) so an
+      # under-documented API — an operation without summary/description/tags, a response without an
+      # example, or a schema field without a description — fails this required check. Folded into
+      # the Unit & Integration job (mirrors how bff folds Spectral into Lint & Typecheck). See
+      # .spectral.yaml + docs/openapi-conventions.md.
+      - run: npx --yes @stoplight/spectral-cli lint target/openapi.json
 
   patch-coverage:
     name: Patch Coverage

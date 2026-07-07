@@ -37,4 +37,5 @@
 - [ ] Tests added or updated (or explained why not)
 - [ ] No secrets, tokens, or `.env` files committed
 - [ ] DB migration included if the schema changed (Flyway)
+- [ ] If a REST endpoint/DTO changed, it's annotated (`@Operation`/`@Schema`/`@Parameter`/`@ApiResponse`) and the OpenAPI Spectral gate passes (`./mvnw verify` + `npx @stoplight/spectral-cli lint target/openapi.json`)
 - [ ] Docs / README updated if needed
