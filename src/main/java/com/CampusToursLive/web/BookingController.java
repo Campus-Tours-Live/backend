@@ -6,6 +6,8 @@ import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.dto.ApiEnvelope;
 import com.CampusToursLive.web.dto.BookingDetailResponse;
 import com.CampusToursLive.web.dto.PendingActionsResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -17,6 +19,9 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/participant/bookings")
+@Tag(
+        name = "Participant bookings",
+        description = "Read endpoints for a participant's tour bookings")
 public class BookingController {
 
     private final CurrentUser currentUser;
@@ -28,6 +33,9 @@ public class BookingController {
     }
 
     /** The soonest upcoming CONFIRMED booking. Returns {@code null} data if none exists. */
+    @Operation(
+            summary = "Next upcoming tour",
+            description = "The soonest upcoming CONFIRMED booking, or null data if none exists.")
     @GetMapping("/next-tour")
     public ApiEnvelope<BookingDetailResponse> getNextTour() {
         var user = currentUser.requireRole(UserRole.PARTICIPANT);
