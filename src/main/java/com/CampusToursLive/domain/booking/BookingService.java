@@ -79,6 +79,9 @@ public class BookingService {
     private static final Duration GUIDE_RESPONSE_WINDOW = Duration.ofMinutes(90);
     private static final Duration RESERVED_BUFFER_AFTER = Duration.ofMinutes(15);
 
+    /** Cap on free-text fields (participant notes, cancellation reason) — the columns are TEXT. */
+    private static final int MAX_FREE_TEXT_LENGTH = 1000;
+
     private static final String BOOKING_NUMBER_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final int BOOKING_NUMBER_LENGTH = 10;
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -175,7 +178,7 @@ public class BookingService {
         if (bookings
                 .existsByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
                         offering.getGuideId(), SLOT_HOLDING_STATUSES, reservedEnd, start)) {
-            throw new ValidationException("The guide is not available at that time");
+            throw new ValidationException("The guide already has a booking at that time");
         }
         if (bookings
                 .existsByParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
@@ -207,12 +210,13 @@ public class BookingService {
         b.setPlatformFeeCents(0L);
         b.setGuideAmountCents(offering.getPriceCents());
         b.setCurrency(offering.getCurrency());
-        if (req.participantNotes() != null && !req.participantNotes().isBlank()) {
-            b.setParticipantNotes(req.participantNotes().trim());
-        }
+        b.setParticipantNotes(cleanFreeText(req.participantNotes(), "participantNotes"));
 
         try {
-            bookings.save(b);
+            // Flush now (id is assigned, so save() alone would defer the INSERT to commit):
+            // the audit row's FK needs the booking row in place, and flushing here is what
+            // lets this catch actually see an exclusion-constraint race.
+            bookings.saveAndFlush(b);
         } catch (DataIntegrityViolationException raceLost) {
             // A concurrent request won the slot between our pre-check and the insert —
             // the exclusion constraint is the source of truth.
@@ -250,8 +254,8 @@ public class BookingService {
         b.setStatus(BookingStatus.CANCELLED_BY_PARTICIPANT);
         b.setCancellationActor(BookingActor.PARTICIPANT);
         b.setCancelledAt(Instant.now());
-        if (req != null && req.reason() != null && !req.reason().isBlank()) {
-            b.setCancellationReason(req.reason().trim());
+        if (req != null) {
+            b.setCancellationReason(cleanFreeText(req.reason(), "reason"));
         }
         bookings.save(b);
         recordTransition(b, previous, participant.getId(), "PARTICIPANT_CANCELLED");
@@ -338,6 +342,19 @@ public class BookingService {
                             RANDOM.nextInt(BOOKING_NUMBER_ALPHABET.length())));
         }
         return sb.toString();
+    }
+
+    /** Trim + length-cap optional free text; blank collapses to null. */
+    private static String cleanFreeText(String raw, String field) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.length() > MAX_FREE_TEXT_LENGTH) {
+            throw new ValidationException(
+                    field + " must be at most " + MAX_FREE_TEXT_LENGTH + " characters");
+        }
+        return trimmed;
     }
 
     /** Append one row to the booking_status_history audit trail. */

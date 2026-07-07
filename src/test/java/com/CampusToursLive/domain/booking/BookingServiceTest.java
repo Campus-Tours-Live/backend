@@ -491,7 +491,7 @@ class BookingServiceTest {
                                         "  meet at the fountain  "));
 
         ArgumentCaptor<BookingEntity> saved = ArgumentCaptor.forClass(BookingEntity.class);
-        verify(bookings).save(saved.capture());
+        verify(bookings).saveAndFlush(saved.capture());
         BookingEntity b = saved.getValue();
         assertEquals(BookingStatus.PENDING_GUIDE_ACCEPTANCE, b.getStatus());
         assertEquals(AcceptanceMode.MANUAL, b.getAcceptanceModeSnap());
@@ -544,7 +544,7 @@ class BookingServiceTest {
         service().createBooking(participant, validRequest(ctx, "   "));
 
         ArgumentCaptor<BookingEntity> saved = ArgumentCaptor.forClass(BookingEntity.class);
-        verify(bookings).save(saved.capture());
+        verify(bookings).saveAndFlush(saved.capture());
         assertNull(saved.getValue().getParticipantNotes());
     }
 
@@ -565,7 +565,7 @@ class BookingServiceTest {
                                 .createBooking(
                                         participant,
                                         new CreateBookingRequest("not-a-uuid", null, null, null)));
-        verify(bookings, never()).save(any());
+        verify(bookings, never()).saveAndFlush(any());
     }
 
     @Test
@@ -759,7 +759,7 @@ class BookingServiceTest {
         assertThrows(
                 ValidationException.class,
                 () -> service().createBooking(participant, validRequest(ctx, null)));
-        verify(bookings, never()).save(any());
+        verify(bookings, never()).saveAndFlush(any());
     }
 
     @Test
@@ -778,7 +778,7 @@ class BookingServiceTest {
         assertThrows(
                 ValidationException.class,
                 () -> service().createBooking(participant, validRequest(ctx, null)));
-        verify(bookings, never()).save(any());
+        verify(bookings, never()).saveAndFlush(any());
     }
 
     @Test
@@ -786,13 +786,42 @@ class BookingServiceTest {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
         Bookable ctx = stubBookableOffering();
         stubNoOverlaps();
-        when(bookings.save(any()))
+        when(bookings.saveAndFlush(any()))
                 .thenThrow(new DataIntegrityViolationException("excl_guide_no_overlap"));
 
         assertThrows(
                 ValidationException.class,
                 () -> service().createBooking(participant, validRequest(ctx, null)));
         verifyNoInteractions(statusHistory);
+    }
+
+    @Test
+    void createBooking_notesOverLengthCap_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().createBooking(participant, validRequest(ctx, "x".repeat(1001))));
+        verify(bookings, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void cancelBooking_reasonOverLengthCap_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity b = upcomingBooking(participant.getId(), BookingStatus.CONFIRMED);
+        when(bookings.findByIdAndParticipantUserId(b.getId(), participant.getId()))
+                .thenReturn(Optional.of(b));
+
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .cancelBooking(
+                                        participant,
+                                        b.getId(),
+                                        new CancelBookingRequest("x".repeat(1001))));
+        verify(bookings, never()).save(any());
     }
 
     // ── cancelBooking ────────────────────────────────────────────────────────

@@ -50,6 +50,16 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void optimisticLockConflict_mapsTo409() {
+        ProblemDetail pd =
+                handler.handleOptimisticLock(
+                        new org.springframework.dao.OptimisticLockingFailureException(
+                                "Row was updated or deleted by another transaction"));
+        assertEquals(409, pd.getStatus());
+        assertEquals("This resource was modified by another request — please retry", pd.getTitle());
+    }
+
+    @Test
     void genericException_mapsTo500AndHidesInternals() {
         ProblemDetail pd =
                 handler.handleGeneric(

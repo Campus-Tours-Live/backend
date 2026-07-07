@@ -6,6 +6,7 @@ import com.CampusToursLive.error.UnauthorizedException;
 import com.CampusToursLive.error.ValidationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -66,6 +67,17 @@ public class GlobalExceptionHandler {
         ProblemDetail pd = ProblemDetail.forStatus(status);
         pd.setTitle(title);
         return pd;
+    }
+
+    /**
+     * Optimistic-lock conflict — two requests updated the same row (@Version) concurrently and this
+     * one lost → 409, so clients retry instead of treating it as a server fault.
+     */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ProblemDetail handleOptimisticLock(OptimisticLockingFailureException ex) {
+        return problem(
+                HttpStatus.CONFLICT,
+                "This resource was modified by another request — please retry");
     }
 
     /**
