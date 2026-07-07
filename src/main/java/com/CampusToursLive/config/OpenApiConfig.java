@@ -3,6 +3,7 @@ package com.CampusToursLive.config;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
 import io.swagger.v3.oas.annotations.security.SecurityScheme;
 import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import org.springframework.context.annotation.Bean;
@@ -30,7 +31,11 @@ public class OpenApiConfig {
                                 .version("v1")
                                 .description(
                                         "Contract B — the REST API the BFF consumes (bookings,"
-                                                + " guides, tours, availability, etc.)."))
+                                                + " guides, tours, availability, etc.).")
+                                .contact(
+                                        new Contact()
+                                                .name("CampusToursLive")
+                                                .url("https://github.com/Campus-Tours-Live")))
                 .addSecurityItem(new SecurityRequirement().addList("bearerAuth"));
     }
 }

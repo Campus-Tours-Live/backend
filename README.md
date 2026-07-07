@@ -32,6 +32,7 @@ stateless Spring Boot service that validates a Google OIDC `id_token` on every r
   - [Database \& migrations](#database--migrations)
   - [Architecture](#architecture)
   - [API overview](#api-overview)
+  - [API documentation (OpenAPI / Swagger)](#api-documentation-openapi--swagger)
   - [Authentication \& roles](#authentication--roles)
   - [Code quality (format \& coverage)](#code-quality-format--coverage)
   - [Git hooks \& commit conventions](#git-hooks--commit-conventions)
@@ -211,6 +212,9 @@ curl -s -o /dev/null -w '%{http_code}\n' \
      http://localhost:8080/userinfo                  # 401 — security chain is up (unauthenticated)
 ```
 
+Then explore the API interactively at **<http://localhost:8080/swagger-ui.html>** (Swagger UI) — see
+[API documentation](#api-documentation-openapi--swagger).
+
 ---
 
 ## Configuration (environment variables)
@@ -366,6 +370,61 @@ curl -s "http://localhost:4000/v1/tours?sort=RECOMMENDED&limit=20" \
 
 See the endpoint tables above for the full request/response contract. Cross-repo integration (BFF
 `/v1` passthrough, frontend) is described in the PR that introduced this endpoint.
+
+---
+
+## API documentation (OpenAPI / Swagger)
+
+Contract B is documented as an **OpenAPI 3.1** spec, **auto-generated at runtime by springdoc** from
+the `@RestController` methods and DTO records — so it never drifts from the code. It is served by the
+app itself:
+
+- **Swagger UI** — <http://localhost:8080/swagger-ui.html> (interactive; browse + _Try it out_).
+- **Raw spec** — <http://localhost:8080/v3/api-docs>.
+
+You never edit a spec file — you annotate the Java (`@Operation` / `@Schema` / `@Parameter` /
+`@ApiResponse`). A **CI gate** (Spectral, folded into the required `Unit & Integration` job) fails the
+build if any operation or field is undocumented, so the docs stay complete. Full contributor guide:
+[`docs/openapi-conventions.md`](./docs/openapi-conventions.md).
+
+### Authorizing in Swagger — getting a `bearerAuth` token
+
+Every business endpoint needs a **Google OIDC `id_token`** as a Bearer JWT (see
+[Authentication & roles](#authentication--roles)). Swagger UI's **Authorize** → `bearerAuth` box wants
+that token. The BFF session cookie can't be reused here (it's encrypted, httpOnly, server-side), so
+mint a token directly with the [OAuth 2.0 Playground](https://developers.google.com/oauthplayground).
+
+**One-time setup** — let the Playground use our OAuth client:
+
+1. Open [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials) → the
+   OAuth 2.0 **Web** client (the `GOOGLE_CLIENT_ID` in `bff/.env`).
+2. Under **Authorized redirect URIs**, add `https://developers.google.com/oauthplayground` → **Save**.
+   This is additive — it does not affect the BFF's own `localhost` callback.
+
+**Each time you need a token:**
+
+1. Open the [OAuth 2.0 Playground](https://developers.google.com/oauthplayground).
+2. **⚙️ (top-right) → tick "Use your own OAuth credentials"** → paste the `GOOGLE_CLIENT_ID` and
+   `GOOGLE_CLIENT_SECRET` from `bff/.env`. (This makes the token's `aud` match what the Core enforces —
+   skip it and the Core rejects the token.)
+3. **Step 1** → in the **"Input your own scopes"** field type `openid email profile` → **Authorize
+   APIs** → sign in / consent.
+4. **Step 2** → click **"Exchange authorization code for tokens"**.
+5. In the **Response** JSON, copy the **`id_token`** value (the `eyJ…` string — **not** `access_token`;
+   the Core validates the `id_token`).
+6. In [Swagger UI](http://localhost:8080/swagger-ui.html) → **Authorize** → paste it into `bearerAuth`
+   **without** a `Bearer ` prefix (Swagger adds it) → **Authorize**. Requests now send the token.
+
+The `id_token` expires after **~1 hour** — repeat steps 4–6 for a fresh one. (Local-only shortcut: run
+the Core with `GOOGLE_CLIENT_ID` unset to skip the `aud` check — but signature, issuer, and expiry are
+still enforced, so you still need a real, current Google `id_token`.)
+
+> **One token ≠ access to every endpoint.** The `id_token` identifies a **Google account**, not a
+> role — the Core reads _that account's_ roles from `user_roles` (never from the token; see
+> [Authentication & roles](#authentication--roles)). So a token minted from a PARTICIPANT-only account
+> gets **403 Forbidden** on guide/admin paths. To exercise a role-restricted endpoint (`/admin/*`, a
+> guide's offering activation, …) sign in — in step 3 above — with an account that actually holds the
+> required role (`PARTICIPANT` / `GUIDE` / `ADMIN` / `SUPPORT`), then use _that_ account's `id_token`.
 
 ---
 

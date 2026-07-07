@@ -35,6 +35,17 @@ manual step **inside the editor**:
 Notes: Cursor does **not** honor a skill's `tools:` allowlist. The project auto-install (the
 SessionStart hook, the launcher, `./skills`) only covers Claude/Codex — Cursor is manual.
 
+## OpenAPI / Contract B (auto-generated)
+
+Adding or changing a `@RestController` endpoint or a DTO **regenerates the OpenAPI spec
+automatically** from annotations (springdoc serves `/swagger-ui.html` + `/v3/api-docs`) — there is
+no hand-written spec, so no code↔spec drift. Annotate with `@Operation` / `@Schema` / `@Parameter`
+/ `@ApiResponse`, keep the `@SecurityScheme` bearer JWT and the doc-path `permitAll` intact. CI
+writes the spec to `target/openapi.json` during `./mvnw verify` and lints it with a **Spectral
+gate** that requires every operation (summary/description/tags/response example) and every schema
+field (description) to be documented. Run it locally with
+`npx @stoplight/spectral-cli lint target/openapi.json`. See `docs/openapi-conventions.md`.
+
 ## Cross-repo rule (read before changing backend)
 
 backend is the **contract origin** — a change to the REST contract / DTO / returned fields flows to

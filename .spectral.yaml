@@ -1,0 +1,67 @@
+# Spectral ruleset for the backend's springdoc-generated OpenAPI spec (Contract B).
+#
+# springdoc AUTO-generates target/openapi.json at runtime from the @RestController + DTO
+# annotations (there is no hand-written spec, so no code↔spec drift). This ruleset is a
+# COMPLETENESS / QUALITY gate: it fails CI when an operation or a schema field is under-documented.
+# The spec is produced by OpenApiDocsExportTest during `./mvnw verify`; lint it with
+# `npx @stoplight/spectral-cli lint target/openapi.json` (also run in CI). Mirrors bff/.spectral.yaml.
+extends: ["spectral:oas"]
+
+rules:
+  # Disabled: this rule can crash (nimma "Cannot read properties of null") traversing OAS 3.1
+  # nullable enums (`enum: [..., null]`). Harmless to disable — our enums have no real duplicates.
+  duplicated-entry-in-enum: off
+
+  # spectral:oas ships these as warnings — the backend treats them as hard requirements so every
+  # operation is self-describing. Each is satisfied by @Operation(summary/description) + @Tag.
+  operation-description: error
+  operation-tags: error
+  operation-tag-defined: error
+
+  # Every operation MUST have a non-empty summary (spectral:oas has no summary rule).
+  # Satisfied by @Operation(summary = ...).
+  operation-summary:
+    description: Every operation must have a non-empty summary.
+    message: "{{path}} — operation is missing a `summary`."
+    severity: error
+    given: "$.paths[*][get,put,post,delete,options,head,patch,trace]"
+    then:
+      field: summary
+      function: truthy
+
+  # Every operation MUST carry at least one tag (truthy catches missing; oas `operation-tags`
+  # above catches the empty-array case). Satisfied by @Tag on the controller class.
+  operation-has-tag:
+    description: Every operation must declare at least one tag.
+    message: "{{path}} — operation must declare at least one `tag`."
+    severity: error
+    given: "$.paths[*][get,put,post,delete,options,head,patch,trace]"
+    then:
+      field: tags
+      function: truthy
+
+  # Every response body (any media type that has content) MUST ship an example — exactly one of
+  # `example` / `examples`. Add @ApiResponse(content = @Content(examples = @ExampleObject(...)))
+  # for each response the operation declares (success + the 401/403/404/422 it really returns).
+  response-has-example:
+    description: Every response body must include an example (`example` or `examples`).
+    message: "{{path}} — response body must include an `example` or `examples`."
+    severity: error
+    given: "$.paths[*][*].responses[*].content[*]"
+    then:
+      function: xor
+      functionOptions:
+        properties: ["example", "examples"]
+
+  # Named component schemas that are plain objects MUST describe every own property, so the
+  # generated docs never show an undocumented field. Satisfied by @Schema(description = ...) on
+  # every DTO record component. (Ref-valued / composed schemas aren't `type: object` with
+  # `properties`, so they're naturally out of scope.)
+  schema-property-description:
+    description: Object-schema properties must have a description.
+    message: "#/components/schemas — a property is missing a `description`."
+    severity: error
+    given: "$.components.schemas[*][?(@.type=='object')].properties[*]"
+    then:
+      field: description
+      function: truthy

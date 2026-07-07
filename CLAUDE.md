@@ -76,6 +76,7 @@ command** (e.g. `/code-review`); `/plugin` only installs/manages plugins — it 
 | Fixing a red CI / failing build | `superpowers:systematic-debugging` † (reproduce locally: `./mvnw verify`) |
 | Debugging (any bug / test failure / unexpected behavior) | `superpowers:systematic-debugging` † |
 | Writing docs / README / OpenAPI | `doc-coauthoring` † |
+| Adding / changing a `@RestController` endpoint or a DTO | The OpenAPI spec (`/swagger-ui.html`, `/v3/api-docs`) **regenerates automatically** from annotations — annotate with `@Operation` / `@Schema` / `@Parameter` / `@ApiResponse`, keep the `@SecurityScheme` bearer JWT and the doc-path `permitAll` intact; the CI **Spectral gate** requires every operation + field to be documented. See `docs/openapi-conventions.md`. |
 | Reviewing your own or someone else's PR, before merging | `comprehensive-review`, `/code-review`; security via `/security-review` |
 | **"Live" real-time tours (WebSocket/streaming backend support)** | ⚠️ product core, **no skill and no infra yet** — always `superpowers:brainstorming` † and design before coding |
 

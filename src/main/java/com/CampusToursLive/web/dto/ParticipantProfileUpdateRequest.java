@@ -1,5 +1,7 @@
 package com.CampusToursLive.web.dto;
 
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
@@ -8,15 +10,96 @@ import java.util.List;
  * intendedMajor) + participant_profiles.interests JSON (universitiesOfInterest, topicsOfInterest,
  * accessibilityPreferences).
  */
+@Schema(
+        name = "ParticipantProfileUpdateRequest",
+        description = "Partial participant profile update. All fields optional.")
 public record ParticipantProfileUpdateRequest(
-        String firstName,
-        String lastName,
-        String displayName,
-        String participantType,
-        String gradeLevel,
-        String intendedMajor,
-        List<String> universitiesOfInterest,
-        List<String> topicsOfInterest,
-        String preferredLanguage,
-        String timezone,
-        String accessibilityPreferences) {}
+        @Schema(
+                        description = "First name.",
+                        example = "Sam",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String firstName,
+        @Schema(
+                        description = "Last name.",
+                        example = "Rivera",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String lastName,
+        @Schema(
+                        description = "Public display name.",
+                        example = "Sam Rivera",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String displayName,
+        @Schema(
+                        description = "Participant type (controlled vocabulary).",
+                        example = "PROSPECTIVE",
+                        allowableValues = {
+                            "HIGH_SCHOOL",
+                            "PROSPECTIVE",
+                            "TRANSFER",
+                            "INTERNATIONAL",
+                            "PARENT",
+                            "OTHER"
+                        },
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String participantType,
+        @Schema(
+                        description =
+                                "Grade / education level. Free-text (no controlled vocabulary);"
+                                        + " typical values include \"High school senior\","
+                                        + " \"College freshman\", or \"Graduate\".",
+                        example = "High school senior",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String gradeLevel,
+        @Schema(
+                        description = "Intended field of study.",
+                        example = "Computer Science",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String intendedMajor,
+        @ArraySchema(
+                        arraySchema =
+                                @Schema(
+                                        description =
+                                                "University ids the participant is interested in.",
+                                        requiredMode = Schema.RequiredMode.NOT_REQUIRED),
+                        schema =
+                                @Schema(
+                                        description = "University id (UUID).",
+                                        example = "u1a2c3d4-0000-4000-8000-000000000003"))
+                List<String> universitiesOfInterest,
+        @ArraySchema(
+                        arraySchema =
+                                @Schema(
+                                        description =
+                                                "Tour topic codes the participant is interested"
+                                                        + " in (controlled vocabulary).",
+                                        requiredMode = Schema.RequiredMode.NOT_REQUIRED),
+                        schema =
+                                @Schema(
+                                        description = "Tour topic code.",
+                                        example = "DORM_HOUSING",
+                                        allowableValues = {
+                                            "GENERAL_CAMPUS",
+                                            "DORM_HOUSING",
+                                            "DINING_STUDENT_LIFE",
+                                            "MAJOR_SPECIFIC",
+                                            "INTERNATIONAL_STUDENT",
+                                            "PARENT_FOCUSED",
+                                            "FRESHMAN",
+                                            "TRANSFER"
+                                        }))
+                List<String> topicsOfInterest,
+        @Schema(
+                        description = "Preferred BCP-47 language tag.",
+                        example = "en-US",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String preferredLanguage,
+        @Schema(
+                        description = "IANA timezone.",
+                        example = "America/New_York",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String timezone,
+        @Schema(
+                        description = "Free-form accessibility preferences (stored as JSON).",
+                        example = "wheelchair-access",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String accessibilityPreferences) {}
