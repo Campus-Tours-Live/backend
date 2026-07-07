@@ -219,4 +219,49 @@ public interface ApiExamples {
                     + "\"avgRating\":4.5,\"reviewCount\":12},"
                     + META
                     + "}";
+
+    String AVAILABILITY_RULE =
+            "{\"data\":{\"id\":\"a1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"dayOfWeek\":1,\"startLocal\":\"09:00\",\"endLocal\":\"17:00\","
+                    + "\"timezone\":\"America/Los_Angeles\",\"effectiveFrom\":\"2026-06-01\","
+                    + "\"effectiveTo\":null,\"active\":true,"
+                    + "\"createdAt\":\"2026-06-01T12:00:00Z\"},"
+                    + META
+                    + "}";
+
+    String AVAILABILITY_EXCEPTION =
+            "{\"data\":{\"id\":\"e1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"exceptionDate\":\"2026-07-04\",\"type\":\"UNAVAILABLE_ALL_DAY\","
+                    + "\"startLocal\":null,\"endLocal\":null,\"reason\":\"Holiday\","
+                    + "\"createdAt\":\"2026-06-15T12:00:00Z\"},"
+                    + META
+                    + "}";
+
+    String BOOKING_SETTINGS =
+            "{\"data\":{\"acceptanceMode\":\"MANUAL\",\"responseDeadlineMin\":90,"
+                    + "\"minNoticeMin\":1440,\"maxAdvanceDays\":30,\"bufferBeforeMin\":0,"
+                    + "\"bufferAfterMin\":15,\"durationsOffered\":[30,45,60,90],"
+                    + "\"timezone\":\"America/Los_Angeles\"},"
+                    + META
+                    + "}";
+
+    String AVAILABILITY_SUMMARY =
+            "{\"data\":{\"rules\":[{\"id\":\"a1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"dayOfWeek\":1,\"startLocal\":\"09:00\",\"endLocal\":\"17:00\","
+                    + "\"timezone\":\"America/Los_Angeles\",\"effectiveFrom\":\"2026-06-01\","
+                    + "\"effectiveTo\":null,\"active\":true,"
+                    + "\"createdAt\":\"2026-06-01T12:00:00Z\"}],"
+                    + "\"exceptions\":[{\"id\":\"e1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"exceptionDate\":\"2026-07-04\",\"type\":\"UNAVAILABLE_ALL_DAY\","
+                    + "\"startLocal\":null,\"endLocal\":null,\"reason\":\"Holiday\","
+                    + "\"createdAt\":\"2026-06-15T12:00:00Z\"}],"
+                    + "\"bookingSettings\":{\"acceptanceMode\":\"MANUAL\","
+                    + "\"responseDeadlineMin\":90,\"minNoticeMin\":1440,\"maxAdvanceDays\":30,"
+                    + "\"bufferBeforeMin\":0,\"bufferAfterMin\":15,"
+                    + "\"durationsOffered\":[30,45,60,90],"
+                    + "\"timezone\":\"America/Los_Angeles\"}},"
+                    + META
+                    + "}";
+
+    String ENVELOPE_NULL = "{\"data\":null," + META + "}";
 }
