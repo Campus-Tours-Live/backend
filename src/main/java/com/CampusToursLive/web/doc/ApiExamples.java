@@ -29,6 +29,10 @@ public interface ApiExamples {
             "{\"type\":\"about:blank\",\"title\":\"Not found\",\"status\":404,"
                     + "\"detail\":\"The requested resource does not exist.\"}";
 
+    String PROBLEM_409 =
+            "{\"type\":\"about:blank\",\"title\":\"This resource was modified by another request —"
+                    + " please retry\",\"status\":409}";
+
     String PROBLEM_422 =
             "{\"type\":\"about:blank\",\"title\":\"Validation failed\",\"status\":422,"
                     + "\"detail\":\"One or more fields are invalid.\"}";
@@ -60,6 +64,18 @@ public interface ApiExamples {
                     + "}";
 
     String NEXT_TOUR_EMPTY = "{\"data\":null," + META + "}";
+
+    String BOOKING_CANCELLED =
+            "{\"data\":{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"status\":\"CANCELLED\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
+                    + "\"timezone\":\"America/Los_Angeles\","
+                    + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
+                    + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
+                    + "\"guideResponseDeadline\":null,"
+                    + "\"universityName\":\"North Coast University\",\"durationMin\":60,"
+                    + "\"priceCents\":4200,\"currency\":\"USD\"},"
+                    + META
+                    + "}";
 
     String PENDING_ACTIONS =
             "{\"data\":{\"paymentsToFinish\":1,\"waitingForGuide\":2,\"reviewsToWrite\":0},"

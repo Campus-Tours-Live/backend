@@ -8,6 +8,8 @@ import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.dto.BookingDetailResponse;
+import com.CampusToursLive.web.dto.CancelBookingRequest;
+import com.CampusToursLive.web.dto.CreateBookingRequest;
 import com.CampusToursLive.web.dto.PendingActionsResponse;
 import java.time.Instant;
 import java.util.List;
@@ -106,5 +108,49 @@ class BookingControllerTest {
         when(bookingService.getPendingActions(u.getId())).thenReturn(counts);
 
         assertSame(counts, controller().getPendingActions().data());
+    }
+
+    // ── create ───────────────────────────────────────────────────────────────
+
+    @Test
+    void create_requiresParticipantRole_andWrapsResultInEnvelope() {
+        UserEntity u = participantUser();
+        CreateBookingRequest req =
+                new CreateBookingRequest(
+                        UUID.randomUUID().toString(),
+                        "2026-07-10T17:00:00Z",
+                        "America/Los_Angeles",
+                        null);
+        BookingDetailResponse detail = mockDetail();
+        when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
+        when(bookingService.createBooking(u, req)).thenReturn(detail);
+
+        assertSame(detail, controller().create(req).data());
+        verify(bookingService).createBooking(u, req);
+    }
+
+    // ── cancel ───────────────────────────────────────────────────────────────
+
+    @Test
+    void cancel_requiresParticipantRole_andWrapsResultInEnvelope() {
+        UserEntity u = participantUser();
+        UUID bookingId = UUID.randomUUID();
+        CancelBookingRequest req = new CancelBookingRequest("plans changed");
+        BookingDetailResponse detail = mockDetail();
+        when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
+        when(bookingService.cancelBooking(u, bookingId, req)).thenReturn(detail);
+
+        assertSame(detail, controller().cancel(bookingId, req).data());
+    }
+
+    @Test
+    void cancel_acceptsMissingBody() {
+        UserEntity u = participantUser();
+        UUID bookingId = UUID.randomUUID();
+        BookingDetailResponse detail = mockDetail();
+        when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
+        when(bookingService.cancelBooking(u, bookingId, null)).thenReturn(detail);
+
+        assertSame(detail, controller().cancel(bookingId, null).data());
     }
 }
