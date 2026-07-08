@@ -928,6 +928,317 @@ class BookingServiceTest {
         verify(bookings, never()).save(any());
     }
 
+    // ── addCartItem ──────────────────────────────────────────────────────────
+
+    @Test
+    void addCartItem_savesDraft_withoutDeadline_andAuditRow() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        when(users.findById(ctx.guideUserId()))
+                .thenReturn(Optional.of(user(ctx.guideUserId(), "G")));
+        when(bookings.countByParticipantUserIdAndStatus(participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(0L);
+        stubNoOverlaps();
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of());
+
+        BookingDetailResponse resp = service().addCartItem(participant, validRequest(ctx, null));
+
+        ArgumentCaptor<BookingEntity> saved = ArgumentCaptor.forClass(BookingEntity.class);
+        verify(bookings).saveAndFlush(saved.capture());
+        assertEquals(BookingStatus.DRAFT, saved.getValue().getStatus());
+        assertNull(saved.getValue().getGuideResponseDeadlineAt());
+        assertEquals("DRAFT", resp.status());
+
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory).save(audit.capture());
+        assertNull(audit.getValue().getPreviousStatus());
+        assertEquals(BookingStatus.DRAFT, audit.getValue().getNewStatus());
+        assertEquals("CART_ITEM_ADDED", audit.getValue().getReasonCode());
+    }
+
+    @Test
+    void addCartItem_fullCart_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        when(bookings.countByParticipantUserIdAndStatus(participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(10L);
+
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .addCartItem(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                UUID.randomUUID().toString(), null, null, null)));
+        verify(bookings, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void addCartItem_conflictWithHeldBooking_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        when(bookings.countByParticipantUserIdAndStatus(participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(0L);
+        when(bookings
+                        .existsByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
+                                eq(ctx.guideProfileId()), any(), any(), any()))
+                .thenReturn(true);
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().addCartItem(participant, validRequest(ctx, null)));
+        verify(bookings, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void addCartItem_conflictWithAnotherCartItem_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        when(bookings.countByParticipantUserIdAndStatus(participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(1L);
+        stubNoOverlaps();
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(draftItem(participant.getId(), start, 60)));
+
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .addCartItem(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                ctx.offeringId().toString(),
+                                                start.toString(),
+                                                "UTC",
+                                                null)));
+        verify(bookings, never()).saveAndFlush(any());
+    }
+
+    // ── getCart / removeCartItem ─────────────────────────────────────────────
+
+    @Test
+    void getCart_returnsDraftItems_withDraftDisplayStatus() {
+        UUID uid = UUID.randomUUID();
+        BookingEntity item = upcomingBooking(uid, BookingStatus.DRAFT);
+        stubDetailLookups(item);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(uid, BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+
+        List<BookingDetailResponse> cart = service().getCart(uid);
+        assertEquals(1, cart.size());
+        assertEquals("DRAFT", cart.get(0).status());
+    }
+
+    @Test
+    void removeCartItem_deletesDraft_andReturnsRemainingCart() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity item = upcomingBooking(participant.getId(), BookingStatus.DRAFT);
+        when(bookings.findByIdAndParticipantUserIdAndStatus(
+                        item.getId(), participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(Optional.of(item));
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of());
+
+        assertTrue(service().removeCartItem(participant, item.getId()).isEmpty());
+        verify(bookings).delete(item);
+    }
+
+    @Test
+    void removeCartItem_unknownOrNonDraft_isNotFound() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        UUID itemId = UUID.randomUUID();
+        when(bookings.findByIdAndParticipantUserIdAndStatus(
+                        itemId, participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(Optional.empty());
+
+        assertThrows(NotFoundException.class, () -> service().removeCartItem(participant, itemId));
+        verify(bookings, never()).delete(any());
+    }
+
+    // ── checkout ─────────────────────────────────────────────────────────────
+
+    @Test
+    void checkout_flipsAllDraftsToPending_withDeadlinesAndAuditRows() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Instant start1 = Instant.now().plus(3, ChronoUnit.DAYS);
+        Instant start2 = Instant.now().plus(5, ChronoUnit.DAYS);
+        BookingEntity i1 = draftItem(participant.getId(), start1, 60);
+        BookingEntity i2 = draftItem(participant.getId(), start2, 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(i1, i2));
+        UUID gu1 = stubCheckoutLookups(i1, TourStatus.ACTIVE);
+        UUID gu2 = stubCheckoutLookups(i2, TourStatus.ACTIVE);
+        when(users.findById(gu1)).thenReturn(Optional.of(user(gu1, "G1")));
+        when(users.findById(gu2)).thenReturn(Optional.of(user(gu2, "G2")));
+        stubNoOverlaps();
+        when(bookings.saveAllAndFlush(any())).thenReturn(List.of(i1, i2));
+
+        List<BookingDetailResponse> resp = service().checkout(participant);
+
+        assertEquals(2, resp.size());
+        assertEquals(BookingStatus.PENDING_GUIDE_ACCEPTANCE, i1.getStatus());
+        assertEquals(BookingStatus.PENDING_GUIDE_ACCEPTANCE, i2.getStatus());
+        assertNotNull(i1.getGuideResponseDeadlineAt());
+        assertNotNull(i2.getGuideResponseDeadlineAt());
+        assertEquals("WAITING_FOR_GUIDE", resp.get(0).status());
+
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory, times(2)).save(audit.capture());
+        assertEquals(BookingStatus.DRAFT, audit.getAllValues().get(0).getPreviousStatus());
+        assertEquals("CART_CHECKOUT", audit.getAllValues().get(0).getReasonCode());
+    }
+
+    @Test
+    void checkout_emptyCart_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of());
+
+        assertThrows(ValidationException.class, () -> service().checkout(participant));
+        verify(bookings, never()).saveAllAndFlush(any());
+    }
+
+    @Test
+    void checkout_staleItemInsideNoticeWindow_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity stale =
+                draftItem(participant.getId(), Instant.now().plus(2, ChronoUnit.HOURS), 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(stale));
+        stubCheckoutLookups(stale, TourStatus.ACTIVE);
+
+        assertThrows(ValidationException.class, () -> service().checkout(participant));
+        verify(bookings, never()).saveAllAndFlush(any());
+    }
+
+    @Test
+    void checkout_offeringNoLongerActive_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity item =
+                draftItem(participant.getId(), Instant.now().plus(3, ChronoUnit.DAYS), 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        stubCheckoutLookups(item, TourStatus.PAUSED);
+
+        ValidationException ex =
+                assertThrows(ValidationException.class, () -> service().checkout(participant));
+        assertTrue(ex.getMessage().contains(item.getBookingNumber()));
+        assertEquals(BookingStatus.DRAFT, item.getStatus());
+    }
+
+    @Test
+    void checkout_itemsOverlappingEachOther_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS);
+        BookingEntity i1 = draftItem(participant.getId(), start, 60);
+        BookingEntity i2 = draftItem(participant.getId(), start.plus(30, ChronoUnit.MINUTES), 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(i1, i2));
+        stubCheckoutLookups(i1, TourStatus.ACTIVE);
+        stubCheckoutLookups(i2, TourStatus.ACTIVE);
+        stubNoOverlaps();
+
+        assertThrows(ValidationException.class, () -> service().checkout(participant));
+        verify(bookings, never()).saveAllAndFlush(any());
+    }
+
+    @Test
+    void checkout_lostSlotRace_rollsBackWholeCart_andWritesNoAudit() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity item =
+                draftItem(participant.getId(), Instant.now().plus(3, ChronoUnit.DAYS), 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        stubCheckoutLookups(item, TourStatus.ACTIVE);
+        stubNoOverlaps();
+        when(bookings.saveAllAndFlush(any()))
+                .thenThrow(new DataIntegrityViolationException("excl_guide_no_overlap"));
+
+        assertThrows(ValidationException.class, () -> service().checkout(participant));
+        verifyNoInteractions(statusHistory);
+    }
+
+    @Test
+    void checkout_reSnapshotsPriceAndDuration_fromCurrentOffering() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
+        // Carted at 60 min / 5000¢; the offering has since changed to 30 min / 9000¢.
+        BookingEntity item = draftItem(participant.getId(), start, 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        UUID gu = stubCheckoutLookups(item, TourStatus.ACTIVE, 30, 9000L);
+        when(users.findById(gu)).thenReturn(Optional.of(user(gu, "G")));
+        stubNoOverlaps();
+        when(bookings.saveAllAndFlush(any())).thenReturn(List.of(item));
+
+        List<BookingDetailResponse> resp = service().checkout(participant);
+
+        assertEquals(9000L, item.getBasePriceCents());
+        assertEquals(9000L, item.getTotalCents());
+        assertEquals(9000L, item.getGuideAmountCents());
+        assertEquals(start.plus(30, ChronoUnit.MINUTES), item.getScheduledEndAt());
+        assertEquals(start.plus(45, ChronoUnit.MINUTES), item.getReservedEndAt());
+        assertEquals(30, resp.get(0).durationMin());
+        assertEquals(9000L, resp.get(0).priceCents());
+    }
+
+    @Test
+    void checkout_guideNoLongerApproved_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity item =
+                draftItem(participant.getId(), Instant.now().plus(3, ChronoUnit.DAYS), 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        TourOfferingEntity o = offering(item.getTourOfferingId(), "Tour");
+        o.setStatus(TourStatus.ACTIVE);
+        o.setGuideId(item.getGuideId());
+        o.setUniversityId(item.getUniversityId());
+        when(offerings.findById(item.getTourOfferingId())).thenReturn(Optional.of(o));
+        GuideProfileEntity g = guideProfile(item.getGuideId(), UUID.randomUUID());
+        g.setApplicationStatus(GuideApplicationStatus.SUSPENDED);
+        when(guides.findById(item.getGuideId())).thenReturn(Optional.of(g));
+
+        ValidationException ex =
+                assertThrows(ValidationException.class, () -> service().checkout(participant));
+        assertTrue(ex.getMessage().contains(item.getBookingNumber()));
+        verify(bookings, never()).saveAllAndFlush(any());
+    }
+
+    @Test
+    void checkout_sameGuideBufferOverlap_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
+        // Back-to-back with the SAME guide: scheduled windows touch but don't overlap, yet the
+        // 15-min post-tour buffer makes the reserved intervals collide (guideClash only).
+        BookingEntity i1 = draftItem(participant.getId(), start, 60);
+        BookingEntity i2 = draftItem(participant.getId(), start.plus(60, ChronoUnit.MINUTES), 60);
+        i2.setGuideId(i1.getGuideId());
+        i2.setTourOfferingId(i1.getTourOfferingId());
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(i1, i2));
+        stubCheckoutLookups(i1, TourStatus.ACTIVE);
+        stubNoOverlaps();
+
+        assertThrows(ValidationException.class, () -> service().checkout(participant));
+        verify(bookings, never()).saveAllAndFlush(any());
+    }
+
     // ── write-test fixtures ──────────────────────────────────────────────────
 
     /** Ids of a fully bookable offering wired into the lookup mocks. */
@@ -999,6 +1310,55 @@ class BookingServiceTest {
                         start.plus(60, ChronoUnit.MINUTES));
         b.setParticipantUserId(participantUserId);
         return b;
+    }
+
+    /** An unsaved DRAFT cart item owned by the participant (random offering/guide/university). */
+    private static BookingEntity draftItem(UUID participantUserId, Instant start, int minutes) {
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.DRAFT,
+                        start,
+                        start.plus(minutes, ChronoUnit.MINUTES));
+        b.setParticipantUserId(participantUserId);
+        b.setBookingNumber("BK-" + b.getId().toString().substring(0, 8).toUpperCase());
+        b.setReservedStartAt(start);
+        b.setReservedEndAt(start.plus(minutes + 15, ChronoUnit.MINUTES));
+        return b;
+    }
+
+    /**
+     * Stubs the offering lookup (in the given status, wired to the item's guide/university ids)
+     * plus, for ACTIVE offerings, an APPROVED guide and an ACTIVE university. Returns the guide's
+     * user id so happy-path tests can stub the display-name lookup.
+     */
+    private UUID stubCheckoutLookups(BookingEntity b, TourStatus offeringStatus) {
+        return stubCheckoutLookups(b, offeringStatus, 60, 5000L);
+    }
+
+    /** Same, with an explicit current duration/price (checkout re-snapshots these). */
+    private UUID stubCheckoutLookups(
+            BookingEntity b, TourStatus offeringStatus, int durationMin, long priceCents) {
+        TourOfferingEntity o = offering(b.getTourOfferingId(), "Campus Walk");
+        o.setStatus(offeringStatus);
+        o.setGuideId(b.getGuideId());
+        o.setUniversityId(b.getUniversityId());
+        o.setDurationMin(durationMin);
+        o.setPriceCents(priceCents);
+        when(offerings.findById(b.getTourOfferingId())).thenReturn(Optional.of(o));
+        UUID guideUserId = UUID.randomUUID();
+        if (offeringStatus == TourStatus.ACTIVE) {
+            GuideProfileEntity g = guideProfile(b.getGuideId(), guideUserId);
+            g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+            when(guides.findById(b.getGuideId())).thenReturn(Optional.of(g));
+            UniversityEntity u = university(b.getUniversityId(), "Test University");
+            u.setStatus(UniversityStatus.ACTIVE);
+            when(universities.findById(b.getUniversityId())).thenReturn(Optional.of(u));
+        }
+        return guideUserId;
     }
 
     /** Stubs the three name-resolution lookups used by toDetailResponse for this booking. */

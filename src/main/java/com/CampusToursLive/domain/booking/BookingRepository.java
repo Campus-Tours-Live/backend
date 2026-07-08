@@ -36,6 +36,17 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
     /** A participant's own booking — scopes every write so users can only touch their own rows. */
     Optional<BookingEntity> findByIdAndParticipantUserId(UUID id, UUID participantUserId);
 
+    /** One cart item: the participant's own booking in a given status (cart = status DRAFT). */
+    Optional<BookingEntity> findByIdAndParticipantUserIdAndStatus(
+            UUID id, UUID participantUserId, BookingStatus status);
+
+    /** All of a participant's bookings in one status, oldest first (cart listing / checkout). */
+    List<BookingEntity> findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+            UUID participantUserId, BookingStatus status);
+
+    /** Cart size, for the max-items cap. */
+    long countByParticipantUserIdAndStatus(UUID participantUserId, BookingStatus status);
+
     /**
      * Does any slot-holding booking already reserve part of [{@code newStart}, {@code newEnd}) for
      * this guide? Two intervals overlap iff existing.start &lt; new.end AND existing.end &gt;

@@ -25,6 +25,7 @@ public enum BookingStatus {
      */
     public String displayStatus() {
         return switch (this) {
+            case DRAFT -> "DRAFT";
             case PENDING_PAYMENT_AUTH, PAYMENT_ACTION_REQUIRED -> "PENDING_PAYMENT";
             case PENDING_GUIDE_ACCEPTANCE -> "WAITING_FOR_GUIDE";
             case CONFIRMED -> "CONFIRMED";

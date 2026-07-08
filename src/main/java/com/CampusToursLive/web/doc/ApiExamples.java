@@ -77,6 +77,44 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String CART_LIST =
+            "{\"data\":[{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"status\":\"DRAFT\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
+                    + "\"timezone\":\"America/Los_Angeles\","
+                    + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
+                    + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
+                    + "\"guideResponseDeadline\":null,"
+                    + "\"universityName\":\"North Coast University\",\"durationMin\":60,"
+                    + "\"priceCents\":4200,\"currency\":\"USD\"}],"
+                    + META
+                    + "}";
+
+    String CART_EMPTY = "{\"data\":[]," + META + "}";
+
+    String CART_ITEM_DRAFT =
+            "{\"data\":{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"status\":\"DRAFT\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
+                    + "\"timezone\":\"America/Los_Angeles\","
+                    + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
+                    + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
+                    + "\"guideResponseDeadline\":null,"
+                    + "\"universityName\":\"North Coast University\",\"durationMin\":60,"
+                    + "\"priceCents\":4200,\"currency\":\"USD\"},"
+                    + META
+                    + "}";
+
+    String CART_CHECKOUT_RESULT =
+            "{\"data\":[{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"status\":\"WAITING_FOR_GUIDE\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
+                    + "\"timezone\":\"America/Los_Angeles\","
+                    + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
+                    + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
+                    + "\"guideResponseDeadline\":\"2026-07-30T15:00:00Z\","
+                    + "\"universityName\":\"North Coast University\",\"durationMin\":60,"
+                    + "\"priceCents\":4200,\"currency\":\"USD\"}],"
+                    + META
+                    + "}";
+
     String PENDING_ACTIONS =
             "{\"data\":{\"paymentsToFinish\":1,\"waitingForGuide\":2,\"reviewsToWrite\":0},"
                     + META
