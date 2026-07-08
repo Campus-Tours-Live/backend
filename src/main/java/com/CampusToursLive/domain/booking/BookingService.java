@@ -277,8 +277,12 @@ public class BookingService {
             throw new ValidationException("Your cart is empty");
         }
         Instant now = Instant.now();
+        // Re-validate (and re-snapshot) every item first, THEN cross-check overlaps: the
+        // re-snapshot can change an item's duration, which changes what overlaps what.
         for (BookingEntity b : items) {
             revalidateCartItem(b, now);
+        }
+        for (BookingEntity b : items) {
             requireNoHeldOverlaps(b);
             requireNoCartOverlaps(b, items);
         }
@@ -401,6 +405,10 @@ public class BookingService {
      * Checkout-time re-validation: the offering/guide/university may have changed while the item
      * sat in the cart, and the start may have drifted inside the minimum-notice window. (The
      * max-advance bound can only become MORE satisfied over time, so it is not rechecked.)
+     *
+     * <p>Also RE-SNAPSHOTS price, currency, and duration from the offering as it stands now — a
+     * DRAFT is not a commitment, so the participant commits to the current terms at checkout, not
+     * the ones from add-to-cart time.
      */
     private void revalidateCartItem(BookingEntity b, Instant now) {
         TourOfferingEntity offering =
@@ -428,6 +436,15 @@ public class BookingService {
                             + MIN_NOTICE.toHours()
                             + " hours notice");
         }
+
+        // Commitment-time snapshot (fees stay zero until payments are built).
+        b.setBasePriceCents(offering.getPriceCents());
+        b.setTotalCents(offering.getPriceCents());
+        b.setGuideAmountCents(offering.getPriceCents());
+        b.setCurrency(offering.getCurrency());
+        Instant end = b.getScheduledStartAt().plus(Duration.ofMinutes(offering.getDurationMin()));
+        b.setScheduledEndAt(end);
+        b.setReservedEndAt(end.plus(RESERVED_BUFFER_AFTER));
     }
 
     private List<BookingEntity> cartItems(UUID participantUserId) {

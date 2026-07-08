@@ -1147,6 +1147,7 @@ class BookingServiceTest {
                         participant.getId(), BookingStatus.DRAFT))
                 .thenReturn(List.of(i1, i2));
         stubCheckoutLookups(i1, TourStatus.ACTIVE);
+        stubCheckoutLookups(i2, TourStatus.ACTIVE);
         stubNoOverlaps();
 
         assertThrows(ValidationException.class, () -> service().checkout(participant));
@@ -1168,6 +1169,74 @@ class BookingServiceTest {
 
         assertThrows(ValidationException.class, () -> service().checkout(participant));
         verifyNoInteractions(statusHistory);
+    }
+
+    @Test
+    void checkout_reSnapshotsPriceAndDuration_fromCurrentOffering() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
+        // Carted at 60 min / 5000¢; the offering has since changed to 30 min / 9000¢.
+        BookingEntity item = draftItem(participant.getId(), start, 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        UUID gu = stubCheckoutLookups(item, TourStatus.ACTIVE, 30, 9000L);
+        when(users.findById(gu)).thenReturn(Optional.of(user(gu, "G")));
+        stubNoOverlaps();
+        when(bookings.saveAllAndFlush(any())).thenReturn(List.of(item));
+
+        List<BookingDetailResponse> resp = service().checkout(participant);
+
+        assertEquals(9000L, item.getBasePriceCents());
+        assertEquals(9000L, item.getTotalCents());
+        assertEquals(9000L, item.getGuideAmountCents());
+        assertEquals(start.plus(30, ChronoUnit.MINUTES), item.getScheduledEndAt());
+        assertEquals(start.plus(45, ChronoUnit.MINUTES), item.getReservedEndAt());
+        assertEquals(30, resp.get(0).durationMin());
+        assertEquals(9000L, resp.get(0).priceCents());
+    }
+
+    @Test
+    void checkout_guideNoLongerApproved_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity item =
+                draftItem(participant.getId(), Instant.now().plus(3, ChronoUnit.DAYS), 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        TourOfferingEntity o = offering(item.getTourOfferingId(), "Tour");
+        o.setStatus(TourStatus.ACTIVE);
+        o.setGuideId(item.getGuideId());
+        o.setUniversityId(item.getUniversityId());
+        when(offerings.findById(item.getTourOfferingId())).thenReturn(Optional.of(o));
+        GuideProfileEntity g = guideProfile(item.getGuideId(), UUID.randomUUID());
+        g.setApplicationStatus(GuideApplicationStatus.SUSPENDED);
+        when(guides.findById(item.getGuideId())).thenReturn(Optional.of(g));
+
+        ValidationException ex =
+                assertThrows(ValidationException.class, () -> service().checkout(participant));
+        assertTrue(ex.getMessage().contains(item.getBookingNumber()));
+        verify(bookings, never()).saveAllAndFlush(any());
+    }
+
+    @Test
+    void checkout_sameGuideBufferOverlap_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
+        // Back-to-back with the SAME guide: scheduled windows touch but don't overlap, yet the
+        // 15-min post-tour buffer makes the reserved intervals collide (guideClash only).
+        BookingEntity i1 = draftItem(participant.getId(), start, 60);
+        BookingEntity i2 = draftItem(participant.getId(), start.plus(60, ChronoUnit.MINUTES), 60);
+        i2.setGuideId(i1.getGuideId());
+        i2.setTourOfferingId(i1.getTourOfferingId());
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(i1, i2));
+        stubCheckoutLookups(i1, TourStatus.ACTIVE);
+        stubNoOverlaps();
+
+        assertThrows(ValidationException.class, () -> service().checkout(participant));
+        verify(bookings, never()).saveAllAndFlush(any());
     }
 
     // ── write-test fixtures ──────────────────────────────────────────────────
@@ -1267,10 +1336,18 @@ class BookingServiceTest {
      * user id so happy-path tests can stub the display-name lookup.
      */
     private UUID stubCheckoutLookups(BookingEntity b, TourStatus offeringStatus) {
+        return stubCheckoutLookups(b, offeringStatus, 60, 5000L);
+    }
+
+    /** Same, with an explicit current duration/price (checkout re-snapshots these). */
+    private UUID stubCheckoutLookups(
+            BookingEntity b, TourStatus offeringStatus, int durationMin, long priceCents) {
         TourOfferingEntity o = offering(b.getTourOfferingId(), "Campus Walk");
         o.setStatus(offeringStatus);
         o.setGuideId(b.getGuideId());
         o.setUniversityId(b.getUniversityId());
+        o.setDurationMin(durationMin);
+        o.setPriceCents(priceCents);
         when(offerings.findById(b.getTourOfferingId())).thenReturn(Optional.of(o));
         UUID guideUserId = UUID.randomUUID();
         if (offeringStatus == TourStatus.ACTIVE) {
