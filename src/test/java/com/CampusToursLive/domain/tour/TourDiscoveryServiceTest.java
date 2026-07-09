@@ -1,6 +1,7 @@
 package com.CampusToursLive.domain.tour;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -258,5 +259,170 @@ class TourDiscoveryServiceTest {
         when(universities.findAllById(List.of(univId))).thenReturn(List.of());
 
         assertThrows(NotFoundException.class, () -> service().getById(oid));
+    }
+
+    // ---- parse edge cases ----
+
+    @Test
+    void list_parsesValidUniversityId_andTreatsNullQueryAsEmpty() {
+        UUID univId = UUID.randomUUID();
+        when(offerings.findDiscoverable(eq(univId), eq(null), eq(""), any(Pageable.class)))
+                .thenReturn(List.of());
+
+        service().list(univId.toString(), null, null, TourDiscoverySort.RECOMMENDED, 20);
+
+        verify(offerings).findDiscoverable(eq(univId), eq(null), eq(""), any(Pageable.class));
+    }
+
+    @Test
+    void list_treatsBlankUniversityIdAndTopicAsAbsent() {
+        when(offerings.findDiscoverable(eq(null), eq(null), eq(""), any(Pageable.class)))
+                .thenReturn(List.of());
+
+        service().list("   ", "   ", "", TourDiscoverySort.RECOMMENDED, 20);
+
+        verify(offerings).findDiscoverable(eq(null), eq(null), eq(""), any(Pageable.class));
+    }
+
+    @Test
+    void parseSort_defaultsToRecommended_whenNull() {
+        assertEquals(TourDiscoverySort.RECOMMENDED, TourDiscoveryService.parseSort(null));
+    }
+
+    @Test
+    void parseSort_parsesValidValueCaseInsensitively() {
+        assertEquals(TourDiscoverySort.PRICE_ASC, TourDiscoveryService.parseSort("price_asc"));
+    }
+
+    // ---- toSummary / toDetail fallbacks (null topic, missing guide user) ----
+
+    @Test
+    void list_nullTopic_andMissingGuideUser_useFallbacks() {
+        UUID oid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uid = UUID.randomUUID();
+        UUID univId = UUID.randomUUID();
+        TourOfferingEntity row = offering(oid, gid, univId);
+        row.setTopic(null);
+        when(offerings.findDiscoverable(eq(null), eq(null), eq(""), any(Pageable.class)))
+                .thenReturn(List.of(row));
+        stubGuideUserUniversity(gid, uid, univId, false);
+
+        List<TourSummaryResponse> res =
+                service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 20);
+
+        assertEquals(1, res.size());
+        assertNull(res.get(0).topic());
+        assertEquals("Guide", res.get(0).guideDisplayName());
+    }
+
+    @Test
+    void getById_nullTopic_missingUser_nullLanguages_useFallbacks() {
+        UUID oid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uid = UUID.randomUUID();
+        UUID univId = UUID.randomUUID();
+        TourOfferingEntity row = offering(oid, gid, univId);
+        row.setTopic(null);
+        row.setLanguages(null);
+        when(offerings.findDiscoverableById(oid)).thenReturn(Optional.of(row));
+        stubGuideUserUniversity(gid, uid, univId, false);
+
+        TourDetailResponse res = service().getById(oid);
+
+        assertNull(res.topic());
+        assertEquals("Guide", res.guideDisplayName());
+        assertEquals(List.of(), res.languages());
+    }
+
+    @Test
+    void getById_throws404_whenUniversityMissingFromLookup() {
+        UUID oid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uid = UUID.randomUUID();
+        UUID univId = UUID.randomUUID();
+        when(offerings.findDiscoverableById(oid))
+                .thenReturn(Optional.of(offering(oid, gid, univId)));
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(gid);
+        guide.setUserId(uid);
+        when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
+        when(universities.findAllById(List.of(univId))).thenReturn(List.of());
+
+        assertThrows(NotFoundException.class, () -> service().getById(oid));
+    }
+
+    @Test
+    void getById_nullAvgRating_yieldsZero() {
+        UUID oid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uid = UUID.randomUUID();
+        UUID univId = UUID.randomUUID();
+        TourOfferingEntity row = offering(oid, gid, univId);
+        row.setAvgRating(null);
+        when(offerings.findDiscoverableById(oid)).thenReturn(Optional.of(row));
+        stubGuideUserUniversity(gid, uid, univId, true);
+
+        assertEquals(0.0, service().getById(oid).avgRating());
+    }
+
+    // ---- readLanguages branches ----
+
+    @Test
+    void getById_blankLanguages_yieldEmptyList() {
+        assertEquals(List.of(), detailWithLanguages("   ").languages());
+    }
+
+    @Test
+    void getById_malformedLanguages_yieldEmptyList() {
+        assertEquals(List.of(), detailWithLanguages("not-json").languages());
+    }
+
+    @Test
+    void getById_jsonNullLanguages_yieldEmptyList() {
+        assertEquals(List.of(), detailWithLanguages("null").languages());
+    }
+
+    @Test
+    void getById_filtersNullAndBlankLanguageEntries() {
+        TourDetailResponse res = detailWithLanguages("[\"en-US\", null, \"  \", \"fr-FR\"]");
+        assertEquals(List.of("en-US", "fr-FR"), res.languages());
+    }
+
+    // ---- helpers ----
+
+    private void stubGuideUserUniversity(UUID gid, UUID uid, UUID univId, boolean userPresent) {
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(gid);
+        guide.setUserId(uid);
+        guide.setBio("Bio");
+        when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
+        if (userPresent) {
+            UserEntity user = new UserEntity();
+            user.setId(uid);
+            user.setDisplayName("Maya Chen");
+            when(users.findAllById(List.of(uid))).thenReturn(List.of(user));
+        } else {
+            when(users.findAllById(List.of(uid))).thenReturn(List.of());
+        }
+        UniversityEntity u = new UniversityEntity();
+        u.setId(univId);
+        u.setName("North Coast University");
+        u.setSlug("north-coast");
+        u.setCity("Arcata");
+        u.setRegion("CA");
+        when(universities.findAllById(List.of(univId))).thenReturn(List.of(u));
+    }
+
+    private TourDetailResponse detailWithLanguages(String languagesJson) {
+        UUID oid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uid = UUID.randomUUID();
+        UUID univId = UUID.randomUUID();
+        TourOfferingEntity row = offering(oid, gid, univId);
+        row.setLanguages(languagesJson);
+        when(offerings.findDiscoverableById(oid)).thenReturn(Optional.of(row));
+        stubGuideUserUniversity(gid, uid, univId, true);
+        return service().getById(oid);
     }
 }

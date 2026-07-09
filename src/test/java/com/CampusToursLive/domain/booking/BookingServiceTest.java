@@ -534,6 +534,49 @@ class BookingServiceTest {
     }
 
     @Test
+    void createBooking_blankOfferingId_isRequired() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest("   ", null, null, null)));
+    }
+
+    @Test
+    void createBooking_blankScheduledStartAt_isRequired() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                ctx.offeringId().toString(), "   ", "UTC", null)));
+    }
+
+    @Test
+    void createBooking_blankDisplayTimezone_isRequired() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                ctx.offeringId().toString(),
+                                                Instant.now().plus(3, ChronoUnit.DAYS).toString(),
+                                                "   ",
+                                                null)));
+    }
+
+    @Test
     void createBooking_blankNotes_storedAsNull() {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
         Bookable ctx = stubBookableOffering();
@@ -1237,6 +1280,31 @@ class BookingServiceTest {
 
         assertThrows(ValidationException.class, () -> service().checkout(participant));
         verify(bookings, never()).saveAllAndFlush(any());
+    }
+
+    @Test
+    void checkout_sameGuideFarApart_noReservedOverlap_succeeds() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
+        // Same guide + offering but a week apart: the reserved windows do NOT overlap, so the
+        // guideClash isBefore/isAfter conditions evaluate false in both loop directions and
+        // checkout proceeds.
+        BookingEntity i1 = draftItem(participant.getId(), start, 60);
+        BookingEntity i2 = draftItem(participant.getId(), start.plus(7, ChronoUnit.DAYS), 60);
+        i2.setGuideId(i1.getGuideId());
+        i2.setTourOfferingId(i1.getTourOfferingId());
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(i1, i2));
+        UUID gu = stubCheckoutLookups(i1, TourStatus.ACTIVE);
+        when(users.findById(gu)).thenReturn(Optional.of(user(gu, "G")));
+        stubNoOverlaps();
+        when(bookings.saveAllAndFlush(any())).thenReturn(List.of(i1, i2));
+
+        List<BookingDetailResponse> resp = service().checkout(participant);
+
+        assertEquals(2, resp.size());
+        verify(bookings).saveAllAndFlush(any());
     }
 
     // ── write-test fixtures ──────────────────────────────────────────────────
