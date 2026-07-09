@@ -2,6 +2,7 @@ package com.CampusToursLive.domain.availability;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.LocalTime;
 import org.junit.jupiter.api.Test;
@@ -45,5 +46,20 @@ class LocalWallClockTimeConverterTest {
     void convertToEntityAttribute_nullAndBlank() {
         assertNull(converter.convertToEntityAttribute(null));
         assertNull(converter.convertToEntityAttribute("  "));
+    }
+
+    @Test
+    void convertToEntityAttribute_boundaryTimes() {
+        assertEquals(LocalTime.MIDNIGHT, converter.convertToEntityAttribute("00:00:00"));
+        assertEquals(LocalTime.of(23, 59, 59), converter.convertToEntityAttribute("23:59:59"));
+    }
+
+    @Test
+    void convertToEntityAttribute_rejectsInvalidFormat() {
+        assertThrows(
+                IllegalArgumentException.class, () -> converter.convertToEntityAttribute("9:00"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> converter.convertToEntityAttribute("25:00:00"));
     }
 }

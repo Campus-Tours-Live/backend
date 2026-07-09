@@ -1,5 +1,6 @@
 package com.CampusToursLive.domain.availability;
 
+import com.CampusToursLive.domain.booking.AcceptanceMode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;

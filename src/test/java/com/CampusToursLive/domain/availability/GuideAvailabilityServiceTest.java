@@ -276,7 +276,7 @@ class GuideAvailabilityServiceTest {
     }
 
     @Test
-    void getSummary_usesFallbackDurationsWhenJsonInvalid() {
+    void getSummary_failsWhenDurationsJsonInvalid() {
         UUID userId = UUID.randomUUID();
         UUID guideId = UUID.randomUUID();
         stubGuide(userId, guideId);
@@ -286,8 +286,7 @@ class GuideAvailabilityServiceTest {
         GuideBookingSettingsEntity settings = stubSettingsRead(guideId);
         settings.setDurationsOffered("not-json");
 
-        AvailabilitySummaryResponse summary = service().getSummary(user(userId));
-        assertEquals(List.of(30, 45, 60, 90), summary.bookingSettings().durationsOffered());
+        assertThrows(IllegalStateException.class, () -> service().getSummary(user(userId)));
     }
 
     @Test
@@ -424,6 +423,25 @@ class GuideAvailabilityServiceTest {
                 ArgumentCaptor.forClass(GuideAvailabilityRuleEntity.class);
         verify(rules).save(captor.capture());
         assertEquals(LocalTime.of(9, 15, 45), captor.getValue().getStartLocal());
+    }
+
+    @Test
+    void createRule_acceptsBoundaryTimes() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+        when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
+                .thenReturn(List.of());
+        when(rules.save(any())).thenAnswer(echoSave());
+
+        CreateAvailabilityRuleRequest req =
+                new CreateAvailabilityRuleRequest(
+                        1, "00:00:00", "23:59:59", "America/Los_Angeles", "2026-06-01", null, true);
+
+        var resp = service().createRule(user(userId), req);
+        assertEquals("00:00", resp.startLocal());
+        assertEquals("23:59", resp.endLocal());
     }
 
     @Test

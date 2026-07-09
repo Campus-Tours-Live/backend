@@ -1,5 +1,6 @@
 package com.CampusToursLive.domain.availability;
 
+import com.CampusToursLive.domain.booking.AcceptanceMode;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
 import com.CampusToursLive.domain.user.UserEntity;
@@ -87,13 +88,6 @@ public class GuideAvailabilityService {
         GuideProfileEntity guide = requireGuideProfile(user);
         GuideBookingSettingsEntity settings = requireSettings(guide.getId());
 
-        log.info(
-                "createRule received startLocal={} endLocal={} dayOfWeek={} guideId={}",
-                req.startLocal(),
-                req.endLocal(),
-                req.dayOfWeek(),
-                guide.getId());
-
         GuideAvailabilityRuleEntity rule = new GuideAvailabilityRuleEntity();
         rule.setId(UUID.randomUUID());
         rule.setGuideId(guide.getId());
@@ -101,10 +95,6 @@ public class GuideAvailabilityService {
         rule.setStartLocal(parseTime(req.startLocal(), "startLocal"));
         rule.setEndLocal(parseTime(req.endLocal(), "endLocal"));
         validateTimeRange(rule.getStartLocal(), rule.getEndLocal());
-        log.info(
-                "createRule parsed startLocal={} endLocal={}",
-                rule.getStartLocal(),
-                rule.getEndLocal());
         rule.setTimezone(
                 AvailabilityTimezones.resolveRuleTimezone(req.timezone(), settings.getTimezone()));
         rule.setEffectiveFrom(parseDate(req.effectiveFrom(), "effectiveFrom", LocalDate.now()));
@@ -113,10 +103,6 @@ public class GuideAvailabilityService {
         rule.setActive(req.active() == null || req.active());
 
         assertNoRuleOverlap(rule, null);
-        log.info(
-                "createRule saving startLocal={} endLocal={}",
-                rule.getStartLocal(),
-                rule.getEndLocal());
         persistRule(rule);
         return toRuleResponse(rule);
     }
@@ -130,26 +116,10 @@ public class GuideAvailabilityService {
                 rules.findByIdAndGuideId(ruleId, guide.getId())
                         .orElseThrow(() -> new NotFoundException("Availability rule not found"));
 
-        log.info(
-                "updateRule received ruleId={} startLocal={} endLocal={} dayOfWeek={} guideId={}",
-                ruleId,
-                req.startLocal(),
-                req.endLocal(),
-                req.dayOfWeek(),
-                guide.getId());
-        log.info(
-                "updateRule existing startLocal={} endLocal={}",
-                rule.getStartLocal(),
-                rule.getEndLocal());
-
         if (req.dayOfWeek() != null) rule.setDayOfWeek(parseDayOfWeek(req.dayOfWeek()));
         if (req.startLocal() != null) rule.setStartLocal(parseTime(req.startLocal(), "startLocal"));
         if (req.endLocal() != null) rule.setEndLocal(parseTime(req.endLocal(), "endLocal"));
         validateTimeRange(rule.getStartLocal(), rule.getEndLocal());
-        log.info(
-                "updateRule parsed startLocal={} endLocal={}",
-                rule.getStartLocal(),
-                rule.getEndLocal());
         if (req.timezone() != null) {
             rule.setTimezone(
                     AvailabilityTimezones.resolveRuleTimezone(
@@ -167,10 +137,6 @@ public class GuideAvailabilityService {
         validateEffectiveRange(rule.getEffectiveFrom(), rule.getEffectiveTo());
 
         assertNoRuleOverlap(rule, rule.getId());
-        log.info(
-                "updateRule saving startLocal={} endLocal={}",
-                rule.getStartLocal(),
-                rule.getEndLocal());
         persistRule(rule);
         return toRuleResponse(rule);
     }
@@ -429,7 +395,8 @@ public class GuideAvailabilityService {
             List<Integer> values = mapper.readValue(json, new TypeReference<>() {});
             return values == null ? List.of() : values;
         } catch (Exception ex) {
-            return List.of(30, 45, 60, 90);
+            log.error("Corrupt durationsOffered JSON in guide_booking_settings: {}", json, ex);
+            throw new IllegalStateException("Corrupt durationsOffered in booking settings");
         }
     }
 

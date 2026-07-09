@@ -1,6 +1,7 @@
 package com.CampusToursLive.domain.availability;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.CampusToursLive.domain.university.UniversityRepository;
 import jakarta.persistence.EntityManager;
@@ -13,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -20,8 +22,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Verifies guide availability TIME columns round-trip without UTC shifting (regression for
- * hibernate.jdbc.time_zone=UTC + LocalTime).
+ * Verifies guide availability wall-clock columns round-trip without UTC shifting (regression for
+ * hibernate.jdbc.time_zone=UTC + LocalTime) and that Flyway V4 CHECK constraints hold.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -33,6 +35,7 @@ class GuideAvailabilityRuleRepositoryTest {
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:15");
 
     @Autowired private GuideAvailabilityRuleRepository rules;
+    @Autowired private AvailabilityExceptionRepository exceptions;
     @Autowired private UniversityRepository universities;
     @Autowired private EntityManager entityManager;
 
@@ -98,7 +101,73 @@ class GuideAvailabilityRuleRepositoryTest {
                                         """)
                                 .setParameter("id", rule.getId())
                                 .getSingleResult();
-        assertThat(row[0].toString()).startsWith("09:00");
-        assertThat(row[1].toString()).startsWith("21:45");
+        assertThat(row[0]).isEqualTo("09:00:00");
+        assertThat(row[1]).isEqualTo("21:45:00");
+    }
+
+    @Test
+    void persistsBoundaryWallClockTimes() {
+        GuideAvailabilityRuleEntity rule = new GuideAvailabilityRuleEntity();
+        rule.setId(UUID.randomUUID());
+        rule.setGuideId(guideId);
+        rule.setDayOfWeek((short) 0);
+        rule.setStartLocal(LocalTime.MIDNIGHT);
+        rule.setEndLocal(LocalTime.of(23, 59, 59));
+        rule.setTimezone("America/Los_Angeles");
+        rule.setEffectiveFrom(LocalDate.parse("2026-07-02"));
+        rule.setActive(true);
+
+        rules.saveAndFlush(rule);
+        entityManager.clear();
+
+        GuideAvailabilityRuleEntity loaded = rules.findById(rule.getId()).orElseThrow();
+        assertThat(loaded.getStartLocal()).isEqualTo(LocalTime.MIDNIGHT);
+        assertThat(loaded.getEndLocal()).isEqualTo(LocalTime.of(23, 59, 59));
+    }
+
+    @Test
+    void rejectsInvertedTimeRangeAtDatabase() {
+        GuideAvailabilityRuleEntity rule = new GuideAvailabilityRuleEntity();
+        rule.setId(UUID.randomUUID());
+        rule.setGuideId(guideId);
+        rule.setDayOfWeek((short) 1);
+        rule.setStartLocal(LocalTime.of(18, 0));
+        rule.setEndLocal(LocalTime.of(9, 0));
+        rule.setTimezone("America/Los_Angeles");
+        rule.setEffectiveFrom(LocalDate.parse("2026-07-02"));
+        rule.setActive(true);
+
+        assertThatThrownBy(() -> rules.saveAndFlush(rule))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void exceptionAllowsNullTimesForAllDay() {
+        AvailabilityExceptionEntity ex = new AvailabilityExceptionEntity();
+        ex.setId(UUID.randomUUID());
+        ex.setGuideId(guideId);
+        ex.setExceptionDate(LocalDate.parse("2026-07-04"));
+        ex.setType(AvailabilityExceptionType.UNAVAILABLE_ALL_DAY);
+
+        exceptions.saveAndFlush(ex);
+        entityManager.clear();
+
+        AvailabilityExceptionEntity loaded = exceptions.findById(ex.getId()).orElseThrow();
+        assertThat(loaded.getStartLocal()).isNull();
+        assertThat(loaded.getEndLocal()).isNull();
+    }
+
+    @Test
+    void exceptionRejectsPartialTimePair() {
+        AvailabilityExceptionEntity ex = new AvailabilityExceptionEntity();
+        ex.setId(UUID.randomUUID());
+        ex.setGuideId(guideId);
+        ex.setExceptionDate(LocalDate.parse("2026-07-04"));
+        ex.setType(AvailabilityExceptionType.UNAVAILABLE_RANGE);
+        ex.setStartLocal(LocalTime.of(10, 0));
+        ex.setEndLocal(null);
+
+        assertThatThrownBy(() -> exceptions.saveAndFlush(ex))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 }
