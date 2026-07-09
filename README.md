@@ -335,15 +335,15 @@ envelope; errors are `application/problem+json`.
 | `POST`        | `/guide/offerings/{id}/activate`  | Publish a draft offering (requires an APPROVED guide)     |
 | `GET`         | `/tours`                          | Public marketplace catalog (ACTIVE offerings only)        |
 | `GET`         | `/tours/{tourId}`                 | Single discoverable tour detail                           |
-| `GET`         | `/participant/bookings/next-tour` | Soonest upcoming CONFIRMED booking (dashboard card)       |
-| `GET`         | `/participant/bookings/upcoming`  | Upcoming active-lifecycle bookings, chronological         |
-| `GET`         | `/participant/bookings/pending-actions` | Outstanding-action counts (payments, guide, reviews) |
-| `POST`        | `/participant/bookings`           | Create a booking for a bookable offering                  |
-| `POST`        | `/participant/bookings/{id}/cancel` | Cancel the participant's own upcoming booking           |
-| `GET`         | `/participant/cart`               | The booking cart (DRAFT bookings — hold no slot)          |
-| `POST`        | `/participant/cart/items`         | Validate + add a cart item                                |
-| `DELETE`      | `/participant/cart/items/{id}`    | Remove a cart item                                        |
-| `POST`        | `/participant/cart/checkout`      | Submit the whole cart atomically (all-or-nothing)         |
+| `GET`         | `/bookings/next-tour` | Soonest upcoming CONFIRMED booking (dashboard card)       |
+| `GET`         | `/bookings/upcoming`  | Upcoming active-lifecycle bookings, chronological         |
+| `GET`         | `/bookings/pending-actions` | Outstanding-action counts (payments, guide, reviews) |
+| `POST`        | `/bookings`           | Create a booking for a bookable offering                  |
+| `POST`        | `/bookings/{id}/cancel` | Cancel the participant's own upcoming booking           |
+| `GET`         | `/cart`               | The booking cart (DRAFT bookings — hold no slot)          |
+| `POST`        | `/cart/items`         | Validate + add a cart item                                |
+| `DELETE`      | `/cart/items/{id}`    | Remove a cart item                                        |
+| `POST`        | `/cart/checkout`      | Submit the whole cart atomically (all-or-nothing)         |
 | `GET`         | `/universities`                   | University catalog search (`q`, `limit`)                  |
 | `GET`         | `/meta/tour-topics`               | Controlled vocabulary for tour topics                     |
 | `POST`        | `/admin/guides/{userId}/decision` | Admin approve/reject a guide application                  |
