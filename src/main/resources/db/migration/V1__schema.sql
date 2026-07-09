@@ -352,7 +352,6 @@ CREATE TABLE bookings (
   acceptance_mode_snap  acceptance_mode NOT NULL,
   scheduled_start_at    TIMESTAMPTZ NOT NULL,
   scheduled_end_at      TIMESTAMPTZ NOT NULL,
-  display_timezone      TEXT NOT NULL,
   -- guide-reserved interval includes buffers (for overlap checks)
   reserved_start_at     TIMESTAMPTZ NOT NULL,
   reserved_end_at       TIMESTAMPTZ NOT NULL,
