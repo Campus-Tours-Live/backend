@@ -45,7 +45,6 @@ class BookingControllerTest {
                 UUID.randomUUID().toString(),
                 "CONFIRMED",
                 Instant.now().toString(),
-                "America/Los_Angeles",
                 UUID.randomUUID().toString(),
                 "Campus Walk",
                 "Jane Guide",
@@ -117,10 +116,7 @@ class BookingControllerTest {
         UserEntity u = participantUser();
         CreateBookingRequest req =
                 new CreateBookingRequest(
-                        UUID.randomUUID().toString(),
-                        "2026-07-10T17:00:00Z",
-                        "America/Los_Angeles",
-                        null);
+                        UUID.randomUUID().toString(), "2026-07-10T17:00:00Z", null);
         BookingDetailResponse detail = mockDetail();
         when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
         when(bookingService.createBooking(u, req)).thenReturn(detail);

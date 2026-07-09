@@ -34,11 +34,6 @@ public record BookingDetailResponse(
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 String scheduledAt,
         @Schema(
-                        description = "IANA timezone the tour is scheduled in.",
-                        example = "America/Los_Angeles",
-                        requiredMode = Schema.RequiredMode.REQUIRED)
-                String timezone,
-        @Schema(
                         description = "Id of the tour offering this booking is for.",
                         example = "o1a2c3d4-0000-4000-8000-000000000002",
                         requiredMode = Schema.RequiredMode.REQUIRED)
