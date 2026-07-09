@@ -25,9 +25,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Participant booking cart (Core: /cart; BFF maps /v1/participant/cart/* → here). Cart items are
- * DRAFT bookings — validated and priced, but holding no slot until checkout submits them all
- * atomically. All endpoints require the PARTICIPANT role.
+ * Participant booking cart (Core: /cart; BFF path /v1/cart/*). Cart items are DRAFT bookings:
+ * validated and priced, but holding no slot until checkout submits them all atomically. All
+ * endpoints require the PARTICIPANT role.
  */
 @RestController
 @RequestMapping("/cart")
