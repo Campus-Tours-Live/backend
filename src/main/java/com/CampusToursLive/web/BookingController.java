@@ -26,12 +26,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Participant booking endpoints (BFF maps /v1/participant/bookings/* → here): dashboard reads plus
- * the create/cancel writes. All endpoints require the PARTICIPANT role; ownership of a specific
- * booking is enforced in the service.
+ * Participant booking endpoints (Core: /bookings; BFF maps /v1/participant/bookings/* → here):
+ * dashboard reads plus the create/cancel writes. All endpoints require the PARTICIPANT role;
+ * ownership of a specific booking is enforced in the service.
  */
 @RestController
-@RequestMapping("/participant/bookings")
+@RequestMapping("/bookings")
 @Tag(
         name = "Participant bookings",
         description =
