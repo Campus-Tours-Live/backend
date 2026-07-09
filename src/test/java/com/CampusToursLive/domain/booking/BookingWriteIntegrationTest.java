@@ -104,7 +104,6 @@ class BookingWriteIntegrationTest {
                         new CreateBookingRequest(
                                 offering.getId().toString(),
                                 start.toString(),
-                                "America/Los_Angeles",
                                 "meet at the fountain"));
 
         BookingEntity saved = bookings.findById(UUID.fromString(resp.id())).orElseThrow();
@@ -163,7 +162,6 @@ class BookingWriteIntegrationTest {
         b.setAcceptanceModeSnap(AcceptanceMode.MANUAL);
         b.setScheduledStartAt(start);
         b.setScheduledEndAt(start.plus(60, ChronoUnit.MINUTES));
-        b.setDisplayTimezone("America/Los_Angeles");
         b.setReservedStartAt(start);
         b.setReservedEndAt(start.plus(75, ChronoUnit.MINUTES));
         b.setBasePriceCents(5000L);

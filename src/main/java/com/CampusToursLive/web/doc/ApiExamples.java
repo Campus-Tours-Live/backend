@@ -42,7 +42,6 @@ public interface ApiExamples {
     String BOOKING_DETAIL =
             "{\"data\":{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
                     + "\"status\":\"WAITING_FOR_GUIDE\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
-                    + "\"timezone\":\"America/Los_Angeles\","
                     + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
                     + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
                     + "\"guideResponseDeadline\":\"2026-07-30T15:00:00Z\","
@@ -54,7 +53,6 @@ public interface ApiExamples {
     String BOOKING_LIST =
             "{\"data\":[{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
                     + "\"status\":\"CONFIRMED\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
-                    + "\"timezone\":\"America/Los_Angeles\","
                     + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
                     + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
                     + "\"guideResponseDeadline\":null,"
@@ -68,7 +66,6 @@ public interface ApiExamples {
     String BOOKING_CANCELLED =
             "{\"data\":{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
                     + "\"status\":\"CANCELLED\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
-                    + "\"timezone\":\"America/Los_Angeles\","
                     + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
                     + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
                     + "\"guideResponseDeadline\":null,"
@@ -80,7 +77,6 @@ public interface ApiExamples {
     String CART_LIST =
             "{\"data\":[{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
                     + "\"status\":\"DRAFT\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
-                    + "\"timezone\":\"America/Los_Angeles\","
                     + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
                     + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
                     + "\"guideResponseDeadline\":null,"
@@ -94,7 +90,6 @@ public interface ApiExamples {
     String CART_ITEM_DRAFT =
             "{\"data\":{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
                     + "\"status\":\"DRAFT\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
-                    + "\"timezone\":\"America/Los_Angeles\","
                     + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
                     + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
                     + "\"guideResponseDeadline\":null,"
@@ -106,7 +101,6 @@ public interface ApiExamples {
     String CART_CHECKOUT_RESULT =
             "{\"data\":[{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
                     + "\"status\":\"WAITING_FOR_GUIDE\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
-                    + "\"timezone\":\"America/Los_Angeles\","
                     + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
                     + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
                     + "\"guideResponseDeadline\":\"2026-07-30T15:00:00Z\","

@@ -42,7 +42,6 @@ class CartControllerTest {
                 UUID.randomUUID().toString(),
                 status,
                 Instant.now().toString(),
-                "America/Los_Angeles",
                 UUID.randomUUID().toString(),
                 "Campus Walk",
                 "Jane Guide",
@@ -68,7 +67,7 @@ class CartControllerTest {
         UserEntity u = participantUser();
         CreateBookingRequest req =
                 new CreateBookingRequest(
-                        UUID.randomUUID().toString(), "2026-07-10T17:00:00Z", "UTC", null);
+                        UUID.randomUUID().toString(), "2026-07-10T17:00:00Z", null);
         BookingDetailResponse detail = mockDetail("DRAFT");
         when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
         when(bookingService.addCartItem(u, req)).thenReturn(detail);

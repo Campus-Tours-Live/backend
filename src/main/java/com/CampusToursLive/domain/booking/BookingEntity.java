@@ -60,9 +60,6 @@ public class BookingEntity {
     @Column(name = "scheduled_end_at", nullable = false)
     private Instant scheduledEndAt;
 
-    @Column(name = "display_timezone", nullable = false)
-    private String displayTimezone;
-
     /** Guide-reserved interval including buffers — what the DB overlap constraint guards. */
     @Column(name = "reserved_start_at", nullable = false)
     private Instant reservedStartAt;

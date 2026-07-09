@@ -20,7 +20,6 @@ import com.CampusToursLive.web.dto.PendingActionsResponse;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -307,8 +306,8 @@ public class BookingService {
 
     /**
      * Validates a booking request end-to-end (bookable offering, approved guide, active university,
-     * not the guide's own tour, time window, timezone) and builds the unsaved booking in DRAFT
-     * status with the price snapshot. No slot is checked or claimed here.
+     * not the guide's own tour, time window) and builds the unsaved booking in DRAFT status with
+     * the price snapshot. No slot is checked or claimed here.
      */
     private BookingEntity buildDraftBooking(UserEntity participant, CreateBookingRequest req) {
         TourOfferingEntity offering = requireBookableOffering(req.tourOfferingId());
@@ -320,7 +319,6 @@ public class BookingService {
 
         Instant start = parseStart(req.scheduledStartAt(), Instant.now());
         Instant end = start.plus(Duration.ofMinutes(offering.getDurationMin()));
-        String timezone = parseTimezone(req.displayTimezone());
 
         BookingEntity b = new BookingEntity();
         b.setId(UUID.randomUUID());
@@ -333,7 +331,6 @@ public class BookingService {
         b.setAcceptanceModeSnap(AcceptanceMode.MANUAL);
         b.setScheduledStartAt(start);
         b.setScheduledEndAt(end);
-        b.setDisplayTimezone(timezone);
         b.setReservedStartAt(start);
         b.setReservedEndAt(end.plus(RESERVED_BUFFER_AFTER));
         // Price snapshot — no payments yet, so fees and taxes are zero and the guide
@@ -504,17 +501,6 @@ public class BookingService {
         return start;
     }
 
-    private static String parseTimezone(String raw) {
-        if (raw == null || raw.isBlank()) {
-            throw new ValidationException("displayTimezone is required");
-        }
-        try {
-            return ZoneId.of(raw.trim()).getId();
-        } catch (Exception ex) {
-            throw new ValidationException("Invalid displayTimezone: " + raw);
-        }
-    }
-
     /**
      * Human-facing unique reference, e.g. {@code BK-7F3K2M9QX1}. The 32-char alphabet omits the
      * look-alikes 0/O and 1/I; 10 chars ≈ 10^15 combinations, so collisions are practically
@@ -571,7 +557,6 @@ public class BookingService {
                 b.getId().toString(),
                 b.getStatus().displayStatus(),
                 b.getScheduledStartAt().toString(),
-                b.getDisplayTimezone(),
                 b.getTourOfferingId().toString(),
                 offeringTitle,
                 guideName,

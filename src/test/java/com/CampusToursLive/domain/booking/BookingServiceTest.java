@@ -66,7 +66,6 @@ class BookingServiceTest {
         b.setStatus(status);
         b.setScheduledStartAt(start);
         b.setScheduledEndAt(end);
-        b.setDisplayTimezone("America/Los_Angeles");
         b.setBasePriceCents(5000L);
         b.setCurrency("USD");
         return b;
@@ -151,7 +150,6 @@ class BookingServiceTest {
         assertEquals(bookingId.toString(), resp.id());
         assertEquals("CONFIRMED", resp.status());
         assertEquals(start.toString(), resp.scheduledAt());
-        assertEquals("America/Los_Angeles", resp.timezone());
         assertEquals(offeringId.toString(), resp.offeringId());
         assertEquals("Campus Walk", resp.offeringTitle());
         assertEquals("Jane Guide", resp.guideName());
@@ -487,7 +485,6 @@ class BookingServiceTest {
                                 new CreateBookingRequest(
                                         ctx.offeringId().toString(),
                                         start.toString(),
-                                        "America/Los_Angeles",
                                         "  meet at the fountain  "));
 
         ArgumentCaptor<BookingEntity> saved = ArgumentCaptor.forClass(BookingEntity.class);
@@ -504,7 +501,6 @@ class BookingServiceTest {
         // reserved interval = scheduled + 15-min post-tour buffer
         assertEquals(start, b.getReservedStartAt());
         assertEquals(start.plus(75, ChronoUnit.MINUTES), b.getReservedEndAt());
-        assertEquals("America/Los_Angeles", b.getDisplayTimezone());
         assertNotNull(b.getGuideResponseDeadlineAt());
         assertTrue(b.getBookingNumber().startsWith("BK-"));
         assertEquals("BK-".length() + 10, b.getBookingNumber().length());
@@ -541,8 +537,7 @@ class BookingServiceTest {
                 () ->
                         service()
                                 .createBooking(
-                                        participant,
-                                        new CreateBookingRequest("   ", null, null, null)));
+                                        participant, new CreateBookingRequest("   ", null, null)));
     }
 
     @Test
@@ -556,24 +551,7 @@ class BookingServiceTest {
                                 .createBooking(
                                         participant,
                                         new CreateBookingRequest(
-                                                ctx.offeringId().toString(), "   ", "UTC", null)));
-    }
-
-    @Test
-    void createBooking_blankDisplayTimezone_isRequired() {
-        UserEntity participant = user(UUID.randomUUID(), "Pat");
-        Bookable ctx = stubBookableOffering();
-        assertThrows(
-                ValidationException.class,
-                () ->
-                        service()
-                                .createBooking(
-                                        participant,
-                                        new CreateBookingRequest(
-                                                ctx.offeringId().toString(),
-                                                Instant.now().plus(3, ChronoUnit.DAYS).toString(),
-                                                "   ",
-                                                null)));
+                                                ctx.offeringId().toString(), "   ", null)));
     }
 
     @Test
@@ -599,15 +577,14 @@ class BookingServiceTest {
                 () ->
                         service()
                                 .createBooking(
-                                        participant,
-                                        new CreateBookingRequest(null, null, null, null)));
+                                        participant, new CreateBookingRequest(null, null, null)));
         assertThrows(
                 ValidationException.class,
                 () ->
                         service()
                                 .createBooking(
                                         participant,
-                                        new CreateBookingRequest("not-a-uuid", null, null, null)));
+                                        new CreateBookingRequest("not-a-uuid", null, null)));
         verify(bookings, never()).saveAndFlush(any());
     }
 
@@ -624,7 +601,7 @@ class BookingServiceTest {
                                 .createBooking(
                                         participant,
                                         new CreateBookingRequest(
-                                                offeringId.toString(), null, null, null)));
+                                                offeringId.toString(), null, null)));
     }
 
     @Test
@@ -642,7 +619,7 @@ class BookingServiceTest {
                                 .createBooking(
                                         participant,
                                         new CreateBookingRequest(
-                                                offeringId.toString(), null, null, null)));
+                                                offeringId.toString(), null, null)));
     }
 
     @Test
@@ -665,7 +642,7 @@ class BookingServiceTest {
                                 .createBooking(
                                         participant,
                                         new CreateBookingRequest(
-                                                offeringId.toString(), null, null, null)));
+                                                offeringId.toString(), null, null)));
     }
 
     @Test
@@ -693,7 +670,7 @@ class BookingServiceTest {
                                 .createBooking(
                                         participant,
                                         new CreateBookingRequest(
-                                                offeringId.toString(), null, null, null)));
+                                                offeringId.toString(), null, null)));
     }
 
     @Test
@@ -718,7 +695,7 @@ class BookingServiceTest {
                                 .createBooking(
                                         participant,
                                         new CreateBookingRequest(
-                                                ctx.offeringId().toString(), null, "UTC", null)));
+                                                ctx.offeringId().toString(), null, null)));
         assertThrows(
                 ValidationException.class,
                 () ->
@@ -728,7 +705,6 @@ class BookingServiceTest {
                                         new CreateBookingRequest(
                                                 ctx.offeringId().toString(),
                                                 "tomorrow at noon",
-                                                "UTC",
                                                 null)));
     }
 
@@ -746,10 +722,7 @@ class BookingServiceTest {
                                 .createBooking(
                                         participant,
                                         new CreateBookingRequest(
-                                                ctx.offeringId().toString(),
-                                                tooSoon,
-                                                "UTC",
-                                                null)));
+                                                ctx.offeringId().toString(), tooSoon, null)));
 
         // More than 30 days out
         String tooFar = Instant.now().plus(45, ChronoUnit.DAYS).toString();
@@ -760,34 +733,7 @@ class BookingServiceTest {
                                 .createBooking(
                                         participant,
                                         new CreateBookingRequest(
-                                                ctx.offeringId().toString(), tooFar, "UTC", null)));
-    }
-
-    @Test
-    void createBooking_rejectsMissingOrInvalidTimezone() {
-        UserEntity participant = user(UUID.randomUUID(), "Pat");
-        Bookable ctx = stubBookableOffering();
-        String start = Instant.now().plus(3, ChronoUnit.DAYS).toString();
-
-        assertThrows(
-                ValidationException.class,
-                () ->
-                        service()
-                                .createBooking(
-                                        participant,
-                                        new CreateBookingRequest(
-                                                ctx.offeringId().toString(), start, null, null)));
-        assertThrows(
-                ValidationException.class,
-                () ->
-                        service()
-                                .createBooking(
-                                        participant,
-                                        new CreateBookingRequest(
-                                                ctx.offeringId().toString(),
-                                                start,
-                                                "Mars/Olympus_Mons",
-                                                null)));
+                                                ctx.offeringId().toString(), tooFar, null)));
     }
 
     @Test
@@ -1015,7 +961,7 @@ class BookingServiceTest {
                                 .addCartItem(
                                         participant,
                                         new CreateBookingRequest(
-                                                UUID.randomUUID().toString(), null, null, null)));
+                                                UUID.randomUUID().toString(), null, null)));
         verify(bookings, never()).saveAndFlush(any());
     }
 
@@ -1057,7 +1003,6 @@ class BookingServiceTest {
                                         new CreateBookingRequest(
                                                 ctx.offeringId().toString(),
                                                 start.toString(),
-                                                "UTC",
                                                 null)));
         verify(bookings, never()).saveAndFlush(any());
     }
@@ -1360,7 +1305,6 @@ class BookingServiceTest {
         return new CreateBookingRequest(
                 ctx.offeringId().toString(),
                 Instant.now().plus(3, ChronoUnit.DAYS).toString(),
-                "UTC",
                 notes);
     }
 
