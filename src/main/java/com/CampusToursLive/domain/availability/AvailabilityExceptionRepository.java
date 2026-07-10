@@ -1,5 +1,6 @@
 package com.CampusToursLive.domain.availability;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -10,6 +11,9 @@ public interface AvailabilityExceptionRepository
 
     List<AvailabilityExceptionEntity> findByGuideIdOrderByExceptionDateAscCreatedAtAsc(
             UUID guideId);
+
+    List<AvailabilityExceptionEntity> findByGuideIdAndExceptionDate(
+            UUID guideId, LocalDate exceptionDate);
 
     Optional<AvailabilityExceptionEntity> findByIdAndGuideId(UUID id, UUID guideId);
 }

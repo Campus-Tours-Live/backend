@@ -16,6 +16,8 @@ import com.CampusToursLive.web.dto.UpdateAvailabilityExceptionRequest;
 import com.CampusToursLive.web.dto.UpdateAvailabilityRuleRequest;
 import com.CampusToursLive.web.dto.UpdateBookingSettingsRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
@@ -37,12 +39,13 @@ class GuideAvailabilityServiceTest {
     @Mock GuideBookingSettingsRepository bookingSettings;
     @Mock GuideBookingSettingsService settingsService;
     @Mock GuideProfileRepository guides;
+    @Mock EntityManager entityManager;
 
     private final ObjectMapper mapper = new ObjectMapper();
 
     private GuideAvailabilityService service() {
         return new GuideAvailabilityService(
-                rules, exceptions, bookingSettings, settingsService, guides, mapper);
+                rules, exceptions, bookingSettings, settingsService, guides, mapper, entityManager);
     }
 
     private static UserEntity user(UUID id) {
@@ -84,8 +87,21 @@ class GuideAvailabilityServiceTest {
         return settings;
     }
 
-    private Answer<Object> echoSave() {
-        return inv -> inv.getArgument(0);
+    private Answer<Object> echoSaveAndFlush() {
+        return inv -> {
+            Object entity = inv.getArgument(0);
+            if (entity instanceof GuideAvailabilityRuleEntity rule && rule.getCreatedAt() == null) {
+                rule.setCreatedAt(Instant.parse("2026-06-01T12:00:00Z"));
+            }
+            if (entity instanceof AvailabilityExceptionEntity ex && ex.getCreatedAt() == null) {
+                ex.setCreatedAt(Instant.parse("2026-06-01T12:00:00Z"));
+            }
+            return entity;
+        };
+    }
+
+    private void stubPersistRefresh() {
+        doAnswer(inv -> null).when(entityManager).refresh(any());
     }
 
     @Test
@@ -150,7 +166,7 @@ class GuideAvailabilityServiceTest {
                         1, "12:00", "14:00", "America/Los_Angeles", "2026-06-01", null, true);
 
         assertThrows(ValidationException.class, () -> service().createRule(user(userId), req));
-        verify(rules, never()).save(any());
+        verify(rules, never()).saveAndFlush(any());
     }
 
     @Test
@@ -165,7 +181,7 @@ class GuideAvailabilityServiceTest {
                         0, "17:00", "06:00", "America/Los_Angeles", "2026-07-02", null, true);
 
         assertThrows(ValidationException.class, () -> service().createRule(user(userId), req));
-        verify(rules, never()).save(any());
+        verify(rules, never()).saveAndFlush(any());
     }
 
     @Test
@@ -192,7 +208,7 @@ class GuideAvailabilityServiceTest {
 
         assertThrows(
                 ValidationException.class, () -> service().updateRule(user(userId), ruleId, req));
-        verify(rules, never()).save(any());
+        verify(rules, never()).saveAndFlush(any());
     }
 
     @Test
@@ -214,7 +230,7 @@ class GuideAvailabilityServiceTest {
 
         ArgumentCaptor<GuideAvailabilityRuleEntity> captor =
                 ArgumentCaptor.forClass(GuideAvailabilityRuleEntity.class);
-        verify(rules).save(captor.capture());
+        verify(rules).saveAndFlush(captor.capture());
         assertEquals(guideId, captor.getValue().getGuideId());
     }
 
@@ -234,7 +250,7 @@ class GuideAvailabilityServiceTest {
 
         ArgumentCaptor<AvailabilityExceptionEntity> captor =
                 ArgumentCaptor.forClass(AvailabilityExceptionEntity.class);
-        verify(exceptions).save(captor.capture());
+        verify(exceptions).saveAndFlush(captor.capture());
         assertNull(captor.getValue().getStartLocal());
         assertEquals("Holiday", captor.getValue().getReason());
     }
@@ -307,7 +323,7 @@ class GuideAvailabilityServiceTest {
         existing.setEffectiveFrom(LocalDate.parse("2026-06-01"));
         existing.setActive(true);
         when(rules.findByIdAndGuideId(ruleId, guideId)).thenReturn(Optional.of(existing));
-        when(rules.save(any())).thenAnswer(echoSave());
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
 
         UpdateAvailabilityRuleRequest req =
                 new UpdateAvailabilityRuleRequest(
@@ -343,7 +359,7 @@ class GuideAvailabilityServiceTest {
         UUID guideId = UUID.randomUUID();
         stubGuide(userId, guideId);
         stubSettings(guideId);
-        when(rules.save(any())).thenAnswer(echoSave());
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
 
         CreateAvailabilityRuleRequest req =
                 new CreateAvailabilityRuleRequest(
@@ -410,18 +426,18 @@ class GuideAvailabilityServiceTest {
         stubSettings(guideId);
         when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
                 .thenReturn(List.of());
-        when(rules.save(any())).thenAnswer(echoSave());
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
 
         CreateAvailabilityRuleRequest req =
                 new CreateAvailabilityRuleRequest(
                         1, "09:15:45", "10:00:00", "America/Los_Angeles", "2026-06-01", null, true);
 
         var resp = service().createRule(user(userId), req);
-        assertEquals("09:15", resp.startLocal());
+        assertEquals("09:15:45", resp.startLocal());
 
         ArgumentCaptor<GuideAvailabilityRuleEntity> captor =
                 ArgumentCaptor.forClass(GuideAvailabilityRuleEntity.class);
-        verify(rules).save(captor.capture());
+        verify(rules).saveAndFlush(captor.capture());
         assertEquals(LocalTime.of(9, 15, 45), captor.getValue().getStartLocal());
     }
 
@@ -433,7 +449,7 @@ class GuideAvailabilityServiceTest {
         stubSettings(guideId);
         when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
                 .thenReturn(List.of());
-        when(rules.save(any())).thenAnswer(echoSave());
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
 
         CreateAvailabilityRuleRequest req =
                 new CreateAvailabilityRuleRequest(
@@ -441,7 +457,7 @@ class GuideAvailabilityServiceTest {
 
         var resp = service().createRule(user(userId), req);
         assertEquals("00:00", resp.startLocal());
-        assertEquals("23:59", resp.endLocal());
+        assertEquals("23:59:59", resp.endLocal());
     }
 
     @Test
@@ -452,7 +468,7 @@ class GuideAvailabilityServiceTest {
         stubSettings(guideId);
         when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
                 .thenReturn(List.of());
-        when(rules.save(any()))
+        when(rules.saveAndFlush(any()))
                 .thenThrow(
                         new DataIntegrityViolationException(
                                 "violates check constraint start_local end_local"));
@@ -486,7 +502,7 @@ class GuideAvailabilityServiceTest {
         UUID userId = UUID.randomUUID();
         UUID guideId = UUID.randomUUID();
         stubGuide(userId, guideId);
-        when(exceptions.save(any())).thenAnswer(echoSave());
+        when(exceptions.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
 
         CreateAvailabilityExceptionRequest req =
                 new CreateAvailabilityExceptionRequest(
@@ -526,7 +542,7 @@ class GuideAvailabilityServiceTest {
         existing.setStartLocal(LocalTime.of(10, 0));
         existing.setEndLocal(LocalTime.of(12, 0));
         when(exceptions.findByIdAndGuideId(exceptionId, guideId)).thenReturn(Optional.of(existing));
-        when(exceptions.save(any())).thenAnswer(echoSave());
+        when(exceptions.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
 
         UpdateAvailabilityExceptionRequest req =
                 new UpdateAvailabilityExceptionRequest(
@@ -553,7 +569,7 @@ class GuideAvailabilityServiceTest {
         existing.setStartLocal(LocalTime.of(10, 0));
         existing.setEndLocal(LocalTime.of(12, 0));
         when(exceptions.findByIdAndGuideId(exceptionId, guideId)).thenReturn(Optional.of(existing));
-        when(exceptions.save(any())).thenAnswer(echoSave());
+        when(exceptions.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
 
         UpdateAvailabilityExceptionRequest req =
                 new UpdateAvailabilityExceptionRequest(
@@ -598,7 +614,7 @@ class GuideAvailabilityServiceTest {
         UUID guideId = UUID.randomUUID();
         stubGuide(userId, guideId);
         GuideBookingSettingsEntity settings = stubSettings(guideId);
-        when(bookingSettings.save(any())).thenAnswer(echoSave());
+        when(bookingSettings.save(any())).thenAnswer(echoSaveAndFlush());
 
         UpdateBookingSettingsRequest req =
                 new UpdateBookingSettingsRequest(
@@ -692,7 +708,7 @@ class GuideAvailabilityServiceTest {
         existing.setActive(true);
         when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
                 .thenReturn(List.of(existing));
-        when(rules.save(any())).thenAnswer(echoSave());
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
 
         CreateAvailabilityRuleRequest req =
                 new CreateAvailabilityRuleRequest(
@@ -710,7 +726,7 @@ class GuideAvailabilityServiceTest {
         stubSettings(guideId);
         when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
                 .thenReturn(List.of());
-        when(rules.save(any())).thenAnswer(echoSave());
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
 
         CreateAvailabilityRuleRequest req =
                 new CreateAvailabilityRuleRequest(
@@ -725,17 +741,21 @@ class GuideAvailabilityServiceTest {
         UUID userId = UUID.randomUUID();
         UUID guideId = UUID.randomUUID();
         stubGuide(userId, guideId);
-        stubSettings(guideId);
+        GuideBookingSettingsEntity settings = stubSettings(guideId);
+        settings.setTimezone("America/Los_Angeles");
         when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
                 .thenReturn(List.of());
-        when(rules.save(any())).thenAnswer(echoSave());
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
+        stubPersistRefresh();
 
         CreateAvailabilityRuleRequest req =
                 new CreateAvailabilityRuleRequest(
                         1, "10:00", "12:00", "America/Los_Angeles", null, null, true);
 
         var resp = service().createRule(user(userId), req);
-        assertEquals(LocalDate.now().toString(), resp.effectiveFrom());
+        assertEquals(
+                AvailabilityTimezones.todayInTimezone("America/Los_Angeles").toString(),
+                resp.effectiveFrom());
     }
 
     @Test
@@ -758,7 +778,7 @@ class GuideAvailabilityServiceTest {
         when(rules.findByIdAndGuideId(ruleId, guideId)).thenReturn(Optional.of(existing));
         when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
                 .thenReturn(List.of(existing));
-        when(rules.save(any())).thenAnswer(echoSave());
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
 
         UpdateAvailabilityRuleRequest req =
                 new UpdateAvailabilityRuleRequest(null, "11:00", "14:00", null, null, null, true);
@@ -841,7 +861,7 @@ class GuideAvailabilityServiceTest {
         existing.setActive(true);
         when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
                 .thenReturn(List.of(existing));
-        when(rules.save(any())).thenAnswer(echoSave());
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
 
         CreateAvailabilityRuleRequest req =
                 new CreateAvailabilityRuleRequest(
@@ -919,7 +939,7 @@ class GuideAvailabilityServiceTest {
         UUID userId = UUID.randomUUID();
         UUID guideId = UUID.randomUUID();
         stubGuide(userId, guideId);
-        when(exceptions.save(any())).thenAnswer(echoSave());
+        when(exceptions.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
 
         CreateAvailabilityExceptionRequest req =
                 new CreateAvailabilityExceptionRequest(
@@ -1063,7 +1083,7 @@ class GuideAvailabilityServiceTest {
         UUID guideId = UUID.randomUUID();
         stubGuide(userId, guideId);
         GuideBookingSettingsEntity settings = stubSettings(guideId);
-        when(bookingSettings.save(any())).thenAnswer(echoSave());
+        when(bookingSettings.save(any())).thenAnswer(echoSaveAndFlush());
 
         UpdateBookingSettingsRequest req =
                 new UpdateBookingSettingsRequest(
@@ -1106,5 +1126,186 @@ class GuideAvailabilityServiceTest {
                         ValidationException.class,
                         () -> service().updateBookingSettings(user(userId), req));
         assertEquals("bufferBeforeMin must be at most 1440", ex.getMessage());
+    }
+
+    @Test
+    void createRule_returnsCreatedAtAfterPersist() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+        when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
+                .thenReturn(List.of());
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
+        stubPersistRefresh();
+
+        CreateAvailabilityRuleRequest req =
+                new CreateAvailabilityRuleRequest(
+                        1, "10:00", "12:00", "America/Los_Angeles", "2026-06-01", null, true);
+
+        var resp = service().createRule(user(userId), req);
+        assertEquals("2026-06-01T12:00:00Z", resp.createdAt());
+    }
+
+    @Test
+    void createRule_preservesSecondsInResponse() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+        when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
+                .thenReturn(List.of());
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
+        stubPersistRefresh();
+
+        CreateAvailabilityRuleRequest req =
+                new CreateAvailabilityRuleRequest(
+                        1, "09:30:45", "12:00", "America/Los_Angeles", "2026-06-01", null, true);
+
+        var resp = service().createRule(user(userId), req);
+        assertEquals("09:30:45", resp.startLocal());
+    }
+
+    @Test
+    void createRule_mapsExclusionConstraintToOverlapMessage() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        stubSettings(guideId);
+        when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
+                .thenReturn(List.of());
+        when(rules.saveAndFlush(any()))
+                .thenThrow(
+                        new DataIntegrityViolationException(
+                                "violates exclusion constraint guide_availability_rules_no_overlap"));
+
+        CreateAvailabilityRuleRequest req =
+                new CreateAvailabilityRuleRequest(
+                        1, "09:00", "10:00", "America/Los_Angeles", "2026-06-01", null, true);
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class, () -> service().createRule(user(userId), req));
+        assertEquals("This time block overlaps an existing rule", ex.getMessage());
+    }
+
+    @Test
+    void updateBookingSettings_cascadesTimezoneToExistingRules() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        GuideBookingSettingsEntity settings = stubSettings(guideId);
+        settings.setTimezone("America/Los_Angeles");
+
+        GuideAvailabilityRuleEntity rule = new GuideAvailabilityRuleEntity();
+        rule.setId(UUID.randomUUID());
+        rule.setGuideId(guideId);
+        rule.setDayOfWeek((short) 1);
+        rule.setStartLocal(LocalTime.of(9, 0));
+        rule.setEndLocal(LocalTime.of(17, 0));
+        rule.setTimezone("America/Los_Angeles");
+        rule.setEffectiveFrom(LocalDate.parse("2026-06-01"));
+        rule.setActive(true);
+        when(rules.findByGuideIdOrderByDayOfWeekAscStartLocalAsc(guideId))
+                .thenReturn(List.of(rule));
+        when(rules.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(bookingSettings.save(any())).thenAnswer(echoSaveAndFlush());
+
+        UpdateBookingSettingsRequest req =
+                new UpdateBookingSettingsRequest(
+                        null, null, null, null, null, null, null, "America/New_York");
+
+        service().updateBookingSettings(user(userId), req);
+
+        assertEquals("America/New_York", rule.getTimezone());
+        assertEquals("America/New_York", settings.getTimezone());
+        verify(rules).save(rule);
+    }
+
+    @Test
+    void updateRule_succeedsWhenTimezoneMatchesSettingsAfterCascade() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        UUID ruleId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+        GuideBookingSettingsEntity settings = stubSettings(guideId);
+        settings.setTimezone("America/New_York");
+
+        GuideAvailabilityRuleEntity existing = new GuideAvailabilityRuleEntity();
+        existing.setId(ruleId);
+        existing.setGuideId(guideId);
+        existing.setDayOfWeek((short) 1);
+        existing.setStartLocal(LocalTime.of(10, 0));
+        existing.setEndLocal(LocalTime.of(13, 0));
+        existing.setTimezone("America/New_York");
+        existing.setEffectiveFrom(LocalDate.parse("2026-06-01"));
+        existing.setActive(true);
+        when(rules.findByIdAndGuideId(ruleId, guideId)).thenReturn(Optional.of(existing));
+        when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 1))
+                .thenReturn(List.of(existing));
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
+        stubPersistRefresh();
+
+        UpdateAvailabilityRuleRequest req =
+                new UpdateAvailabilityRuleRequest(null, "11:00", "14:00", null, null, null, true);
+
+        var resp = service().updateRule(user(userId), ruleId, req);
+        assertEquals("11:00", resp.startLocal());
+    }
+
+    @Test
+    void createException_rejectsAllDayWhenSameDateExists() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+
+        AvailabilityExceptionEntity existing = new AvailabilityExceptionEntity();
+        existing.setId(UUID.randomUUID());
+        existing.setGuideId(guideId);
+        existing.setExceptionDate(LocalDate.parse("2026-07-04"));
+        existing.setType(AvailabilityExceptionType.ADDITIONAL);
+        existing.setStartLocal(LocalTime.of(14, 0));
+        existing.setEndLocal(LocalTime.of(16, 0));
+        when(exceptions.findByGuideIdAndExceptionDate(guideId, LocalDate.parse("2026-07-04")))
+                .thenReturn(List.of(existing));
+
+        CreateAvailabilityExceptionRequest req =
+                new CreateAvailabilityExceptionRequest(
+                        "2026-07-04", "UNAVAILABLE_ALL_DAY", null, null, "Holiday");
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().createException(user(userId), req));
+        assertEquals("An exception already exists for this date", ex.getMessage());
+        verify(exceptions, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createException_rejectsOverlappingRangeOnSameDate() {
+        UUID userId = UUID.randomUUID();
+        UUID guideId = UUID.randomUUID();
+        stubGuide(userId, guideId);
+
+        AvailabilityExceptionEntity existing = new AvailabilityExceptionEntity();
+        existing.setId(UUID.randomUUID());
+        existing.setGuideId(guideId);
+        existing.setExceptionDate(LocalDate.parse("2026-07-04"));
+        existing.setType(AvailabilityExceptionType.UNAVAILABLE_RANGE);
+        existing.setStartLocal(LocalTime.of(10, 0));
+        existing.setEndLocal(LocalTime.of(12, 0));
+        when(exceptions.findByGuideIdAndExceptionDate(guideId, LocalDate.parse("2026-07-04")))
+                .thenReturn(List.of(existing));
+
+        CreateAvailabilityExceptionRequest req =
+                new CreateAvailabilityExceptionRequest(
+                        "2026-07-04", "ADDITIONAL", "11:00", "13:00", "Extra hours");
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().createException(user(userId), req));
+        assertEquals(
+                "This exception overlaps an existing exception on the same date", ex.getMessage());
     }
 }

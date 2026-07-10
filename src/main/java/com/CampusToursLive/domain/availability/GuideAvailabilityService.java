@@ -17,6 +17,7 @@ import com.CampusToursLive.web.dto.UpdateAvailabilityRuleRequest;
 import com.CampusToursLive.web.dto.UpdateBookingSettingsRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -53,6 +54,7 @@ public class GuideAvailabilityService {
     private final GuideBookingSettingsService settingsService;
     private final GuideProfileRepository guides;
     private final ObjectMapper mapper;
+    private final EntityManager entityManager;
 
     public GuideAvailabilityService(
             GuideAvailabilityRuleRepository rules,
@@ -60,13 +62,15 @@ public class GuideAvailabilityService {
             GuideBookingSettingsRepository bookingSettings,
             GuideBookingSettingsService settingsService,
             GuideProfileRepository guides,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            EntityManager entityManager) {
         this.rules = rules;
         this.exceptions = exceptions;
         this.bookingSettings = bookingSettings;
         this.settingsService = settingsService;
         this.guides = guides;
         this.mapper = mapper;
+        this.entityManager = entityManager;
     }
 
     @Transactional(readOnly = true)
@@ -97,7 +101,11 @@ public class GuideAvailabilityService {
         validateTimeRange(rule.getStartLocal(), rule.getEndLocal());
         rule.setTimezone(
                 AvailabilityTimezones.resolveRuleTimezone(req.timezone(), settings.getTimezone()));
-        rule.setEffectiveFrom(parseDate(req.effectiveFrom(), "effectiveFrom", LocalDate.now()));
+        rule.setEffectiveFrom(
+                parseDate(
+                        req.effectiveFrom(),
+                        "effectiveFrom",
+                        AvailabilityTimezones.todayInTimezone(settings.getTimezone())));
         rule.setEffectiveTo(parseOptionalDate(req.effectiveTo(), "effectiveTo"));
         validateEffectiveRange(rule.getEffectiveFrom(), rule.getEffectiveTo());
         rule.setActive(req.active() == null || req.active());
@@ -163,6 +171,7 @@ public class GuideAvailabilityService {
         applyExceptionTimes(ex, req.startLocal(), req.endLocal());
         ex.setReason(trimToNull(req.reason()));
 
+        assertNoExceptionConflict(ex, null);
         persistException(ex);
         return toExceptionResponse(ex);
     }
@@ -189,6 +198,7 @@ public class GuideAvailabilityService {
         }
         if (req.reason() != null) ex.setReason(trimToNull(req.reason()));
 
+        assertNoExceptionConflict(ex, ex.getId());
         persistException(ex);
         return toExceptionResponse(ex);
     }
@@ -243,7 +253,11 @@ public class GuideAvailabilityService {
             settings.setDurationsOffered(writeDurations(req.durationsOffered()));
         }
         if (req.timezone() != null) {
-            settings.setTimezone(AvailabilityTimezones.validateTimezone(req.timezone()));
+            String newTimezone = AvailabilityTimezones.validateTimezone(req.timezone());
+            if (!newTimezone.equals(settings.getTimezone())) {
+                cascadeRuleTimezones(guide.getId(), newTimezone);
+                settings.setTimezone(newTimezone);
+            }
         }
 
         persistBookingSettings(settings);
@@ -274,7 +288,8 @@ public class GuideAvailabilityService {
 
     private void persistRule(GuideAvailabilityRuleEntity rule) {
         try {
-            rules.save(rule);
+            rules.saveAndFlush(rule);
+            entityManager.refresh(rule);
         } catch (DataIntegrityViolationException ex) {
             throw mapAvailabilityIntegrityViolation(ex, "availability rule");
         }
@@ -282,7 +297,8 @@ public class GuideAvailabilityService {
 
     private void persistException(AvailabilityExceptionEntity ex) {
         try {
-            exceptions.save(ex);
+            exceptions.saveAndFlush(ex);
+            entityManager.refresh(ex);
         } catch (DataIntegrityViolationException dive) {
             throw mapAvailabilityIntegrityViolation(dive, "availability exception");
         }
@@ -305,10 +321,18 @@ public class GuideAvailabilityService {
                 return new ValidationException(
                         "End time must be after start time on the same day.");
             }
+            if (lower.contains("guide_availability_rules_no_overlap")
+                    || lower.contains("exclusion")) {
+                return new ValidationException("This time block overlaps an existing rule");
+            }
         }
         return new ValidationException("Could not save " + resource + ".");
     }
 
+    /**
+     * In-memory overlap guard; backed at the DB layer by {@code
+     * guide_availability_rules_no_overlap} (Postgres exclusion constraint) for concurrent creates.
+     */
     private void assertNoRuleOverlap(GuideAvailabilityRuleEntity candidate, UUID excludeRuleId) {
         if (!candidate.isActive()) return;
 
@@ -338,6 +362,41 @@ public class GuideAvailabilityService {
         LocalDate aEnd = a.getEffectiveTo() != null ? a.getEffectiveTo() : LocalDate.MAX;
         LocalDate bEnd = b.getEffectiveTo() != null ? b.getEffectiveTo() : LocalDate.MAX;
         return !a.getEffectiveFrom().isAfter(bEnd) && !b.getEffectiveFrom().isAfter(aEnd);
+    }
+
+    private void cascadeRuleTimezones(UUID guideId, String timezone) {
+        for (GuideAvailabilityRuleEntity rule :
+                rules.findByGuideIdOrderByDayOfWeekAscStartLocalAsc(guideId)) {
+            rule.setTimezone(timezone);
+            rules.save(rule);
+        }
+    }
+
+    private void assertNoExceptionConflict(AvailabilityExceptionEntity candidate, UUID excludeId) {
+        List<AvailabilityExceptionEntity> sameDay =
+                exceptions.findByGuideIdAndExceptionDate(
+                        candidate.getGuideId(), candidate.getExceptionDate());
+        for (AvailabilityExceptionEntity other : sameDay) {
+            if (excludeId != null && other.getId().equals(excludeId)) {
+                continue;
+            }
+            if (other.getType() == AvailabilityExceptionType.UNAVAILABLE_ALL_DAY
+                    || candidate.getType() == AvailabilityExceptionType.UNAVAILABLE_ALL_DAY) {
+                throw new ValidationException("An exception already exists for this date");
+            }
+            if (candidate.getStartLocal() != null
+                    && candidate.getEndLocal() != null
+                    && other.getStartLocal() != null
+                    && other.getEndLocal() != null
+                    && timesOverlap(
+                            candidate.getStartLocal(),
+                            candidate.getEndLocal(),
+                            other.getStartLocal(),
+                            other.getEndLocal())) {
+                throw new ValidationException(
+                        "This exception overlaps an existing exception on the same date");
+            }
+        }
     }
 
     private void applyExceptionTimes(
@@ -500,7 +559,13 @@ public class GuideAvailabilityService {
     }
 
     private static String formatTime(LocalTime time) {
-        return time == null ? null : time.toString().substring(0, 5);
+        if (time == null) {
+            return null;
+        }
+        if (time.getSecond() == 0 && time.getNano() == 0) {
+            return time.format(TIME_HH_MM);
+        }
+        return time.format(TIME_HH_MM_SS);
     }
 
     private static String trimToNull(String raw) {

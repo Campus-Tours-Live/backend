@@ -402,7 +402,12 @@ open times from rules, exceptions, bookings, and buffers in a follow-up.
 
 See [`API_BookableTimeSlots.md`](../API_BookableTimeSlots.md) for request/response shapes,
 validation rules, and **V4** (`TIME` → `VARCHAR(8)` on rules/exceptions wall-clock columns —
-application-layer validation plus explicit DB CHECK constraints; see wall-clock convention below).
+application-layer validation plus explicit DB CHECK constraints and a Postgres exclusion
+constraint for concurrent rule overlap; see wall-clock convention below).
+
+If your local DB previously applied **`V3__availability_wall_clock_times.sql`** from an
+earlier checkout of this branch, reset before starting Core:
+`docker compose down -v && docker compose up -d`.
 
 **Wall-clock convention:** Availability `start_local` / `end_local` values are guide-local
 wall-clock times stored as `VARCHAR(8)` (`HH:mm:ss`) via `LocalWallClockTimeConverter`. This

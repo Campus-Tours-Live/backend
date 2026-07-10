@@ -170,4 +170,49 @@ class GuideAvailabilityRuleRepositoryTest {
         assertThatThrownBy(() -> exceptions.saveAndFlush(ex))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
+
+    @Test
+    void persistsCreatedAtFromDatabaseDefault() {
+        GuideAvailabilityRuleEntity rule = new GuideAvailabilityRuleEntity();
+        rule.setId(UUID.randomUUID());
+        rule.setGuideId(guideId);
+        rule.setDayOfWeek((short) 3);
+        rule.setStartLocal(LocalTime.of(9, 0));
+        rule.setEndLocal(LocalTime.of(17, 0));
+        rule.setTimezone("America/Los_Angeles");
+        rule.setEffectiveFrom(LocalDate.parse("2026-07-02"));
+        rule.setActive(true);
+
+        GuideAvailabilityRuleEntity saved = rules.saveAndFlush(rule);
+        entityManager.refresh(saved);
+
+        assertThat(saved.getCreatedAt()).isNotNull();
+    }
+
+    @Test
+    void rejectsOverlappingActiveRulesAtDatabase() {
+        GuideAvailabilityRuleEntity first = new GuideAvailabilityRuleEntity();
+        first.setId(UUID.randomUUID());
+        first.setGuideId(guideId);
+        first.setDayOfWeek((short) 1);
+        first.setStartLocal(LocalTime.of(9, 0));
+        first.setEndLocal(LocalTime.of(12, 0));
+        first.setTimezone("America/Los_Angeles");
+        first.setEffectiveFrom(LocalDate.parse("2026-07-02"));
+        first.setActive(true);
+        rules.saveAndFlush(first);
+
+        GuideAvailabilityRuleEntity overlapping = new GuideAvailabilityRuleEntity();
+        overlapping.setId(UUID.randomUUID());
+        overlapping.setGuideId(guideId);
+        overlapping.setDayOfWeek((short) 1);
+        overlapping.setStartLocal(LocalTime.of(11, 0));
+        overlapping.setEndLocal(LocalTime.of(14, 0));
+        overlapping.setTimezone("America/Los_Angeles");
+        overlapping.setEffectiveFrom(LocalDate.parse("2026-07-02"));
+        overlapping.setActive(true);
+
+        assertThatThrownBy(() -> rules.saveAndFlush(overlapping))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
 }

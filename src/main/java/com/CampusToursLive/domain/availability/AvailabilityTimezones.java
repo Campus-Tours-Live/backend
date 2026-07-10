@@ -2,6 +2,7 @@ package com.CampusToursLive.domain.availability;
 
 import com.CampusToursLive.error.ValidationException;
 import java.time.DateTimeException;
+import java.time.LocalDate;
 import java.time.ZoneId;
 
 /** Shared timezone validation for availability rules and booking settings. */
@@ -33,5 +34,10 @@ final class AvailabilityTimezones {
             throw new ValidationException("Rule timezone must match booking settings timezone");
         }
         return ruleTimezone;
+    }
+
+    /** Calendar \"today\" in the guide's configured timezone (for default effective dates). */
+    static LocalDate todayInTimezone(String timezone) {
+        return LocalDate.now(ZoneId.of(validateTimezone(timezone)));
     }
 }
