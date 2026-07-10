@@ -219,6 +219,8 @@ class GuideAvailabilityServiceTest {
         stubSettings(guideId);
         when(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, (short) 2))
                 .thenReturn(List.of());
+        when(rules.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
+        stubPersistRefresh();
 
         CreateAvailabilityRuleRequest req =
                 new CreateAvailabilityRuleRequest(
@@ -239,6 +241,8 @@ class GuideAvailabilityServiceTest {
         UUID userId = UUID.randomUUID();
         UUID guideId = UUID.randomUUID();
         when(guides.findByUserId(userId)).thenReturn(Optional.of(guide(guideId, userId)));
+        when(exceptions.saveAndFlush(any())).thenAnswer(echoSaveAndFlush());
+        stubPersistRefresh();
 
         CreateAvailabilityExceptionRequest req =
                 new CreateAvailabilityExceptionRequest(

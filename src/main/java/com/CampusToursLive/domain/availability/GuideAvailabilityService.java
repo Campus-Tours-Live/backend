@@ -111,8 +111,7 @@ public class GuideAvailabilityService {
         rule.setActive(req.active() == null || req.active());
 
         assertNoRuleOverlap(rule, null);
-        persistRule(rule);
-        return toRuleResponse(rule);
+        return toRuleResponse(persistRule(rule));
     }
 
     @Transactional
@@ -145,8 +144,7 @@ public class GuideAvailabilityService {
         validateEffectiveRange(rule.getEffectiveFrom(), rule.getEffectiveTo());
 
         assertNoRuleOverlap(rule, rule.getId());
-        persistRule(rule);
-        return toRuleResponse(rule);
+        return toRuleResponse(persistRule(rule));
     }
 
     @Transactional
@@ -172,8 +170,7 @@ public class GuideAvailabilityService {
         ex.setReason(trimToNull(req.reason()));
 
         assertNoExceptionConflict(ex, null);
-        persistException(ex);
-        return toExceptionResponse(ex);
+        return toExceptionResponse(persistException(ex));
     }
 
     @Transactional
@@ -199,8 +196,7 @@ public class GuideAvailabilityService {
         if (req.reason() != null) ex.setReason(trimToNull(req.reason()));
 
         assertNoExceptionConflict(ex, ex.getId());
-        persistException(ex);
-        return toExceptionResponse(ex);
+        return toExceptionResponse(persistException(ex));
     }
 
     @Transactional
@@ -286,19 +282,21 @@ public class GuideAvailabilityService {
         return settings;
     }
 
-    private void persistRule(GuideAvailabilityRuleEntity rule) {
+    private GuideAvailabilityRuleEntity persistRule(GuideAvailabilityRuleEntity rule) {
         try {
-            rules.saveAndFlush(rule);
-            entityManager.refresh(rule);
+            GuideAvailabilityRuleEntity saved = rules.saveAndFlush(rule);
+            entityManager.refresh(saved);
+            return saved;
         } catch (DataIntegrityViolationException ex) {
             throw mapAvailabilityIntegrityViolation(ex, "availability rule");
         }
     }
 
-    private void persistException(AvailabilityExceptionEntity ex) {
+    private AvailabilityExceptionEntity persistException(AvailabilityExceptionEntity ex) {
         try {
-            exceptions.saveAndFlush(ex);
-            entityManager.refresh(ex);
+            AvailabilityExceptionEntity saved = exceptions.saveAndFlush(ex);
+            entityManager.refresh(saved);
+            return saved;
         } catch (DataIntegrityViolationException dive) {
             throw mapAvailabilityIntegrityViolation(dive, "availability exception");
         }
