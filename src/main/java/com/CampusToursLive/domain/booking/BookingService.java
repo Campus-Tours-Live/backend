@@ -57,8 +57,15 @@ public class BookingService {
     private static final List<BookingStatus> PAYMENT_PENDING_STATUSES =
             List.of(BookingStatus.PENDING_PAYMENT_AUTH, BookingStatus.PAYMENT_ACTION_REQUIRED);
 
-    /** Statuses that hold a slot — mirrors the WHERE clause of the DB exclusion constraints. */
-    private static final List<BookingStatus> SLOT_HOLDING_STATUSES =
+    /**
+     * Statuses that hold a slot — mirrors the WHERE clause of the DB exclusion constraints.
+     * Package-private (not {@code private}) so {@link SlotGenerationService} (CTL-54 Task 8, same
+     * package) can subtract the SAME set of held bookings from candidate slots — a CONFIRMED-only
+     * view (like {@link BookingRepository
+     * #findByGuideIdAndStatusAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc}, used
+     * by Task 7) would under-count what actually occupies a guide's calendar.
+     */
+    static final List<BookingStatus> SLOT_HOLDING_STATUSES =
             List.of(
                     BookingStatus.PENDING_PAYMENT_AUTH,
                     BookingStatus.PENDING_GUIDE_ACCEPTANCE,
@@ -78,7 +85,16 @@ public class BookingService {
     private static final Duration MIN_NOTICE = Duration.ofHours(24);
     private static final Duration MAX_ADVANCE = Duration.ofDays(30);
     private static final Duration GUIDE_RESPONSE_WINDOW = Duration.ofMinutes(90);
-    private static final Duration RESERVED_BUFFER_AFTER = Duration.ofMinutes(15);
+
+    /**
+     * Post-tour buffer added to a booking's SCHEDULED end to get its RESERVED end (no buffer is
+     * added before the scheduled start). Package-private (not {@code private}) so {@link
+     * SlotGenerationService} (CTL-54 Task 8, same package) can predict a candidate slot's would-be
+     * reserved interval with the EXACT same math, rather than duplicating the constant — a slot
+     * this reuse marks "free" must actually be bookable without tripping {@code
+     * excl_guide_no_overlap}.
+     */
+    static final Duration RESERVED_BUFFER_AFTER = Duration.ofMinutes(15);
 
     /** Cap on free-text fields (participant notes, cancellation reason) — the columns are TEXT. */
     private static final int MAX_FREE_TEXT_LENGTH = 1000;

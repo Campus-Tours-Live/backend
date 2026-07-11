@@ -68,6 +68,20 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
             UUID guideId, List<BookingStatus> statuses, Instant newEnd, Instant newStart);
 
     /**
+     * The guide's slot-holding bookings whose RESERVED interval overlaps {@code [windowStart,
+     * windowEnd)} — same overlap direction/argument order as {@link
+     * #existsByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan} but returns
+     * the rows (not just existence): CTL-54 Task 8 slot generation needs each held booking's own
+     * reserved interval to test against every candidate slot individually.
+     */
+    List<BookingEntity>
+            findByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
+                    UUID guideId,
+                    List<BookingStatus> statuses,
+                    Instant windowEnd,
+                    Instant windowStart);
+
+    /**
      * Participant-side twin of the guide overlap check (constraint: excl_participant_no_overlap).
      */
     boolean
