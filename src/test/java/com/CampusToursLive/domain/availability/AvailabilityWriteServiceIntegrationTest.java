@@ -3,9 +3,17 @@ package com.CampusToursLive.domain.availability;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.CampusToursLive.domain.booking.AcceptanceMode;
+import com.CampusToursLive.domain.booking.BookingEntity;
+import com.CampusToursLive.domain.booking.BookingRepository;
+import com.CampusToursLive.domain.booking.BookingStatus;
 import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.tour.TourOfferingEntity;
+import com.CampusToursLive.domain.tour.TourOfferingRepository;
+import com.CampusToursLive.domain.tour.TourStatus;
+import com.CampusToursLive.domain.tour.TourTopic;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.university.UniversityStatus;
@@ -14,6 +22,7 @@ import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.web.dto.AffectedBookingResponse;
 import com.CampusToursLive.web.dto.AvailabilityExceptionRequest;
 import com.CampusToursLive.web.dto.AvailabilityRuleRequest;
 import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
@@ -68,6 +77,8 @@ class AvailabilityWriteServiceIntegrationTest {
     @Autowired private GuideProfileRepository guides;
     @Autowired private UserRepository users;
     @Autowired private UniversityRepository universities;
+    @Autowired private TourOfferingRepository offerings;
+    @Autowired private BookingRepository bookings;
     @Autowired private EntityManager entityManager;
 
     private AvailabilityService availabilityService;
@@ -77,6 +88,7 @@ class AvailabilityWriteServiceIntegrationTest {
     private UUID guideAUserId;
     private UUID guideAId;
     private UUID guideBId;
+    private UUID offeringId;
 
     @BeforeEach
     void setUp() {
@@ -91,6 +103,7 @@ class AvailabilityWriteServiceIntegrationTest {
         guideAUserId = guideA.getUserId();
         guideAId = guideA.getId();
         guideBId = seedGuide("Guide B").getId();
+        offeringId = seedOffering(guideAId).getId();
 
         availabilityService =
                 new AvailabilityService(
@@ -103,6 +116,8 @@ class AvailabilityWriteServiceIntegrationTest {
                         guides,
                         availabilityService,
                         entityManager,
+                        bookings,
+                        occurrences,
                         FIXED_CLOCK);
     }
 
@@ -660,8 +675,158 @@ class AvailabilityWriteServiceIntegrationTest {
     }
 
     // ---------------------------------------------------------------------
+    // Task 7 — "(A) allow + notify": an availability edit that uncovers an existing future
+    // CONFIRMED booking still succeeds, but the write reports the affected booking(s).
+    // ---------------------------------------------------------------------
+
+    /** Next Monday after FIXED_TODAY (a Saturday) -- 2026-07-13. */
+    private static final LocalDate NEXT_MONDAY = FIXED_TODAY.plusDays(2);
+
+    private static final int MONDAY_DOW = NEXT_MONDAY.getDayOfWeek().getValue() % 7;
+
+    @Test
+    void deletingTheCoveringRule_succeeds_leavesBookingUntouched_andReportsIt() {
+        AvailabilityRuleRequest ruleReq =
+                new AvailabilityRuleRequest(MONDAY_DOW, "10:00", 240, null, null, null);
+        AvailabilityRuleResponse rule = writeService.createRule(actingUser(guideAUserId), ruleReq);
+
+        Instant scheduledStart = NEXT_MONDAY.atTime(12, 0).atZone(LA_ZONE).toInstant();
+        Instant scheduledEnd = NEXT_MONDAY.atTime(13, 0).atZone(LA_ZONE).toInstant();
+        BookingEntity booking =
+                bookings.saveAndFlush(
+                        confirmedBooking(guideAId, offeringId, scheduledStart, scheduledEnd));
+        // Contained BEFORE the edit — sanity check the fixture actually covers the booking.
+        assertThat(occurrences.existsContaining(guideAId, scheduledStart, scheduledEnd)).isTrue();
+
+        List<AvailabilityRuleResponse> remaining =
+                writeService.deleteRule(actingUser(guideAUserId), UUID.fromString(rule.id()));
+
+        // The edit succeeded (no exception) and left no rules.
+        assertThat(remaining).isEmpty();
+        // No occurrence covers the booking anymore.
+        assertThat(occurrences.existsContaining(guideAId, scheduledStart, scheduledEnd)).isFalse();
+
+        // The booking row itself is completely untouched.
+        BookingEntity reloaded = bookings.findById(booking.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(BookingStatus.CONFIRMED);
+        assertThat(reloaded.getScheduledStartAt()).isEqualTo(scheduledStart);
+        assertThat(reloaded.getScheduledEndAt()).isEqualTo(scheduledEnd);
+
+        // The write surfaces the now-uncovered booking as a warning.
+        List<AffectedBookingResponse> affected =
+                writeService.findFutureBookingsOutsideAvailability(guideAId);
+        assertThat(affected).hasSize(1);
+        assertThat(affected.get(0).bookingId()).isEqualTo(booking.getId().toString());
+        assertThat(affected.get(0).bookingNumber()).isEqualTo(booking.getBookingNumber());
+        assertThat(affected.get(0).status()).isEqualTo("CONFIRMED");
+        assertThat(affected.get(0).scheduledStartAt()).isEqualTo(scheduledStart.toString());
+        assertThat(affected.get(0).scheduledEndAt()).isEqualTo(scheduledEnd.toString());
+
+        // Also reachable through the user-facing overload the controller calls.
+        assertThat(writeService.findAffectedBookings(actingUser(guideAUserId))).hasSize(1);
+    }
+
+    @Test
+    void editThatLeavesBookingCovered_reportsNoAffectedBookings() {
+        AvailabilityRuleRequest ruleReq =
+                new AvailabilityRuleRequest(MONDAY_DOW, "10:00", 240, null, null, null);
+        writeService.createRule(actingUser(guideAUserId), ruleReq);
+
+        Instant scheduledStart = NEXT_MONDAY.atTime(12, 0).atZone(LA_ZONE).toInstant();
+        Instant scheduledEnd = NEXT_MONDAY.atTime(13, 0).atZone(LA_ZONE).toInstant();
+        bookings.saveAndFlush(confirmedBooking(guideAId, offeringId, scheduledStart, scheduledEnd));
+
+        // A settings-only change (unrelated to the rule) still triggers rematerialize, but the
+        // rule -- and therefore the occurrence covering the booking -- is untouched.
+        GuideBookingSettingsUpdateRequest settingsReq =
+                new GuideBookingSettingsUpdateRequest(null, 45, null, null, null, null, null, null);
+        writeService.updateSettings(actingUser(guideAUserId), settingsReq);
+
+        assertThat(occurrences.existsContaining(guideAId, scheduledStart, scheduledEnd)).isTrue();
+        assertThat(writeService.findFutureBookingsOutsideAvailability(guideAId)).isEmpty();
+    }
+
+    @Test
+    void pastConfirmedBooking_uncovered_isNotReported() {
+        AvailabilityRuleRequest ruleReq =
+                new AvailabilityRuleRequest(MONDAY_DOW, "10:00", 240, null, null, null);
+        AvailabilityRuleResponse rule = writeService.createRule(actingUser(guideAUserId), ruleReq);
+
+        // A booking scheduled BEFORE "now" (the fixed clock) that would be uncovered by deleting
+        // the rule -- must never be reported (Task 7 scopes strictly to FUTURE bookings).
+        Instant pastStart = FIXED_TODAY.minusDays(30).atTime(12, 0).atZone(LA_ZONE).toInstant();
+        Instant pastEnd = FIXED_TODAY.minusDays(30).atTime(13, 0).atZone(LA_ZONE).toInstant();
+        bookings.saveAndFlush(confirmedBooking(guideAId, offeringId, pastStart, pastEnd));
+
+        writeService.deleteRule(actingUser(guideAUserId), UUID.fromString(rule.id()));
+
+        assertThat(writeService.findFutureBookingsOutsideAvailability(guideAId)).isEmpty();
+    }
+
+    @Test
+    void nonConfirmedBooking_uncovered_isNotReported() {
+        AvailabilityRuleRequest ruleReq =
+                new AvailabilityRuleRequest(MONDAY_DOW, "10:00", 240, null, null, null);
+        AvailabilityRuleResponse rule = writeService.createRule(actingUser(guideAUserId), ruleReq);
+
+        // A future booking that is NOT CONFIRMED (e.g. still waiting on the guide) -- Task 7
+        // scopes to CONFIRMED only; PENDING re-validation belongs to CTL-46, not this warning.
+        Instant scheduledStart = NEXT_MONDAY.atTime(12, 0).atZone(LA_ZONE).toInstant();
+        Instant scheduledEnd = NEXT_MONDAY.atTime(13, 0).atZone(LA_ZONE).toInstant();
+        BookingEntity pending =
+                confirmedBooking(guideAId, offeringId, scheduledStart, scheduledEnd);
+        pending.setStatus(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
+        bookings.saveAndFlush(pending);
+
+        writeService.deleteRule(actingUser(guideAUserId), UUID.fromString(rule.id()));
+
+        assertThat(writeService.findFutureBookingsOutsideAvailability(guideAId)).isEmpty();
+    }
+
+    // ---------------------------------------------------------------------
     // Fixtures.
     // ---------------------------------------------------------------------
+
+    private static final java.time.ZoneId LA_ZONE = java.time.ZoneId.of("America/Los_Angeles");
+
+    private TourOfferingEntity seedOffering(UUID guideId) {
+        TourOfferingEntity o = new TourOfferingEntity();
+        o.setId(UUID.randomUUID());
+        o.setGuideId(guideId);
+        o.setUniversityId(universityId);
+        o.setTitle("Campus Walk");
+        o.setSlug("campus-walk-" + UUID.randomUUID().toString().substring(0, 8));
+        o.setTopic(TourTopic.GENERAL_CAMPUS);
+        o.setDurationMin(60);
+        o.setPriceCents(5000L);
+        o.setStatus(TourStatus.ACTIVE);
+        return offerings.save(o);
+    }
+
+    /** A CONFIRMED 60-min booking for the given guide/offering/interval, seeded directly. */
+    private BookingEntity confirmedBooking(
+            UUID guideId, UUID offeringId, Instant scheduledStart, Instant scheduledEnd) {
+        UserEntity participant = users.save(user("Pat Participant"));
+        BookingEntity b = new BookingEntity();
+        b.setId(UUID.randomUUID());
+        b.setBookingNumber("BK-T7" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
+        b.setParticipantUserId(participant.getId());
+        b.setGuideId(guideId);
+        b.setTourOfferingId(offeringId);
+        b.setUniversityId(universityId);
+        b.setStatus(BookingStatus.CONFIRMED);
+        b.setAcceptanceModeSnap(AcceptanceMode.MANUAL);
+        b.setScheduledStartAt(scheduledStart);
+        b.setScheduledEndAt(scheduledEnd);
+        b.setReservedStartAt(scheduledStart);
+        b.setReservedEndAt(scheduledEnd.plusSeconds(15 * 60));
+        b.setBasePriceCents(5000L);
+        b.setTotalCents(5000L);
+        b.setPlatformFeeCents(0L);
+        b.setGuideAmountCents(5000L);
+        b.setCurrency("USD");
+        return b;
+    }
 
     private GuideProfileEntity seedGuide(String displayName) {
         UserEntity guideUser = users.save(user(displayName));

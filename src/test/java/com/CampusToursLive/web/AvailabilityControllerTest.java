@@ -18,6 +18,7 @@ import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.security.CurrentUser;
+import com.CampusToursLive.web.dto.AffectedBookingResponse;
 import com.CampusToursLive.web.dto.AvailabilityExceptionResponse;
 import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
@@ -211,7 +212,45 @@ class AvailabilityControllerTest {
                                         "{\"dayOfWeek\":1,\"startLocal\":\"09:00\",\"windowMin\":60}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(ruleId.toString()))
-                .andExpect(jsonPath("$.data.timezone").value("America/Los_Angeles"));
+                .andExpect(jsonPath("$.data.timezone").value("America/Los_Angeles"))
+                // CTL-54 Task 7: no affected bookings were stubbed -> an empty warning list, and
+                // the plain "data" contract (asserted above) is completely untouched by its
+                // presence.
+                .andExpect(jsonPath("$.affectedBookings").isArray())
+                .andExpect(jsonPath("$.affectedBookings").isEmpty())
+                .andExpect(jsonPath("$.meta.requestId").exists());
+    }
+
+    @Test
+    void createRule_surfacesAffectedBookings_whenEditUncoveredAnExistingBooking() throws Exception {
+        UserEntity u = user();
+        UUID ruleId = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(availability.createRule(eq(u), any())).thenReturn(rule(ruleId));
+        AffectedBookingResponse affected =
+                new AffectedBookingResponse(
+                        bookingId.toString(),
+                        "BK-7F3K2M9QX1",
+                        "2026-07-13T19:00:00Z",
+                        "2026-07-13T20:00:00Z",
+                        "CONFIRMED");
+        when(availability.findAffectedBookings(u)).thenReturn(List.of(affected));
+
+        mvc.perform(
+                        post("/availability/rules")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        "{\"dayOfWeek\":1,\"startLocal\":\"09:00\",\"windowMin\":60}"))
+                .andExpect(status().isOk())
+                // The write's normal payload ("data") is unaffected by the warning.
+                .andExpect(jsonPath("$.data.id").value(ruleId.toString()))
+                .andExpect(jsonPath("$.affectedBookings[0].bookingId").value(bookingId.toString()))
+                .andExpect(jsonPath("$.affectedBookings[0].bookingNumber").value("BK-7F3K2M9QX1"))
+                .andExpect(jsonPath("$.affectedBookings[0].status").value("CONFIRMED"))
+                .andExpect(
+                        jsonPath("$.affectedBookings[0].scheduledStartAt")
+                                .value("2026-07-13T19:00:00Z"));
     }
 
     @Test
@@ -319,6 +358,33 @@ class AvailabilityControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").isArray())
                 .andExpect(jsonPath("$.data").isEmpty());
+    }
+
+    @Test
+    void deleteRule_surfacesAffectedBookings_whenDeletionUncoveredAnExistingBooking()
+            throws Exception {
+        UserEntity u = user();
+        UUID id = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(availability.deleteRule(u, id)).thenReturn(List.of());
+        when(availability.findAffectedBookings(u))
+                .thenReturn(
+                        List.of(
+                                new AffectedBookingResponse(
+                                        bookingId.toString(),
+                                        "BK-ABANDONED1",
+                                        "2026-07-13T19:00:00Z",
+                                        "2026-07-13T20:00:00Z",
+                                        "CONFIRMED")));
+
+        mvc.perform(delete("/availability/rules/{id}", id))
+                .andExpect(status().isOk())
+                // "data" (the remaining-rules list) is still exactly what deleteRule returned.
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data").isEmpty())
+                .andExpect(jsonPath("$.affectedBookings[0].bookingId").value(bookingId.toString()))
+                .andExpect(jsonPath("$.affectedBookings[0].status").value("CONFIRMED"));
     }
 
     // ---------------------------------------------------------------------

@@ -1,11 +1,15 @@
 package com.CampusToursLive.domain.availability;
 
 import com.CampusToursLive.domain.booking.AcceptanceMode;
+import com.CampusToursLive.domain.booking.BookingEntity;
+import com.CampusToursLive.domain.booking.BookingRepository;
+import com.CampusToursLive.domain.booking.BookingStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.web.dto.AffectedBookingResponse;
 import com.CampusToursLive.web.dto.AvailabilityExceptionRequest;
 import com.CampusToursLive.web.dto.AvailabilityExceptionResponse;
 import com.CampusToursLive.web.dto.AvailabilityRuleRequest;
@@ -15,6 +19,7 @@ import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
 import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.time.DateTimeException;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -61,6 +66,8 @@ public class AvailabilityWriteService {
     private final GuideProfileRepository guides;
     private final AvailabilityService availabilityService;
     private final EntityManager entityManager;
+    private final BookingRepository bookings;
+    private final GuideAvailabilityOccurrenceRepository occurrences;
     private final Clock clock;
 
     @Autowired
@@ -70,7 +77,9 @@ public class AvailabilityWriteService {
             GuideBookingSettingsRepository settingsRepo,
             GuideProfileRepository guides,
             AvailabilityService availabilityService,
-            EntityManager entityManager) {
+            EntityManager entityManager,
+            BookingRepository bookings,
+            GuideAvailabilityOccurrenceRepository occurrences) {
         this(
                 rules,
                 exceptions,
@@ -78,6 +87,8 @@ public class AvailabilityWriteService {
                 guides,
                 availabilityService,
                 entityManager,
+                bookings,
+                occurrences,
                 Clock.systemUTC());
     }
 
@@ -89,6 +100,8 @@ public class AvailabilityWriteService {
             GuideProfileRepository guides,
             AvailabilityService availabilityService,
             EntityManager entityManager,
+            BookingRepository bookings,
+            GuideAvailabilityOccurrenceRepository occurrences,
             Clock clock) {
         this.rules = rules;
         this.exceptions = exceptions;
@@ -96,6 +109,8 @@ public class AvailabilityWriteService {
         this.guides = guides;
         this.availabilityService = availabilityService;
         this.entityManager = entityManager;
+        this.bookings = bookings;
+        this.occurrences = occurrences;
         this.clock = clock;
     }
 
@@ -294,6 +309,56 @@ public class AvailabilityWriteService {
 
         availabilityService.rematerialize(guideId);
         return toSettingsResponse(settings);
+    }
+
+    // ---------------------------------------------------------------------
+    // Task 7 — "(A) allow + notify": detect (never block, never mutate) existing future CONFIRMED
+    // bookings an availability edit left uncovered by any current occurrence.
+    // ---------------------------------------------------------------------
+
+    /**
+     * The guide's own future CONFIRMED bookings not contained by any of their current materialized
+     * occurrences, as of right after this call (so a caller invoking this AFTER a write's {@link
+     * AvailabilityService#rematerialize} has committed sees the post-edit state). Never mutates a
+     * booking — read-only.
+     *
+     * <p>Scope, per the spec: only {@code CONFIRMED} (the immutable, accepted state) and only
+     * FUTURE (scheduled start at-or-after "now", via the injected {@link Clock} for testability).
+     * PENDING bookings are still subject to guide acceptance/decline and re-validation is CTL-46's
+     * job, not this warning; a booking that has already started/finished is moot to warn about.
+     */
+    @Transactional(readOnly = true)
+    public List<AffectedBookingResponse> findFutureBookingsOutsideAvailability(UUID guideId) {
+        Instant now = clock.instant();
+        return bookings
+                .findByGuideIdAndStatusAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                        guideId, BookingStatus.CONFIRMED, now)
+                .stream()
+                .filter(
+                        b ->
+                                !occurrences.existsContaining(
+                                        guideId, b.getScheduledStartAt(), b.getScheduledEndAt()))
+                .map(AvailabilityWriteService::toAffectedBookingResponse)
+                .toList();
+    }
+
+    /**
+     * Convenience overload for the controller: resolves the caller's {@code guideId} the same
+     * IDOR-safe way every other method here does, then delegates to {@link
+     * #findFutureBookingsOutsideAvailability(UUID)}.
+     */
+    @Transactional(readOnly = true)
+    public List<AffectedBookingResponse> findAffectedBookings(UserEntity user) {
+        return findFutureBookingsOutsideAvailability(requireGuideId(user));
+    }
+
+    private static AffectedBookingResponse toAffectedBookingResponse(BookingEntity b) {
+        return new AffectedBookingResponse(
+                b.getId().toString(),
+                b.getBookingNumber(),
+                b.getScheduledStartAt().toString(),
+                b.getScheduledEndAt().toString(),
+                b.getStatus().name());
     }
 
     // ---------------------------------------------------------------------

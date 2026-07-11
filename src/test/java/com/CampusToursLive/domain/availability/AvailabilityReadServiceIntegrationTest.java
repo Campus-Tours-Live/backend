@@ -3,6 +3,7 @@ package com.CampusToursLive.domain.availability;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.CampusToursLive.domain.booking.BookingRepository;
 import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
@@ -67,6 +68,7 @@ class AvailabilityReadServiceIntegrationTest {
     @Autowired private GuideProfileRepository guides;
     @Autowired private UserRepository users;
     @Autowired private UniversityRepository universities;
+    @Autowired private BookingRepository bookings;
     @Autowired private EntityManager entityManager;
 
     private AvailabilityReadService readService;
@@ -98,7 +100,15 @@ class AvailabilityReadServiceIntegrationTest {
                 new AvailabilityService(
                         rules, exceptions, occurrences, dstNotices, settingsRepo, clock);
         return new AvailabilityWriteService(
-                rules, exceptions, settingsRepo, guides, availabilityService, entityManager, clock);
+                rules,
+                exceptions,
+                settingsRepo,
+                guides,
+                availabilityService,
+                entityManager,
+                bookings,
+                occurrences,
+                clock);
     }
 
     // ---------------------------------------------------------------------

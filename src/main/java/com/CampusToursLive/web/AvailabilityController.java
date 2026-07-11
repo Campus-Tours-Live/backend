@@ -2,13 +2,16 @@ package com.CampusToursLive.web;
 
 import com.CampusToursLive.domain.availability.AvailabilityReadService;
 import com.CampusToursLive.domain.availability.AvailabilityWriteService;
+import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.security.CurrentUser;
+import com.CampusToursLive.web.dto.AffectedBookingResponse;
 import com.CampusToursLive.web.dto.ApiEnvelope;
 import com.CampusToursLive.web.dto.AvailabilityExceptionRequest;
 import com.CampusToursLive.web.dto.AvailabilityExceptionResponse;
 import com.CampusToursLive.web.dto.AvailabilityRuleRequest;
 import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
+import com.CampusToursLive.web.dto.AvailabilityWriteResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
 import com.CampusToursLive.web.dto.ResolvedAvailabilityResponse;
@@ -38,6 +41,15 @@ import org.springframework.web.bind.annotation.RestController;
  * rules/exceptions/settings a guide just edited. This does NOT include the resolved read ({@code
  * GET /availability}, CTL-54 Task 5b -- see {@link AvailabilityReadService}, a pure read that never
  * rematerializes) or booking-containment (Task 6).
+ *
+ * <p><b>Task 7 -- "(A) allow + notify".</b> Every write endpoint below returns {@link
+ * AvailabilityWriteResponse} rather than the plain {@link ApiEnvelope}: after the edit commits (and
+ * re-materializes), this controller ALSO asks {@link AvailabilityWriteService#findAffectedBookings}
+ * for the guide's own future CONFIRMED bookings the edit left uncovered by any occurrence. The edit
+ * still succeeds either way and the booking is NEVER mutated -- {@code affectedBookings} is purely
+ * advisory so the guide-facing UI can warn. The read routes ({@code GET /availability}, {@code
+ * /rules}, {@code /exceptions}, {@code /settings}) are unaffected and keep returning the plain
+ * {@link ApiEnvelope}.
  */
 @RestController
 @RequestMapping("/availability")
@@ -86,25 +98,29 @@ public class AvailabilityController {
 
     /** Create a recurring availability rule; timezone is server-set to the guide's settings tz. */
     @PostMapping("/rules")
-    public ApiEnvelope<AvailabilityRuleResponse> createRule(
+    public AvailabilityWriteResponse<AvailabilityRuleResponse> createRule(
             @RequestBody AvailabilityRuleRequest req) {
         var user = currentUser.requireRole(UserRole.GUIDE);
-        return ApiEnvelope.of(availability.createRule(user, req));
+        AvailabilityRuleResponse created = availability.createRule(user, req);
+        return AvailabilityWriteResponse.of(created, affectedBookings(user));
     }
 
     /** Update an owned rule (404 if the id does not belong to the caller). */
     @PatchMapping("/rules/{id}")
-    public ApiEnvelope<AvailabilityRuleResponse> updateRule(
+    public AvailabilityWriteResponse<AvailabilityRuleResponse> updateRule(
             @PathVariable UUID id, @RequestBody AvailabilityRuleRequest req) {
         var user = currentUser.requireRole(UserRole.GUIDE);
-        return ApiEnvelope.of(availability.updateRule(user, id, req));
+        AvailabilityRuleResponse updated = availability.updateRule(user, id, req);
+        return AvailabilityWriteResponse.of(updated, affectedBookings(user));
     }
 
     /** Delete an owned rule (404 if not owned); returns the guide's remaining rules. */
     @DeleteMapping("/rules/{id}")
-    public ApiEnvelope<List<AvailabilityRuleResponse>> deleteRule(@PathVariable UUID id) {
+    public AvailabilityWriteResponse<List<AvailabilityRuleResponse>> deleteRule(
+            @PathVariable UUID id) {
         var user = currentUser.requireRole(UserRole.GUIDE);
-        return ApiEnvelope.of(availability.deleteRule(user, id));
+        List<AvailabilityRuleResponse> remaining = availability.deleteRule(user, id);
+        return AvailabilityWriteResponse.of(remaining, affectedBookings(user));
     }
 
     /** List the guide's one-off availability exceptions. */
@@ -116,25 +132,29 @@ public class AvailabilityController {
 
     /** Create a one-off availability exception (UNAVAILABLE or ADDITIONAL). */
     @PostMapping("/exceptions")
-    public ApiEnvelope<AvailabilityExceptionResponse> createException(
+    public AvailabilityWriteResponse<AvailabilityExceptionResponse> createException(
             @RequestBody AvailabilityExceptionRequest req) {
         var user = currentUser.requireRole(UserRole.GUIDE);
-        return ApiEnvelope.of(availability.createException(user, req));
+        AvailabilityExceptionResponse created = availability.createException(user, req);
+        return AvailabilityWriteResponse.of(created, affectedBookings(user));
     }
 
     /** Update an owned exception (404 if the id does not belong to the caller). */
     @PatchMapping("/exceptions/{id}")
-    public ApiEnvelope<AvailabilityExceptionResponse> updateException(
+    public AvailabilityWriteResponse<AvailabilityExceptionResponse> updateException(
             @PathVariable UUID id, @RequestBody AvailabilityExceptionRequest req) {
         var user = currentUser.requireRole(UserRole.GUIDE);
-        return ApiEnvelope.of(availability.updateException(user, id, req));
+        AvailabilityExceptionResponse updated = availability.updateException(user, id, req);
+        return AvailabilityWriteResponse.of(updated, affectedBookings(user));
     }
 
     /** Delete an owned exception (404 if not owned); returns the guide's remaining exceptions. */
     @DeleteMapping("/exceptions/{id}")
-    public ApiEnvelope<List<AvailabilityExceptionResponse>> deleteException(@PathVariable UUID id) {
+    public AvailabilityWriteResponse<List<AvailabilityExceptionResponse>> deleteException(
+            @PathVariable UUID id) {
         var user = currentUser.requireRole(UserRole.GUIDE);
-        return ApiEnvelope.of(availability.deleteException(user, id));
+        List<AvailabilityExceptionResponse> remaining = availability.deleteException(user, id);
+        return AvailabilityWriteResponse.of(remaining, affectedBookings(user));
     }
 
     /** The guide's booking settings; auto-provisions a default row the first time it is asked. */
@@ -149,9 +169,19 @@ public class AvailabilityController {
      * every existing rule (the read-only-tz invariant) before re-materializing.
      */
     @PatchMapping("/settings")
-    public ApiEnvelope<GuideBookingSettingsResponse> updateSettings(
+    public AvailabilityWriteResponse<GuideBookingSettingsResponse> updateSettings(
             @RequestBody GuideBookingSettingsUpdateRequest req) {
         var user = currentUser.requireRole(UserRole.GUIDE);
-        return ApiEnvelope.of(availability.updateSettings(user, req));
+        GuideBookingSettingsResponse updated = availability.updateSettings(user, req);
+        return AvailabilityWriteResponse.of(updated, affectedBookings(user));
+    }
+
+    /**
+     * CTL-54 Task 7: the caller's own future CONFIRMED bookings left uncovered by any current
+     * occurrence, computed AFTER the write above has already committed its rematerialize -- so it
+     * reflects the post-edit availability. Read-only; never mutates a booking.
+     */
+    private List<AffectedBookingResponse> affectedBookings(UserEntity user) {
+        return availability.findAffectedBookings(user);
     }
 }
