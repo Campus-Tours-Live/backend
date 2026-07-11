@@ -1,5 +1,6 @@
 package com.CampusToursLive.web;
 
+import com.CampusToursLive.domain.availability.AvailabilityReadService;
 import com.CampusToursLive.domain.availability.AvailabilityWriteService;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.security.CurrentUser;
@@ -10,6 +11,7 @@ import com.CampusToursLive.web.dto.AvailabilityRuleRequest;
 import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
+import com.CampusToursLive.web.dto.ResolvedAvailabilityResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
 import java.util.UUID;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -33,7 +36,8 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>Every write triggers {@code AvailabilityService.rematerialize(guideId)} inside the same
  * transaction (see {@link AvailabilityWriteService}), so the materialized occurrences never lag the
  * rules/exceptions/settings a guide just edited. This does NOT include the resolved read ({@code
- * GET /availability}, CTL-54 Task 5b) or booking-containment (Task 6).
+ * GET /availability}, CTL-54 Task 5b -- see {@link AvailabilityReadService}, a pure read that never
+ * rematerializes) or booking-containment (Task 6).
  */
 @RestController
 @RequestMapping("/availability")
@@ -47,10 +51,30 @@ public class AvailabilityController {
 
     private final CurrentUser currentUser;
     private final AvailabilityWriteService availability;
+    private final AvailabilityReadService availabilityRead;
 
-    public AvailabilityController(CurrentUser currentUser, AvailabilityWriteService availability) {
+    public AvailabilityController(
+            CurrentUser currentUser,
+            AvailabilityWriteService availability,
+            AvailabilityReadService availabilityRead) {
         this.currentUser = currentUser;
         this.availability = availability;
+        this.availabilityRead = availabilityRead;
+    }
+
+    /**
+     * The guide's resolved availability (CTL-54 Task 5b): editable rules + backend-coalesced
+     * occurrences + DST gap-days -- the single source of truth CTL-55/CTL-56 render read-only
+     * without re-coalescing. {@code from} / {@code to} (ISO {@code yyyy-MM-dd}) optionally narrow
+     * the returned occurrences to those intersecting {@code [from, to)}; omitted, every
+     * materialized occurrence is returned.
+     */
+    @GetMapping
+    public ApiEnvelope<ResolvedAvailabilityResponse> getResolvedAvailability(
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        var user = currentUser.requireRole(UserRole.GUIDE);
+        return ApiEnvelope.of(availabilityRead.getResolvedAvailability(user, from, to));
     }
 
     /** List the guide's recurring availability rules. */

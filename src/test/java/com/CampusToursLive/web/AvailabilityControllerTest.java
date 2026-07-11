@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.CampusToursLive.domain.availability.AvailabilityReadService;
 import com.CampusToursLive.domain.availability.AvailabilityWriteService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
@@ -20,6 +21,9 @@ import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.dto.AvailabilityExceptionResponse;
 import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
+import com.CampusToursLive.web.dto.ResolvedAvailabilityResponse;
+import com.CampusToursLive.web.dto.ResolvedOccurrence;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -52,6 +56,7 @@ class AvailabilityControllerTest {
 
     @MockitoBean private CurrentUser currentUser;
     @MockitoBean private AvailabilityWriteService availability;
+    @MockitoBean private AvailabilityReadService availabilityRead;
 
     private static UserEntity user() {
         UserEntity u = new UserEntity();
@@ -81,6 +86,86 @@ class AvailabilityControllerTest {
                 List.of(30, 45, 60, 90),
                 timezone,
                 "2026-07-11T00:00:00Z");
+    }
+
+    // ---------------------------------------------------------------------
+    // Resolved availability (CTL-54 Task 5b).
+    // ---------------------------------------------------------------------
+
+    @Test
+    void getResolvedAvailability_returnsEnvelope_whenAuthorized() throws Exception {
+        UserEntity u = user();
+        UUID ruleId = UUID.randomUUID();
+        ResolvedAvailabilityResponse resolved =
+                new ResolvedAvailabilityResponse(
+                        List.of(rule(ruleId)),
+                        List.of(
+                                new ResolvedOccurrence(
+                                        Instant.parse("2026-07-13T16:00:00Z"),
+                                        Instant.parse("2026-07-13T17:00:00Z"))),
+                        List.of("2026-03-08"));
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(availabilityRead.getResolvedAvailability(u, null, null)).thenReturn(resolved);
+
+        mvc.perform(get("/availability"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rules[0].id").value(ruleId.toString()))
+                .andExpect(jsonPath("$.data.occurrences[0].startAt").value("2026-07-13T16:00:00Z"))
+                .andExpect(jsonPath("$.data.occurrences[0].endAt").value("2026-07-13T17:00:00Z"))
+                .andExpect(jsonPath("$.data.dstGapDays[0]").value("2026-03-08"))
+                .andExpect(jsonPath("$.meta.requestId").exists());
+    }
+
+    @Test
+    void getResolvedAvailability_passesWindowParams_whenProvided() throws Exception {
+        UserEntity u = user();
+        ResolvedAvailabilityResponse resolved =
+                new ResolvedAvailabilityResponse(List.of(), List.of(), List.of());
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(availabilityRead.getResolvedAvailability(u, "2026-07-01", "2026-08-01"))
+                .thenReturn(resolved);
+
+        mvc.perform(get("/availability").param("from", "2026-07-01").param("to", "2026-08-01"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rules").isEmpty())
+                .andExpect(jsonPath("$.data.occurrences").isEmpty())
+                .andExpect(jsonPath("$.data.dstGapDays").isEmpty());
+    }
+
+    @Test
+    void getResolvedAvailability_403_whenNonGuideCaller() throws Exception {
+        when(currentUser.requireRole(UserRole.GUIDE))
+                .thenThrow(new ForbiddenException("Missing required role: GUIDE"));
+
+        mvc.perform(get("/availability"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
+    }
+
+    @Test
+    void getResolvedAvailability_422_whenWindowMalformed() throws Exception {
+        UserEntity u = user();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(availabilityRead.getResolvedAvailability(u, "not-a-date", null))
+                .thenThrow(
+                        new ValidationException(
+                                "Invalid from (expected e.g. \"2026-07-11\"): not-a-date"));
+
+        mvc.perform(get("/availability").param("from", "not-a-date"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422));
+    }
+
+    @Test
+    void getResolvedAvailability_422_whenToNotAfterFrom() throws Exception {
+        UserEntity u = user();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(availabilityRead.getResolvedAvailability(u, "2026-07-11", "2026-07-01"))
+                .thenThrow(new ValidationException("to must be after from"));
+
+        mvc.perform(get("/availability").param("from", "2026-07-11").param("to", "2026-07-01"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422));
     }
 
     // ---------------------------------------------------------------------
