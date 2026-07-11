@@ -97,7 +97,40 @@ public final class AvailabilityProjection {
         Objects.requireNonNull(exceptions, "exceptions");
         Objects.requireNonNull(horizon, "horizon");
 
+        // Legacy/3-arg entry point (kept for the pure Task-2 tests): resolve the exception zone
+        // from the rules themselves (MODE heuristic). This throws when exceptions are supplied but
+        // no rules exist. Callers that know the guide's zone (Task 3, from
+        // guide_booking_settings.timezone) should use the 4-arg overload below instead, which never
+        // needs a rule to resolve an exception's zone.
         String exceptionTimezone = exceptions.isEmpty() ? null : resolveExceptionTimezone(rules);
+        return project(rules, exceptions, horizon, exceptionTimezone);
+    }
+
+    /**
+     * Same projection, but with the exception zone supplied EXPLICITLY (CTL-54 Task 3). Rules are
+     * always projected in each rule's own {@code timezone} column; every exception is projected in
+     * {@code guideTimezone} (the {@code guide_booking_settings.timezone}). This overload lets a
+     * guide who has exceptions but NO active rules still materialize correctly — there is no rule
+     * to infer a zone from, so the persistence layer passes the guide's settings zone directly
+     * instead of the 3-arg overload throwing. {@code guideTimezone} may be {@code null} only when
+     * {@code exceptions} is empty (then no exception needs a zone).
+     */
+    public static ProjectionResult project(
+            List<GuideAvailabilityRuleEntity> rules,
+            List<AvailabilityExceptionEntity> exceptions,
+            AvailabilityHorizon horizon,
+            String guideTimezone) {
+        Objects.requireNonNull(rules, "rules");
+        Objects.requireNonNull(exceptions, "exceptions");
+        Objects.requireNonNull(horizon, "horizon");
+        if (!exceptions.isEmpty()) {
+            Objects.requireNonNull(
+                    guideTimezone,
+                    "guideTimezone is required when exceptions are present (exceptions carry no"
+                            + " timezone column of their own)");
+        }
+
+        String exceptionTimezone = exceptions.isEmpty() ? null : guideTimezone;
 
         List<AvailabilityInterval> base = new ArrayList<>();
         List<AvailabilityInterval> additional = new ArrayList<>();

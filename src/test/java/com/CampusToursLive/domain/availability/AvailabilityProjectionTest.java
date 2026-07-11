@@ -166,6 +166,28 @@ class AvailabilityProjectionTest {
                                 Instant.parse("2026-03-02T17:00:00Z")));
     }
 
+    @Test
+    void coalesce_twoExactlyTouchingRules_mergeIntoOneInterval() {
+        // Back-to-back windows that share a boundary instant ([10:00,11:00) + [11:00,12:00)) must
+        // coalesce into a single [10:00,12:00) interval, not two abutting rows — the half-open
+        // "touching" case (next.startAt == curEnd), distinct from the overlapping case above.
+        LocalDate monday = LocalDate.of(2026, 3, 2);
+        GuideAvailabilityRuleEntity first = rule(1, LocalTime.of(10, 0), 60, NY, monday, null);
+        GuideAvailabilityRuleEntity second = rule(1, LocalTime.of(11, 0), 60, NY, monday, null);
+
+        ProjectionResult result =
+                AvailabilityProjection.project(
+                        List.of(first, second),
+                        List.of(),
+                        new AvailabilityHorizon(monday, monday.plusDays(1)));
+
+        assertThat(result.intervals())
+                .containsExactly(
+                        new AvailabilityInterval(
+                                Instant.parse("2026-03-02T15:00:00Z"),
+                                Instant.parse("2026-03-02T17:00:00Z")));
+    }
+
     // ---------------------------------------------------------------------
     // Precedence: ADDITIONAL overlapping UNAVAILABLE -> the additional region stays available.
     // ---------------------------------------------------------------------
