@@ -1,0 +1,707 @@
+package com.CampusToursLive.domain.availability;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.CampusToursLive.domain.guide.GuideApplicationStatus;
+import com.CampusToursLive.domain.guide.GuideProfileEntity;
+import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.university.UniversityEntity;
+import com.CampusToursLive.domain.university.UniversityRepository;
+import com.CampusToursLive.domain.university.UniversityStatus;
+import com.CampusToursLive.domain.user.AccountStatus;
+import com.CampusToursLive.domain.user.UserEntity;
+import com.CampusToursLive.domain.user.UserRepository;
+import com.CampusToursLive.error.NotFoundException;
+import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.web.dto.AvailabilityExceptionRequest;
+import com.CampusToursLive.web.dto.AvailabilityRuleRequest;
+import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
+import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
+import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
+import jakarta.persistence.EntityManager;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+/**
+ * Persistence integration test for {@link AvailabilityWriteService} against a REAL PostgreSQL
+ * (Testcontainers) — the only way to exercise the guide-profile lookup, the IDOR-safe {@code
+ * findByIdAndGuideId} scoping, the settings auto-provisioning insert, the jsonb {@code
+ * durations_offered} round-trip ({@link DurationsOfferedConverter}), and — critically — that every
+ * write really does call through to {@link AvailabilityService#rematerialize(UUID)} and the guide's
+ * materialized occurrences change accordingly. Mirrors {@code AvailabilityServiceIntegrationTest}.
+ *
+ * <p>Both services are constructed with a FIXED clock (today = {@code 2026-07-11}, a Saturday) so
+ * the rolling horizon and the default {@code effectiveFrom} are deterministic.
+ */
+@DataJpaTest
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@Testcontainers
+class AvailabilityWriteServiceIntegrationTest {
+
+    @Container @ServiceConnection
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:15");
+
+    private static final LocalDate FIXED_TODAY = LocalDate.of(2026, 7, 11);
+    private static final Clock FIXED_CLOCK =
+            Clock.fixed(FIXED_TODAY.atStartOfDay(ZoneOffset.UTC).toInstant(), ZoneOffset.UTC);
+    private static final int TODAY_DOW = FIXED_TODAY.getDayOfWeek().getValue() % 7;
+
+    @Autowired private GuideAvailabilityRuleRepository rules;
+    @Autowired private AvailabilityExceptionRepository exceptions;
+    @Autowired private GuideAvailabilityOccurrenceRepository occurrences;
+    @Autowired private GuideAvailabilityDstNoticeRepository dstNotices;
+    @Autowired private GuideBookingSettingsRepository settingsRepo;
+    @Autowired private GuideProfileRepository guides;
+    @Autowired private UserRepository users;
+    @Autowired private UniversityRepository universities;
+    @Autowired private EntityManager entityManager;
+
+    private AvailabilityService availabilityService;
+    private AvailabilityWriteService writeService;
+    private UUID universityId;
+
+    private UUID guideAUserId;
+    private UUID guideAId;
+    private UUID guideBId;
+
+    @BeforeEach
+    void setUp() {
+        UniversityEntity university =
+                universities.findAll().stream()
+                        .filter(u -> u.getStatus() == UniversityStatus.ACTIVE)
+                        .findFirst()
+                        .orElseThrow();
+        universityId = university.getId();
+
+        GuideProfileEntity guideA = seedGuide("Guide A");
+        guideAUserId = guideA.getUserId();
+        guideAId = guideA.getId();
+        guideBId = seedGuide("Guide B").getId();
+
+        availabilityService =
+                new AvailabilityService(
+                        rules, exceptions, occurrences, dstNotices, settingsRepo, FIXED_CLOCK);
+        writeService =
+                new AvailabilityWriteService(
+                        rules,
+                        exceptions,
+                        settingsRepo,
+                        guides,
+                        availabilityService,
+                        entityManager,
+                        FIXED_CLOCK);
+    }
+
+    // ---------------------------------------------------------------------
+    // Rules — happy path + rematerialize wiring.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void createRule_persistsWithSettingsTimezone_andRematerializes() {
+        AvailabilityRuleRequest req =
+                new AvailabilityRuleRequest(
+                        TODAY_DOW,
+                        "09:00",
+                        60,
+                        FIXED_TODAY.toString(),
+                        FIXED_TODAY.toString(),
+                        null);
+
+        AvailabilityRuleResponse created = writeService.createRule(actingUser(guideAUserId), req);
+
+        assertThat(created.timezone()).isEqualTo(AvailabilityService.DEFAULT_TIMEZONE);
+        assertThat(created.active()).isTrue();
+
+        List<GuideAvailabilityRuleEntity> persisted = rules.findByGuideId(guideAId);
+        assertThat(persisted).hasSize(1);
+        assertThat(persisted.get(0).getTimezone()).isEqualTo(AvailabilityService.DEFAULT_TIMEZONE);
+
+        // rematerialize ran in the same transaction -> an occurrence now exists for this guide.
+        assertThat(occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId)).isNotEmpty();
+    }
+
+    @Test
+    void createRule_usesExistingSettingsTimezone_whenSettingsRowAlreadyExists() {
+        settingsRepo.save(settings(guideAId, "America/New_York"));
+
+        AvailabilityRuleRequest req =
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null);
+        AvailabilityRuleResponse created = writeService.createRule(actingUser(guideAUserId), req);
+
+        assertThat(created.timezone()).isEqualTo("America/New_York");
+        // effectiveFrom defaulted to "today" (the fixed clock) since the request omitted it.
+        assertThat(created.effectiveFrom()).isEqualTo(FIXED_TODAY.toString());
+    }
+
+    @Test
+    void deleteRule_removesOccurrences_whenNoRulesRemain() {
+        AvailabilityRuleRequest req =
+                new AvailabilityRuleRequest(
+                        TODAY_DOW,
+                        "09:00",
+                        60,
+                        FIXED_TODAY.toString(),
+                        FIXED_TODAY.toString(),
+                        null);
+        AvailabilityRuleResponse created = writeService.createRule(actingUser(guideAUserId), req);
+        assertThat(occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId)).isNotEmpty();
+
+        List<AvailabilityRuleResponse> remaining =
+                writeService.deleteRule(actingUser(guideAUserId), UUID.fromString(created.id()));
+
+        assertThat(remaining).isEmpty();
+        assertThat(rules.findByGuideId(guideAId)).isEmpty();
+        // The write re-projected: with no rules left, the guide has no occurrences either.
+        assertThat(occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId)).isEmpty();
+    }
+
+    // ---------------------------------------------------------------------
+    // IDOR — 404 across guides for both rules and exceptions.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void updateRule_404_whenOwnedByAnotherGuide() {
+        AvailabilityRuleRequest createReq =
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null);
+        AvailabilityRuleResponse created =
+                writeService.createRule(actingUser(guideAUserId), createReq);
+        UUID ruleId = UUID.fromString(created.id());
+
+        UserEntity guideBUser = actingUserForGuideProfile(guideBId);
+        AvailabilityRuleRequest updateReq =
+                new AvailabilityRuleRequest(2, "10:00", 45, null, null, null);
+
+        assertThatThrownBy(() -> writeService.updateRule(guideBUser, ruleId, updateReq))
+                .isInstanceOf(NotFoundException.class);
+
+        // Untouched.
+        assertThat(rules.findById(ruleId).orElseThrow().getStartLocal().toString())
+                .isEqualTo("09:00");
+    }
+
+    @Test
+    void deleteRule_404_whenOwnedByAnotherGuide() {
+        AvailabilityRuleRequest createReq =
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null);
+        AvailabilityRuleResponse created =
+                writeService.createRule(actingUser(guideAUserId), createReq);
+        UUID ruleId = UUID.fromString(created.id());
+
+        UserEntity guideBUser = actingUserForGuideProfile(guideBId);
+
+        assertThatThrownBy(() -> writeService.deleteRule(guideBUser, ruleId))
+                .isInstanceOf(NotFoundException.class);
+        assertThat(rules.findById(ruleId)).isPresent();
+    }
+
+    @Test
+    void updateException_404_whenOwnedByAnotherGuide() {
+        AvailabilityExceptionRequest createReq =
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "ADDITIONAL", "10:00", 60, null);
+        var created = writeService.createException(actingUser(guideAUserId), createReq);
+        UUID exceptionId = UUID.fromString(created.id());
+
+        UserEntity guideBUser = actingUserForGuideProfile(guideBId);
+        AvailabilityExceptionRequest updateReq =
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "UNAVAILABLE", "11:00", 30, "nope");
+
+        assertThatThrownBy(() -> writeService.updateException(guideBUser, exceptionId, updateReq))
+                .isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void deleteException_404_whenOwnedByAnotherGuide() {
+        AvailabilityExceptionRequest createReq =
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "ADDITIONAL", "10:00", 60, null);
+        var created = writeService.createException(actingUser(guideAUserId), createReq);
+        UUID exceptionId = UUID.fromString(created.id());
+
+        UserEntity guideBUser = actingUserForGuideProfile(guideBId);
+
+        assertThatThrownBy(() -> writeService.deleteException(guideBUser, exceptionId))
+                .isInstanceOf(NotFoundException.class);
+        assertThat(exceptions.findById(exceptionId)).isPresent();
+    }
+
+    // ---------------------------------------------------------------------
+    // Validation — 422s.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void createRule_rejectsNonPositiveWindowMin() {
+        AvailabilityRuleRequest req =
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 0, null, null, null);
+        assertThatThrownBy(() -> writeService.createRule(actingUser(guideAUserId), req))
+                .isInstanceOf(ValidationException.class);
+        assertThat(rules.findByGuideId(guideAId)).isEmpty();
+    }
+
+    @Test
+    void createRule_rejectsOutOfRangeDayOfWeek() {
+        AvailabilityRuleRequest req = new AvailabilityRuleRequest(9, "09:00", 60, null, null, null);
+        assertThatThrownBy(() -> writeService.createRule(actingUser(guideAUserId), req))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void createRule_rejectsMissingStartLocal() {
+        AvailabilityRuleRequest req =
+                new AvailabilityRuleRequest(TODAY_DOW, null, 60, null, null, null);
+        assertThatThrownBy(() -> writeService.createRule(actingUser(guideAUserId), req))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void createException_rejectsMissingKind() {
+        AvailabilityExceptionRequest req =
+                new AvailabilityExceptionRequest(FIXED_TODAY.toString(), null, "10:00", 60, null);
+        assertThatThrownBy(() -> writeService.createException(actingUser(guideAUserId), req))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void updateSettings_rejectsInvalidTimezone() {
+        GuideBookingSettingsUpdateRequest req =
+                new GuideBookingSettingsUpdateRequest(
+                        null, null, null, null, null, null, null, "Not/AZone");
+        assertThatThrownBy(() -> writeService.updateSettings(actingUser(guideAUserId), req))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    // ---------------------------------------------------------------------
+    // Settings — auto-provision + tz cascade + reproject.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void getSettings_autoProvisionsDefaults_whenNoRowExists() {
+        assertThat(settingsRepo.findByGuideId(guideAId)).isEmpty();
+
+        GuideBookingSettingsResponse settings = writeService.getSettings(actingUser(guideAUserId));
+
+        assertThat(settings.guideId()).isEqualTo(guideAId.toString());
+        assertThat(settings.acceptanceMode()).isEqualTo("MANUAL");
+        assertThat(settings.responseDeadlineMin()).isEqualTo(90);
+        assertThat(settings.minNoticeMin()).isEqualTo(1440);
+        assertThat(settings.maxAdvanceDays()).isEqualTo(30);
+        assertThat(settings.bufferBeforeMin()).isEqualTo(0);
+        assertThat(settings.bufferAfterMin()).isEqualTo(15);
+        assertThat(settings.durationsOffered()).containsExactly(30, 45, 60, 90);
+        assertThat(settings.timezone()).isEqualTo(AvailabilityService.DEFAULT_TIMEZONE);
+        assertThat(settings.updatedAt()).isNotNull();
+        assertThat(settingsRepo.findByGuideId(guideAId)).isPresent();
+    }
+
+    @Test
+    void updateSettings_cascadesNewTimezoneToRules_andReprojectsOccurrences() {
+        // A rule that only ever fires on FIXED_TODAY, at 09:00 local. In July, LA is PDT (-07:00)
+        // and New York is EDT (-04:00) -- a 3-hour difference lets the test observe the reproject.
+        AvailabilityRuleRequest ruleReq =
+                new AvailabilityRuleRequest(
+                        TODAY_DOW,
+                        "09:00",
+                        60,
+                        FIXED_TODAY.toString(),
+                        FIXED_TODAY.toString(),
+                        null);
+        writeService.createRule(actingUser(guideAUserId), ruleReq);
+
+        List<GuideAvailabilityOccurrenceEntity> beforeOccurrences =
+                occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId);
+        assertThat(beforeOccurrences).hasSize(1);
+        Instant beforeStart = beforeOccurrences.get(0).getDuringStartAt();
+        assertThat(beforeStart).isEqualTo(Instant.parse("2026-07-11T16:00:00Z")); // 09:00 PDT
+
+        GuideBookingSettingsUpdateRequest settingsReq =
+                new GuideBookingSettingsUpdateRequest(
+                        null, null, null, null, null, null, null, "America/New_York");
+        writeService.updateSettings(actingUser(guideAUserId), settingsReq);
+
+        // Cascade: the existing rule's own timezone column now matches the new settings tz.
+        List<GuideAvailabilityRuleEntity> guideRules = rules.findByGuideId(guideAId);
+        assertThat(guideRules)
+                .extracting(GuideAvailabilityRuleEntity::getTimezone)
+                .containsExactly("America/New_York");
+
+        // Reproject: the same wall-clock 09:00 now resolves 3 hours earlier in UTC (EDT = -04:00).
+        List<GuideAvailabilityOccurrenceEntity> afterOccurrences =
+                occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId);
+        assertThat(afterOccurrences).hasSize(1);
+        assertThat(afterOccurrences.get(0).getDuringStartAt())
+                .isEqualTo(Instant.parse("2026-07-11T13:00:00Z")) // 09:00 EDT
+                .isNotEqualTo(beforeStart);
+    }
+
+    @Test
+    void updateSettings_doesNotCascade_whenTimezoneUnchanged() {
+        AvailabilityRuleRequest ruleReq =
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null);
+        writeService.createRule(actingUser(guideAUserId), ruleReq);
+
+        GuideBookingSettingsUpdateRequest settingsReq =
+                new GuideBookingSettingsUpdateRequest(
+                        null, 120, null, null, null, null, null, null);
+        GuideBookingSettingsResponse updated =
+                writeService.updateSettings(actingUser(guideAUserId), settingsReq);
+
+        assertThat(updated.responseDeadlineMin()).isEqualTo(120);
+        assertThat(updated.timezone()).isEqualTo(AvailabilityService.DEFAULT_TIMEZONE);
+        assertThat(rules.findByGuideId(guideAId))
+                .extracting(GuideAvailabilityRuleEntity::getTimezone)
+                .containsExactly(AvailabilityService.DEFAULT_TIMEZONE);
+    }
+
+    @Test
+    void updateSettings_roundTripsDurationsOffered_viaJsonbConverter() {
+        GuideBookingSettingsUpdateRequest req =
+                new GuideBookingSettingsUpdateRequest(
+                        null, null, null, null, null, null, List.of(20, 40), null);
+
+        writeService.updateSettings(actingUser(guideAUserId), req);
+
+        GuideBookingSettingsEntity reloaded = settingsRepo.findByGuideId(guideAId).orElseThrow();
+        assertThat(reloaded.getDurationsOffered()).containsExactly(20, 40);
+    }
+
+    @Test
+    void updateSettings_appliesEveryField_inOneRequest() {
+        GuideBookingSettingsUpdateRequest req =
+                new GuideBookingSettingsUpdateRequest(
+                        "AUTO", 45, 720, 60, 10, 20, List.of(30, 60), null);
+
+        GuideBookingSettingsResponse updated =
+                writeService.updateSettings(actingUser(guideAUserId), req);
+
+        assertThat(updated.acceptanceMode()).isEqualTo("AUTO");
+        assertThat(updated.responseDeadlineMin()).isEqualTo(45);
+        assertThat(updated.minNoticeMin()).isEqualTo(720);
+        assertThat(updated.maxAdvanceDays()).isEqualTo(60);
+        assertThat(updated.bufferBeforeMin()).isEqualTo(10);
+        assertThat(updated.bufferAfterMin()).isEqualTo(20);
+        assertThat(updated.durationsOffered()).containsExactly(30, 60);
+    }
+
+    @Test
+    void updateSettings_rejectsEachInvalidField() {
+        UserEntity actor = actingUser(guideAUserId);
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateSettings(
+                                        actor,
+                                        new GuideBookingSettingsUpdateRequest(
+                                                "NOT_A_MODE",
+                                                null,
+                                                null,
+                                                null,
+                                                null,
+                                                null,
+                                                null,
+                                                null)))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateSettings(
+                                        actor,
+                                        new GuideBookingSettingsUpdateRequest(
+                                                null, 0, null, null, null, null, null, null)))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateSettings(
+                                        actor,
+                                        new GuideBookingSettingsUpdateRequest(
+                                                null, null, -1, null, null, null, null, null)))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateSettings(
+                                        actor,
+                                        new GuideBookingSettingsUpdateRequest(
+                                                null, null, null, 0, null, null, null, null)))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateSettings(
+                                        actor,
+                                        new GuideBookingSettingsUpdateRequest(
+                                                null, null, null, 400, null, null, null, null)))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateSettings(
+                                        actor,
+                                        new GuideBookingSettingsUpdateRequest(
+                                                null, null, null, null, -1, null, null, null)))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateSettings(
+                                        actor,
+                                        new GuideBookingSettingsUpdateRequest(
+                                                null, null, null, null, null, -1, null, null)))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateSettings(
+                                        actor,
+                                        new GuideBookingSettingsUpdateRequest(
+                                                null, null, null, null, null, null, List.of(),
+                                                null)))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateSettings(
+                                        actor,
+                                        new GuideBookingSettingsUpdateRequest(
+                                                null,
+                                                null,
+                                                null,
+                                                null,
+                                                null,
+                                                null,
+                                                List.of(30, -5),
+                                                null)))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    // ---------------------------------------------------------------------
+    // Rules/exceptions — happy-path update/delete + list.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void updateRule_appliesChangesAndRematerializes_whenOwned() {
+        AvailabilityRuleRequest createReq =
+                new AvailabilityRuleRequest(
+                        TODAY_DOW,
+                        "09:00",
+                        60,
+                        FIXED_TODAY.toString(),
+                        FIXED_TODAY.toString(),
+                        null);
+        AvailabilityRuleResponse created =
+                writeService.createRule(actingUser(guideAUserId), createReq);
+        UUID ruleId = UUID.fromString(created.id());
+
+        LocalDate nextDay = FIXED_TODAY.plusDays(7);
+        int nextDow = nextDay.getDayOfWeek().getValue() % 7;
+        AvailabilityRuleRequest updateReq =
+                new AvailabilityRuleRequest(
+                        nextDow, "10:30", 45, nextDay.toString(), nextDay.toString(), false);
+
+        AvailabilityRuleResponse updated =
+                writeService.updateRule(actingUser(guideAUserId), ruleId, updateReq);
+
+        assertThat(updated.dayOfWeek()).isEqualTo(nextDow);
+        assertThat(updated.startLocal()).isEqualTo("10:30");
+        assertThat(updated.windowMin()).isEqualTo(45);
+        assertThat(updated.effectiveFrom()).isEqualTo(nextDay.toString());
+        assertThat(updated.active()).isFalse();
+        // Timezone was never in the request and must stay the server-set value.
+        assertThat(updated.timezone()).isEqualTo(AvailabilityService.DEFAULT_TIMEZONE);
+        // Reprojected: the rule is now inactive, so it produces no occurrence.
+        assertThat(occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId)).isEmpty();
+    }
+
+    @Test
+    void updateRule_rejectsMalformedStartLocal() {
+        AvailabilityRuleRequest createReq =
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null);
+        AvailabilityRuleResponse created =
+                writeService.createRule(actingUser(guideAUserId), createReq);
+        UUID ruleId = UUID.fromString(created.id());
+
+        AvailabilityRuleRequest badReq =
+                new AvailabilityRuleRequest(TODAY_DOW, "not-a-time", 60, null, null, null);
+        assertThatThrownBy(() -> writeService.updateRule(actingUser(guideAUserId), ruleId, badReq))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void updateRule_rejectsEffectiveToBeforeEffectiveFrom() {
+        AvailabilityRuleRequest createReq =
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null);
+        AvailabilityRuleResponse created =
+                writeService.createRule(actingUser(guideAUserId), createReq);
+        UUID ruleId = UUID.fromString(created.id());
+
+        AvailabilityRuleRequest badReq =
+                new AvailabilityRuleRequest(
+                        TODAY_DOW,
+                        "09:00",
+                        60,
+                        FIXED_TODAY.toString(),
+                        FIXED_TODAY.minusDays(1).toString(),
+                        null);
+        assertThatThrownBy(() -> writeService.updateRule(actingUser(guideAUserId), ruleId, badReq))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void updateException_appliesChangesAndRematerializes_whenOwned() {
+        AvailabilityExceptionRequest createReq =
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "ADDITIONAL", "10:00", 60, null);
+        var created = writeService.createException(actingUser(guideAUserId), createReq);
+        UUID exceptionId = UUID.fromString(created.id());
+
+        LocalDate otherDay = FIXED_TODAY.plusDays(1);
+        AvailabilityExceptionRequest updateReq =
+                new AvailabilityExceptionRequest(
+                        otherDay.toString(), "UNAVAILABLE", "11:30", 30, "changed");
+
+        var updated =
+                writeService.updateException(actingUser(guideAUserId), exceptionId, updateReq);
+
+        assertThat(updated.exceptionDate()).isEqualTo(otherDay.toString());
+        assertThat(updated.kind()).isEqualTo("UNAVAILABLE");
+        assertThat(updated.startLocal()).isEqualTo("11:30");
+        assertThat(updated.windowMin()).isEqualTo(30);
+        assertThat(updated.reason()).isEqualTo("changed");
+    }
+
+    @Test
+    void updateException_rejectsMalformedExceptionDate() {
+        AvailabilityExceptionRequest createReq =
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "ADDITIONAL", "10:00", 60, null);
+        var created = writeService.createException(actingUser(guideAUserId), createReq);
+        UUID exceptionId = UUID.fromString(created.id());
+
+        AvailabilityExceptionRequest badReq =
+                new AvailabilityExceptionRequest("not-a-date", "ADDITIONAL", "10:00", 60, null);
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateException(
+                                        actingUser(guideAUserId), exceptionId, badReq))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void updateException_rejectsUnrecognizedKind() {
+        AvailabilityExceptionRequest createReq =
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "ADDITIONAL", "10:00", 60, null);
+        var created = writeService.createException(actingUser(guideAUserId), createReq);
+        UUID exceptionId = UUID.fromString(created.id());
+
+        AvailabilityExceptionRequest badReq =
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "NOT_A_KIND", "10:00", 60, null);
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateException(
+                                        actingUser(guideAUserId), exceptionId, badReq))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void deleteException_removesAndRematerializes_whenOwned() {
+        AvailabilityExceptionRequest createReq =
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "ADDITIONAL", "10:00", 60, null);
+        var created = writeService.createException(actingUser(guideAUserId), createReq);
+        UUID exceptionId = UUID.fromString(created.id());
+        assertThat(occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId)).isNotEmpty();
+
+        var remaining = writeService.deleteException(actingUser(guideAUserId), exceptionId);
+
+        assertThat(remaining).isEmpty();
+        assertThat(exceptions.findByGuideId(guideAId)).isEmpty();
+        assertThat(occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId)).isEmpty();
+    }
+
+    @Test
+    void listRules_returnsOnlyTheCallersOwnRules() {
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null));
+        writeService.createRule(
+                actingUserForGuideProfile(guideBId),
+                new AvailabilityRuleRequest(TODAY_DOW, "08:00", 30, null, null, null));
+
+        List<AvailabilityRuleResponse> guideARules =
+                writeService.listRules(actingUser(guideAUserId));
+
+        assertThat(guideARules).hasSize(1);
+        assertThat(guideARules.get(0).startLocal()).isEqualTo("09:00");
+    }
+
+    @Test
+    void listExceptions_returnsOnlyTheCallersOwnExceptions() {
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "ADDITIONAL", "10:00", 60, null));
+        writeService.createException(
+                actingUserForGuideProfile(guideBId),
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "UNAVAILABLE", "08:00", 30, null));
+
+        var guideAExceptions = writeService.listExceptions(actingUser(guideAUserId));
+
+        assertThat(guideAExceptions).hasSize(1);
+        assertThat(guideAExceptions.get(0).kind()).isEqualTo("ADDITIONAL");
+    }
+
+    // ---------------------------------------------------------------------
+    // Fixtures.
+    // ---------------------------------------------------------------------
+
+    private GuideProfileEntity seedGuide(String displayName) {
+        UserEntity guideUser = users.save(user(displayName));
+
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(UUID.randomUUID());
+        guide.setUserId(guideUser.getId());
+        guide.setUniversityId(universityId);
+        guide.setMajor("Computer Science");
+        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        return guides.save(guide);
+    }
+
+    private UserEntity actingUser(UUID userId) {
+        UserEntity u = new UserEntity();
+        u.setId(userId);
+        return u;
+    }
+
+    private UserEntity actingUserForGuideProfile(UUID guideProfileId) {
+        GuideProfileEntity guide = guides.findById(guideProfileId).orElseThrow();
+        return actingUser(guide.getUserId());
+    }
+
+    private static UserEntity user(String displayName) {
+        UserEntity u = new UserEntity();
+        u.setId(UUID.randomUUID());
+        u.setOidcSubject("wt-" + UUID.randomUUID());
+        u.setEmail("wt-" + UUID.randomUUID() + "@example.com");
+        u.setDisplayName(displayName);
+        u.setAccountStatus(AccountStatus.ACTIVE);
+        u.setPreferredLanguage("en-US");
+        u.setTimezone("America/Los_Angeles");
+        return u;
+    }
+
+    private static GuideBookingSettingsEntity settings(UUID guideId, String timezone) {
+        GuideBookingSettingsEntity s = new GuideBookingSettingsEntity();
+        s.setGuideId(guideId);
+        s.setTimezone(timezone);
+        return s;
+    }
+}
