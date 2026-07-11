@@ -21,6 +21,7 @@ import com.CampusToursLive.domain.user.AccountStatus;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.error.NotFoundException;
+import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.SlotResponse;
 import java.time.Clock;
 import java.time.Duration;
@@ -354,6 +355,23 @@ class SlotGenerationServiceIntegrationTest {
         List<SlotResponse> slots = service.getBookableSlots(offering.getId(), from, to);
 
         assertThat(slots).extracting(SlotResponse::startAt).containsExactly(near);
+    }
+
+    @Test
+    void getBookableSlots_throwsValidation_whenToIsNotAfterFrom() {
+        TourOfferingEntity offering = offering(60);
+        Instant near = FIXED_NOW.plus(3, java.time.temporal.ChronoUnit.DAYS);
+        occurrence(near, near.plus(1, java.time.temporal.ChronoUnit.HOURS));
+
+        // to == from -- the half-open [from, to) window is empty, which is the same class of
+        // caller error as to < from (both mean "no window"), so the service rejects it as a 422
+        // rather than silently returning zero slots.
+        String from = "2026-07-20";
+        String to = "2026-07-20";
+
+        assertThatThrownBy(() -> service.getBookableSlots(offering.getId(), from, to))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("to must be after from");
     }
 
     // ---------------------------------------------------------------------

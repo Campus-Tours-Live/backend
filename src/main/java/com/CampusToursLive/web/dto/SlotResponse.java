@@ -1,5 +1,6 @@
 package com.CampusToursLive.web.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 
 /**
@@ -9,4 +10,19 @@ import java.time.Instant;
  * guide's notice/max-advance window already removed. Instants are UTC; Jackson serializes {@link
  * Instant} as ISO-8601 with a trailing {@code Z}. Mirrors {@code ResolvedOccurrence}'s shape.
  */
-public record SlotResponse(Instant startAt, Instant endAt) {}
+@Schema(
+        name = "SlotResponse",
+        description =
+                "One concrete, bookable slot: an offering-duration-length window with existing"
+                        + " bookings and the notice/max-advance window already removed.")
+public record SlotResponse(
+        @Schema(
+                        description = "ISO-8601 UTC start instant of the slot.",
+                        example = "2026-07-14T10:00:00Z",
+                        requiredMode = Schema.RequiredMode.REQUIRED)
+                Instant startAt,
+        @Schema(
+                        description = "ISO-8601 UTC end instant of the slot.",
+                        example = "2026-07-14T11:00:00Z",
+                        requiredMode = Schema.RequiredMode.REQUIRED)
+                Instant endAt) {}

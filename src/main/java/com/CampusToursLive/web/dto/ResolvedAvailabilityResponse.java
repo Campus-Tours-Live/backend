@@ -1,5 +1,7 @@
 package com.CampusToursLive.web.dto;
 
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
@@ -9,7 +11,32 @@ import java.util.List;
  * disjoint, UTC instants), and the {@code dstGapDays} the projection reported. The frontend renders
  * this read-only and does NOT re-coalesce -- this is the single source of truth.
  */
+@Schema(
+        name = "ResolvedAvailabilityResponse",
+        description =
+                "A guide's editable rules plus the backend-coalesced, resolved occurrences and any"
+                        + " DST gap-moved/skipped days.")
 public record ResolvedAvailabilityResponse(
-        List<AvailabilityRuleResponse> rules,
-        List<ResolvedOccurrence> occurrences,
-        List<String> dstGapDays) {}
+        @ArraySchema(
+                        arraySchema =
+                                @Schema(
+                                        description = "The guide's editable availability rules.",
+                                        requiredMode = Schema.RequiredMode.REQUIRED))
+                List<AvailabilityRuleResponse> rules,
+        @ArraySchema(
+                        arraySchema =
+                                @Schema(
+                                        description =
+                                                "Coalesced, disjoint, ascending net-available"
+                                                        + " occurrences for the requested window.",
+                                        requiredMode = Schema.RequiredMode.REQUIRED))
+                List<ResolvedOccurrence> occurrences,
+        @ArraySchema(
+                        arraySchema =
+                                @Schema(
+                                        description =
+                                                "ISO-8601 dates the projection had to gap-move or"
+                                                        + " skip due to a DST transition.",
+                                        requiredMode = Schema.RequiredMode.REQUIRED),
+                        schema = @Schema(example = "2026-03-08"))
+                List<String> dstGapDays) {}

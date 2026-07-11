@@ -1,5 +1,7 @@
 package com.CampusToursLive.web.dto;
 
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
@@ -20,8 +22,34 @@ import java.util.List;
  * write always succeeds and the flagged booking is never mutated, this is advisory-only for the
  * guide UI).
  */
+@Schema(
+        name = "AvailabilityWriteResponse",
+        description =
+                "Success envelope for availability write endpoints: { data, affectedBookings,"
+                        + " meta }. data is the write's normal payload, unaffected by"
+                        + " affectedBookings.")
 public record AvailabilityWriteResponse<T>(
-        T data, List<AffectedBookingResponse> affectedBookings, Meta meta) {
+        @Schema(
+                        description =
+                                "The write's normal payload — e.g. the created/updated rule or"
+                                        + " exception, or the remaining list on delete.",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                T data,
+        @ArraySchema(
+                        arraySchema =
+                                @Schema(
+                                        description =
+                                                "The caller's own future CONFIRMED bookings this"
+                                                        + " edit left uncovered by any current"
+                                                        + " occurrence; empty when none. Advisory"
+                                                        + " only — every listed booking is"
+                                                        + " unchanged.",
+                                        requiredMode = Schema.RequiredMode.REQUIRED))
+                List<AffectedBookingResponse> affectedBookings,
+        @Schema(
+                        description = "Response metadata (request id + server timestamp).",
+                        requiredMode = Schema.RequiredMode.REQUIRED)
+                Meta meta) {
     public static <T> AvailabilityWriteResponse<T> of(
             T data, List<AffectedBookingResponse> affectedBookings) {
         return new AvailabilityWriteResponse<>(data, affectedBookings, Meta.now());

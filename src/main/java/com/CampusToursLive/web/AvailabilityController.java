@@ -5,6 +5,7 @@ import com.CampusToursLive.domain.availability.AvailabilityWriteService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.security.CurrentUser;
+import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.AffectedBookingResponse;
 import com.CampusToursLive.web.dto.ApiEnvelope;
 import com.CampusToursLive.web.dto.AvailabilityExceptionRequest;
@@ -14,7 +15,14 @@ import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.AvailabilityWriteResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
+import com.CampusToursLive.web.dto.Problem;
 import com.CampusToursLive.web.dto.ResolvedAvailabilityResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
 import java.util.UUID;
@@ -61,6 +69,10 @@ import org.springframework.web.bind.annotation.RestController;
                         + " guide's availability occurrences in the same transaction.")
 public class AvailabilityController {
 
+    private static final String NO_GUIDE_PROFILE_422 =
+            " Also 422 when the caller holds the GUIDE role but has not completed guide"
+                    + " onboarding (no guide profile yet).";
+
     private final CurrentUser currentUser;
     private final AvailabilityWriteService availability;
     private final AvailabilityReadService availabilityRead;
@@ -81,15 +93,98 @@ public class AvailabilityController {
      * the returned occurrences to those intersecting {@code [from, to)}; omitted, every
      * materialized occurrence is returned.
      */
+    @Operation(
+            summary = "Resolved availability (rules + occurrences + DST gaps)",
+            description =
+                    "Returns the guide's editable rules, the backend-coalesced net-available"
+                            + " occurrences for the requested window, and any DST gap-moved/skipped"
+                            + " days the projection reported. The frontend renders occurrences"
+                            + " as-is and must not re-coalesce — this endpoint is the single source"
+                            + " of truth. from/to (ISO yyyy-MM-dd) optionally narrow the returned"
+                            + " occurrences to those intersecting [from, to); omitted, every"
+                            + " materialized occurrence is returned.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The guide's resolved availability.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.RESOLVED_AVAILABILITY)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "from/to malformed (expected ISO yyyy-MM-dd), or to not after from."
+                            + NO_GUIDE_PROFILE_422,
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
     @GetMapping
     public ApiEnvelope<ResolvedAvailabilityResponse> getResolvedAvailability(
-            @RequestParam(required = false) String from,
-            @RequestParam(required = false) String to) {
+            @Parameter(description = "ISO yyyy-MM-dd; inclusive lower bound of the window.")
+                    @RequestParam(required = false)
+                    String from,
+            @Parameter(description = "ISO yyyy-MM-dd; exclusive upper bound of the window.")
+                    @RequestParam(required = false)
+                    String to) {
         var user = currentUser.requireRole(UserRole.GUIDE);
         return ApiEnvelope.of(availabilityRead.getResolvedAvailability(user, from, to));
     }
 
     /** List the guide's recurring availability rules. */
+    @Operation(
+            summary = "List availability rules",
+            description = "Lists every one of the guide's recurring availability rules.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The guide's availability rules.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.AVAILABILITY_RULE_LIST)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "Caller holds the GUIDE role but has not completed guide onboarding (no guide"
+                            + " profile yet).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
     @GetMapping("/rules")
     public ApiEnvelope<List<AvailabilityRuleResponse>> listRules() {
         var user = currentUser.requireRole(UserRole.GUIDE);
@@ -97,6 +192,57 @@ public class AvailabilityController {
     }
 
     /** Create a recurring availability rule; timezone is server-set to the guide's settings tz. */
+    @Operation(
+            summary = "Create an availability rule",
+            description =
+                    "Creates a recurring availability rule (day of week + start + window). The"
+                            + " rule's timezone is server-set to the guide's settings timezone —"
+                            + " never taken from the request. The write re-materializes the guide's"
+                            + " occurrences in the same transaction, and the response also"
+                            + " surfaces (CTL-54 Task 7) any of the guide's own future CONFIRMED"
+                            + " bookings this edit left uncovered by any occurrence; the edit still"
+                            + " succeeds and no booking is mutated.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The created rule, plus any newly-uncovered bookings (advisory).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = {
+                                @ExampleObject(
+                                        name = "noWarning",
+                                        value = ApiExamples.AVAILABILITY_RULE_WRITE),
+                                @ExampleObject(
+                                        name = "withWarning",
+                                        value = ApiExamples.AVAILABILITY_RULE_WRITE_WITH_WARNING)
+                            }))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "Missing/invalid fields (dayOfWeek, startLocal, windowMin, effectiveTo before"
+                            + " effectiveFrom)."
+                            + NO_GUIDE_PROFILE_422,
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
     @PostMapping("/rules")
     public AvailabilityWriteResponse<AvailabilityRuleResponse> createRule(
             @RequestBody AvailabilityRuleRequest req) {
@@ -106,24 +252,144 @@ public class AvailabilityController {
     }
 
     /** Update an owned rule (404 if the id does not belong to the caller). */
+    @Operation(
+            summary = "Update an availability rule",
+            description =
+                    "Updates an owned recurring availability rule. The rule's timezone is never"
+                            + " updated from the request. The write re-materializes the guide's"
+                            + " occurrences and the response surfaces (CTL-54 Task 7) any newly"
+                            + " uncovered future CONFIRMED bookings; the edit still succeeds and no"
+                            + " booking is mutated.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The updated rule, plus any newly-uncovered bookings (advisory).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.AVAILABILITY_RULE_WRITE)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "No rule with that id belongs to the caller.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "Missing/invalid fields (dayOfWeek, startLocal, windowMin, effectiveTo before"
+                            + " effectiveFrom)."
+                            + NO_GUIDE_PROFILE_422,
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
     @PatchMapping("/rules/{id}")
     public AvailabilityWriteResponse<AvailabilityRuleResponse> updateRule(
-            @PathVariable UUID id, @RequestBody AvailabilityRuleRequest req) {
+            @Parameter(description = "Id (UUID) of the rule to update.") @PathVariable UUID id,
+            @RequestBody AvailabilityRuleRequest req) {
         var user = currentUser.requireRole(UserRole.GUIDE);
         AvailabilityRuleResponse updated = availability.updateRule(user, id, req);
         return AvailabilityWriteResponse.of(updated, affectedBookings(user));
     }
 
     /** Delete an owned rule (404 if not owned); returns the guide's remaining rules. */
+    @Operation(
+            summary = "Delete an availability rule",
+            description =
+                    "Deletes an owned recurring availability rule and returns the guide's"
+                            + " remaining rules. The write re-materializes the guide's occurrences"
+                            + " and the response surfaces (CTL-54 Task 7) any newly uncovered"
+                            + " future CONFIRMED bookings; the deletion still succeeds and no"
+                            + " booking is mutated.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The guide's remaining rules, plus any newly-uncovered bookings.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples =
+                                    @ExampleObject(
+                                            value = ApiExamples.AVAILABILITY_RULE_LIST_WRITE)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "No rule with that id belongs to the caller.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
     @DeleteMapping("/rules/{id}")
     public AvailabilityWriteResponse<List<AvailabilityRuleResponse>> deleteRule(
-            @PathVariable UUID id) {
+            @Parameter(description = "Id (UUID) of the rule to delete.") @PathVariable UUID id) {
         var user = currentUser.requireRole(UserRole.GUIDE);
         List<AvailabilityRuleResponse> remaining = availability.deleteRule(user, id);
         return AvailabilityWriteResponse.of(remaining, affectedBookings(user));
     }
 
     /** List the guide's one-off availability exceptions. */
+    @Operation(
+            summary = "List availability exceptions",
+            description = "Lists every one of the guide's one-off availability exceptions.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The guide's availability exceptions.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples =
+                                    @ExampleObject(
+                                            value = ApiExamples.AVAILABILITY_EXCEPTION_LIST)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
     @GetMapping("/exceptions")
     public ApiEnvelope<List<AvailabilityExceptionResponse>> listExceptions() {
         var user = currentUser.requireRole(UserRole.GUIDE);
@@ -131,6 +397,49 @@ public class AvailabilityController {
     }
 
     /** Create a one-off availability exception (UNAVAILABLE or ADDITIONAL). */
+    @Operation(
+            summary = "Create an availability exception",
+            description =
+                    "Creates a one-off availability exception (UNAVAILABLE removes availability,"
+                            + " ADDITIONAL adds it) for a specific date. The write re-materializes"
+                            + " the guide's occurrences and the response surfaces (CTL-54 Task 7)"
+                            + " any newly uncovered future CONFIRMED bookings; the edit still"
+                            + " succeeds and no booking is mutated.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The created exception, plus any newly-uncovered bookings (advisory).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples =
+                                    @ExampleObject(
+                                            value = ApiExamples.AVAILABILITY_EXCEPTION_WRITE)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "Missing/invalid fields (exceptionDate, kind, startLocal, windowMin)."
+                            + NO_GUIDE_PROFILE_422,
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
     @PostMapping("/exceptions")
     public AvailabilityWriteResponse<AvailabilityExceptionResponse> createException(
             @RequestBody AvailabilityExceptionRequest req) {
@@ -140,24 +449,157 @@ public class AvailabilityController {
     }
 
     /** Update an owned exception (404 if the id does not belong to the caller). */
+    @Operation(
+            summary = "Update an availability exception",
+            description =
+                    "Updates an owned one-off availability exception. The write re-materializes"
+                            + " the guide's occurrences and the response surfaces (CTL-54 Task 7)"
+                            + " any newly uncovered future CONFIRMED bookings; the edit still"
+                            + " succeeds and no booking is mutated.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The updated exception, plus any newly-uncovered bookings (advisory).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples =
+                                    @ExampleObject(
+                                            value = ApiExamples.AVAILABILITY_EXCEPTION_WRITE)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "No exception with that id belongs to the caller.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "Missing/invalid fields (exceptionDate, kind, startLocal, windowMin)."
+                            + NO_GUIDE_PROFILE_422,
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
     @PatchMapping("/exceptions/{id}")
     public AvailabilityWriteResponse<AvailabilityExceptionResponse> updateException(
-            @PathVariable UUID id, @RequestBody AvailabilityExceptionRequest req) {
+            @Parameter(description = "Id (UUID) of the exception to update.") @PathVariable UUID id,
+            @RequestBody AvailabilityExceptionRequest req) {
         var user = currentUser.requireRole(UserRole.GUIDE);
         AvailabilityExceptionResponse updated = availability.updateException(user, id, req);
         return AvailabilityWriteResponse.of(updated, affectedBookings(user));
     }
 
     /** Delete an owned exception (404 if not owned); returns the guide's remaining exceptions. */
+    @Operation(
+            summary = "Delete an availability exception",
+            description =
+                    "Deletes an owned one-off availability exception and returns the guide's"
+                            + " remaining exceptions. The write re-materializes the guide's"
+                            + " occurrences and the response surfaces (CTL-54 Task 7) any newly"
+                            + " uncovered future CONFIRMED bookings; the deletion still succeeds"
+                            + " and no booking is mutated.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The guide's remaining exceptions, plus any newly-uncovered bookings.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples =
+                                    @ExampleObject(
+                                            value = ApiExamples.AVAILABILITY_EXCEPTION_LIST_WRITE)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "No exception with that id belongs to the caller.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
     @DeleteMapping("/exceptions/{id}")
     public AvailabilityWriteResponse<List<AvailabilityExceptionResponse>> deleteException(
-            @PathVariable UUID id) {
+            @Parameter(description = "Id (UUID) of the exception to delete.") @PathVariable
+                    UUID id) {
         var user = currentUser.requireRole(UserRole.GUIDE);
         List<AvailabilityExceptionResponse> remaining = availability.deleteException(user, id);
         return AvailabilityWriteResponse.of(remaining, affectedBookings(user));
     }
 
     /** The guide's booking settings; auto-provisions a default row the first time it is asked. */
+    @Operation(
+            summary = "Get booking settings",
+            description =
+                    "Returns the guide's booking settings (acceptance mode, notice/advance"
+                            + " windows, buffers, offered durations, timezone). Auto-provisions"
+                            + " a default settings row the first time a guide is asked, so a"
+                            + " guide always has one.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The guide's booking settings.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_SETTINGS)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "Caller holds the GUIDE role but has not completed guide onboarding (no guide"
+                            + " profile yet).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
     @GetMapping("/settings")
     public ApiEnvelope<GuideBookingSettingsResponse> getSettings() {
         var user = currentUser.requireRole(UserRole.GUIDE);
@@ -168,6 +610,51 @@ public class AvailabilityController {
      * Update the guide's booking settings. Changing {@code timezone} cascades the new zone onto
      * every existing rule (the read-only-tz invariant) before re-materializing.
      */
+    @Operation(
+            summary = "Update booking settings",
+            description =
+                    "Partially updates the guide's booking settings — a null/omitted field leaves"
+                            + " that setting unchanged. Changing timezone cascades the new zone"
+                            + " onto every one of the guide's existing rules (the read-only-tz"
+                            + " invariant) before re-materializing. The response surfaces (CTL-54"
+                            + " Task 7) any newly uncovered future CONFIRMED bookings; the update"
+                            + " still succeeds and no booking is mutated.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The updated settings, plus any newly-uncovered bookings (advisory).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples =
+                                    @ExampleObject(
+                                            value = ApiExamples.GUIDE_BOOKING_SETTINGS_WRITE)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "Invalid field value (acceptanceMode, responseDeadlineMin, minNoticeMin,"
+                            + " maxAdvanceDays, buffers, durationsOffered, or timezone)."
+                            + NO_GUIDE_PROFILE_422,
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
     @PatchMapping("/settings")
     public AvailabilityWriteResponse<GuideBookingSettingsResponse> updateSettings(
             @RequestBody GuideBookingSettingsUpdateRequest req) {
