@@ -3,6 +3,8 @@ package com.CampusToursLive.domain.booking;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.CampusToursLive.domain.availability.GuideAvailabilityOccurrenceEntity;
+import com.CampusToursLive.domain.availability.GuideAvailabilityOccurrenceRepository;
 import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
@@ -16,6 +18,7 @@ import com.CampusToursLive.domain.university.UniversityStatus;
 import com.CampusToursLive.domain.user.AccountStatus;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
+import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.BookingDetailResponse;
 import com.CampusToursLive.web.dto.CreateBookingRequest;
 import java.time.Instant;
@@ -57,6 +60,7 @@ class BookingWriteIntegrationTest {
     @Autowired GuideProfileRepository guides;
     @Autowired TourOfferingRepository offerings;
     @Autowired UniversityRepository universities;
+    @Autowired GuideAvailabilityOccurrenceRepository occurrences;
 
     private UserEntity participant;
     private GuideProfileEntity guide;
@@ -92,6 +96,26 @@ class BookingWriteIntegrationTest {
         o.setPriceCents(5000L);
         o.setStatus(TourStatus.ACTIVE);
         offering = offerings.save(o);
+
+        // CTL-54 Task 6: booking-create now requires the scheduled interval to be CONTAINED by a
+        // materialized availability occurrence for the guide. Seed a wide window (well beyond the
+        // 30-day max-advance this suite books within) so every pre-existing test in this class --
+        // none of which is about availability -- keeps passing.
+        occurrences.saveAndFlush(
+                occurrence(
+                        Instant.now().minus(1, ChronoUnit.DAYS),
+                        Instant.now().plus(60, ChronoUnit.DAYS)));
+    }
+
+    /** An availability occurrence for this test's guide covering [start, end). */
+    private GuideAvailabilityOccurrenceEntity occurrence(Instant start, Instant end) {
+        GuideAvailabilityOccurrenceEntity o = new GuideAvailabilityOccurrenceEntity();
+        o.setId(UUID.randomUUID());
+        o.setGuideId(guide.getId());
+        o.setDuringStartAt(start);
+        o.setDuringEndAt(end);
+        o.setGeneratedAt(Instant.now());
+        return o;
     }
 
     @Test
@@ -118,6 +142,60 @@ class BookingWriteIntegrationTest {
         assertThat(trail.get(0).getPreviousStatus()).isNull();
         assertThat(trail.get(0).getNewStatus()).isEqualTo(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
         assertThat(trail.get(0).getActorType()).isEqualTo(BookingActor.PARTICIPANT);
+    }
+
+    @Test
+    void createBooking_noAvailabilityOccurrenceAtAll_isRejected() {
+        occurrences.deleteAllInBatch(); // guide has no materialized availability whatsoever
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
+
+        assertThatThrownBy(
+                        () ->
+                                service.createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                offering.getId().toString(),
+                                                start.toString(),
+                                                null)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessage(BookingService.OUTSIDE_AVAILABILITY_MESSAGE);
+    }
+
+    @Test
+    void createBooking_occurrenceExactlyMatchesScheduledInterval_isContained_andSucceeds() {
+        occurrences.deleteAllInBatch();
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
+        // The offering is 60 minutes; an occurrence exactly [start, start+60) must contain it
+        // (boundary: occurrence == scheduled interval, not a strict superset).
+        occurrences.saveAndFlush(occurrence(start, start.plus(60, ChronoUnit.MINUTES)));
+
+        BookingDetailResponse resp =
+                service.createBooking(
+                        participant,
+                        new CreateBookingRequest(
+                                offering.getId().toString(), start.toString(), null));
+
+        assertThat(resp.status()).isEqualTo("WAITING_FOR_GUIDE");
+    }
+
+    @Test
+    void createBooking_scheduledIntervalExtendsPastOccurrenceEnd_isRejected() {
+        occurrences.deleteAllInBatch();
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
+        // The occurrence covers only 59 of the 60 scheduled minutes -- the booking's scheduled end
+        // is one minute past where the guide's availability ends, so containment must fail.
+        occurrences.saveAndFlush(occurrence(start, start.plus(59, ChronoUnit.MINUTES)));
+
+        assertThatThrownBy(
+                        () ->
+                                service.createBooking(
+                                        participant,
+                                        new CreateBookingRequest(
+                                                offering.getId().toString(),
+                                                start.toString(),
+                                                null)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessage(BookingService.OUTSIDE_AVAILABILITY_MESSAGE);
     }
 
     @Test

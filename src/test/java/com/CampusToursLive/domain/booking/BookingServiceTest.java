@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.CampusToursLive.domain.availability.GuideAvailabilityOccurrenceRepository;
 import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
@@ -42,9 +43,17 @@ class BookingServiceTest {
     @Mock UserRepository users;
     @Mock UniversityRepository universities;
     @Mock BookingStatusHistoryRepository statusHistory;
+    @Mock GuideAvailabilityOccurrenceRepository availabilityOccurrences;
 
     private BookingService service() {
-        return new BookingService(bookings, offerings, guides, users, universities, statusHistory);
+        return new BookingService(
+                bookings,
+                offerings,
+                guides,
+                users,
+                universities,
+                statusHistory,
+                availabilityOccurrences);
     }
 
     // ── entity builders ──────────────────────────────────────────────────────
@@ -771,6 +780,23 @@ class BookingServiceTest {
     }
 
     @Test
+    void createBooking_outsideAvailability_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        // Overrides the default (lenient) "covered" stub from stubBookableOffering(): this guide
+        // has no availability occurrence containing the requested scheduled interval.
+        when(availabilityOccurrences.existsContaining(eq(ctx.guideProfileId()), any(), any()))
+                .thenReturn(false);
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().createBooking(participant, validRequest(ctx, null)));
+        assertEquals(BookingService.OUTSIDE_AVAILABILITY_MESSAGE, ex.getMessage());
+        verify(bookings, never()).saveAndFlush(any());
+    }
+
+    @Test
     void createBooking_lostInsertRace_surfacesAsSlotTaken_andWritesNoAudit() {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
         Bookable ctx = stubBookableOffering();
@@ -1007,6 +1033,26 @@ class BookingServiceTest {
         verify(bookings, never()).saveAndFlush(any());
     }
 
+    @Test
+    void addCartItem_outsideAvailability_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        when(bookings.countByParticipantUserIdAndStatus(participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(0L);
+        // Overrides the default (lenient) "covered" stub: proves the containment gate lives in
+        // the shared buildDraftBooking, not just the create endpoint — a not-contained interval is
+        // rejected at cart-add too.
+        when(availabilityOccurrences.existsContaining(eq(ctx.guideProfileId()), any(), any()))
+                .thenReturn(false);
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().addCartItem(participant, validRequest(ctx, null)));
+        assertEquals(BookingService.OUTSIDE_AVAILABILITY_MESSAGE, ex.getMessage());
+        verify(bookings, never()).saveAndFlush(any());
+    }
+
     // ── getCart / removeCartItem ─────────────────────────────────────────────
 
     @Test
@@ -1185,6 +1231,27 @@ class BookingServiceTest {
     }
 
     @Test
+    void checkout_availabilityRemovedSinceCartAdd_isRejected() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity item =
+                draftItem(participant.getId(), Instant.now().plus(3, ChronoUnit.DAYS), 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        stubCheckoutLookups(item, TourStatus.ACTIVE);
+        // The item was contained when it was added to the cart, but the guide has since edited
+        // their availability so it no longer covers the scheduled time -- revalidateCartItem must
+        // re-run the containment check at checkout, not just trust add-to-cart time.
+        when(availabilityOccurrences.existsContaining(eq(item.getGuideId()), any(), any()))
+                .thenReturn(false);
+
+        ValidationException ex =
+                assertThrows(ValidationException.class, () -> service().checkout(participant));
+        assertTrue(ex.getMessage().contains(item.getBookingNumber()));
+        verify(bookings, never()).saveAllAndFlush(any());
+    }
+
+    @Test
     void checkout_guideNoLongerApproved_isRejected() {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
         BookingEntity item =
@@ -1287,6 +1354,13 @@ class BookingServiceTest {
         u.setStatus(UniversityStatus.ACTIVE);
         when(universities.findById(universityId)).thenReturn(Optional.of(u));
 
+        // Default: the scheduled interval IS covered by availability (CTL-54 Task 6) — lenient
+        // because several tests fail earlier (own-tour, blank/malformed start, notice/advance
+        // window) and never reach this check.
+        lenient()
+                .when(availabilityOccurrences.existsContaining(eq(guideProfileId), any(), any()))
+                .thenReturn(true);
+
         return new Bookable(offeringId, guideProfileId, guideUserId, universityId);
     }
 
@@ -1369,6 +1443,14 @@ class BookingServiceTest {
             UniversityEntity u = university(b.getUniversityId(), "Test University");
             u.setStatus(UniversityStatus.ACTIVE);
             when(universities.findById(b.getUniversityId())).thenReturn(Optional.of(u));
+            // Default: still within availability at checkout re-validation time (CTL-54 Task 6) —
+            // lenient because some tests reject the item earlier (stale/notice-window, offering no
+            // longer ACTIVE) and never reach this re-check.
+            lenient()
+                    .when(
+                            availabilityOccurrences.existsContaining(
+                                    eq(b.getGuideId()), any(), any()))
+                    .thenReturn(true);
         }
         return guideUserId;
     }

@@ -1,5 +1,6 @@
 package com.CampusToursLive.domain.booking;
 
+import com.CampusToursLive.domain.availability.GuideAvailabilityOccurrenceRepository;
 import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
@@ -89,12 +90,21 @@ public class BookingService {
     private static final int BOOKING_NUMBER_LENGTH = 10;
     private static final SecureRandom RANDOM = new SecureRandom();
 
+    /**
+     * CTL-54 Task 6: "outside the guide's availability" — distinct from the slot-conflict messages
+     * ("already has a booking" / "overlaps another item"), which are booking-vs-booking, not
+     * booking-vs-availability.
+     */
+    static final String OUTSIDE_AVAILABILITY_MESSAGE =
+            "This time is outside the guide's availability";
+
     private final BookingRepository bookings;
     private final TourOfferingRepository offerings;
     private final GuideProfileRepository guides;
     private final UserRepository users;
     private final UniversityRepository universities;
     private final BookingStatusHistoryRepository statusHistory;
+    private final GuideAvailabilityOccurrenceRepository availabilityOccurrences;
 
     public BookingService(
             BookingRepository bookings,
@@ -102,13 +112,15 @@ public class BookingService {
             GuideProfileRepository guides,
             UserRepository users,
             UniversityRepository universities,
-            BookingStatusHistoryRepository statusHistory) {
+            BookingStatusHistoryRepository statusHistory,
+            GuideAvailabilityOccurrenceRepository availabilityOccurrences) {
         this.bookings = bookings;
         this.offerings = offerings;
         this.guides = guides;
         this.users = users;
         this.universities = universities;
         this.statusHistory = statusHistory;
+        this.availabilityOccurrences = availabilityOccurrences;
     }
 
     /**
@@ -319,6 +331,7 @@ public class BookingService {
 
         Instant start = parseStart(req.scheduledStartAt(), Instant.now());
         Instant end = start.plus(Duration.ofMinutes(offering.getDurationMin()));
+        requireWithinAvailability(offering.getGuideId(), start, end);
 
         BookingEntity b = new BookingEntity();
         b.setId(UUID.randomUUID());
@@ -344,6 +357,23 @@ public class BookingService {
         b.setCurrency(offering.getCurrency());
         b.setParticipantNotes(cleanFreeText(req.participantNotes(), "participantNotes"));
         return b;
+    }
+
+    /**
+     * CTL-54 Task 6: the booking's SCHEDULED tour interval (never the buffer-padded reserved
+     * interval) must be CONTAINED by some current materialized availability occurrence for the
+     * guide — {@code occurrence.during @> booking.scheduled}. This is a containment check, never an
+     * EXCLUDE (that relationship is reserved for availability-vs-availability and
+     * booking-vs-booking overlap, which are separate invariants). Called from the shared {@link
+     * #buildDraftBooking} (covers both {@link #createBooking} and {@link #addCartItem}) and again
+     * from {@link #revalidateCartItem} at checkout, since availability can change while an item
+     * sits in the cart.
+     */
+    private void requireWithinAvailability(
+            UUID guideId, Instant scheduledStart, Instant scheduledEnd) {
+        if (!availabilityOccurrences.existsContaining(guideId, scheduledStart, scheduledEnd)) {
+            throw new ValidationException(OUTSIDE_AVAILABILITY_MESSAGE);
+        }
     }
 
     /** DRAFT → PENDING_GUIDE_ACCEPTANCE: the transition that claims the slot. */
@@ -442,6 +472,17 @@ public class BookingService {
         Instant end = b.getScheduledStartAt().plus(Duration.ofMinutes(offering.getDurationMin()));
         b.setScheduledEndAt(end);
         b.setReservedEndAt(end.plus(RESERVED_BUFFER_AFTER));
+
+        // CTL-54 Task 6: re-check containment at checkout — the guide's availability can change
+        // (or the re-snapshot above can change the scheduled end) between add-to-cart and
+        // checkout, so an item that was contained when carted must still be contained now.
+        if (!availabilityOccurrences.existsContaining(
+                b.getGuideId(), b.getScheduledStartAt(), end)) {
+            throw new ValidationException(
+                    "Cart item "
+                            + b.getBookingNumber()
+                            + " is no longer within the guide's availability");
+        }
     }
 
     private List<BookingEntity> cartItems(UUID participantUserId) {
