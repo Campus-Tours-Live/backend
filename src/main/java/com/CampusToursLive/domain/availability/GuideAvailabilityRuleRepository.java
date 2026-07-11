@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 public interface GuideAvailabilityRuleRepository
         extends JpaRepository<GuideAvailabilityRuleEntity, UUID> {
@@ -13,4 +14,12 @@ public interface GuideAvailabilityRuleRepository
 
     /** A guide's own rule — scopes writes/deletes so a guide can only touch their own rows. */
     Optional<GuideAvailabilityRuleEntity> findByIdAndGuideId(UUID id, UUID guideId);
+
+    /**
+     * Every distinct guide id that has at least one rule — half of the union {@link
+     * OccurrenceHorizonJob} (CTL-54 Task 4) enumerates on each roll-forward tick (the other half is
+     * {@link AvailabilityExceptionRepository#findDistinctGuideIds()}).
+     */
+    @Query("select distinct r.guideId from GuideAvailabilityRuleEntity r")
+    List<UUID> findDistinctGuideIds();
 }
