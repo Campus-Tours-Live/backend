@@ -231,6 +231,33 @@ class AvailabilityServiceIntegrationTest {
     }
 
     @Test
+    void rematerialize_exceptionsWithoutRulesOrSettings_materializesInDefaultTimezone() {
+        // No settings row and NO rules — only a one-off ADDITIONAL exception. rematerialize must
+        // NOT
+        // throw (the pure 3-arg engine would); it resolves AvailabilityService.DEFAULT_TIMEZONE
+        // (matches the guide_booking_settings.timezone DB default) and materializes the window.
+        exceptions.save(
+                exception(
+                        LocalDate.of(2026, 3, 4),
+                        AvailabilityExceptionKind.ADDITIONAL,
+                        LocalTime.of(10, 0),
+                        60));
+
+        assertThatCode(() -> service.rematerialize(guideId)).doesNotThrowAnyException();
+
+        // DEFAULT_TIMEZONE = America/Los_Angeles, PST (-08:00) on 2026-03-04 -> 10:00 local =
+        // 18:00Z.
+        assertThat(occurrences.findByGuideIdOrderByDuringStartAtAsc(guideId))
+                .extracting(
+                        GuideAvailabilityOccurrenceEntity::getDuringStartAt,
+                        GuideAvailabilityOccurrenceEntity::getDuringEndAt)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(
+                                Instant.parse("2026-03-04T18:00:00Z"),
+                                Instant.parse("2026-03-04T19:00:00Z")));
+    }
+
+    @Test
     void rematerialize_persistsDstNoticeForSpringForwardDay() {
         // Sunday 2026-03-08 02:30 America/Los_Angeles falls in the spring-forward gap
         // (02:00->03:00),

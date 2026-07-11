@@ -37,6 +37,15 @@ public class AvailabilityService {
      */
     public static final int HORIZON_DAYS = 375;
 
+    /**
+     * Fallback exception zone when a guide has exceptions but neither a settings row nor any rule
+     * to infer a zone from. Matches the {@code guide_booking_settings.timezone} column DEFAULT in
+     * V1__schema.sql ({@code 'America/Los_Angeles'}) — so a guide with no explicit settings
+     * resolves to the same zone the DB would have defaulted them to. Referenced as a named
+     * constant, never scattered as a literal.
+     */
+    public static final String DEFAULT_TIMEZONE = "America/Los_Angeles";
+
     private final GuideAvailabilityRuleRepository rules;
     private final AvailabilityExceptionRepository exceptions;
     private final GuideAvailabilityOccurrenceRepository occurrences;
@@ -85,23 +94,17 @@ public class AvailabilityService {
         List<GuideAvailabilityRuleEntity> guideRules = rules.findByGuideId(guideId);
         List<AvailabilityExceptionEntity> guideExceptions = exceptions.findByGuideId(guideId);
 
-        // Resolve the exception timezone from the guide's settings row when present (Task 3's fix:
-        // a guide with exceptions but no active rules still projects correctly). With no settings
-        // row, fall back to the pure engine's mode heuristic (resolve the zone from the rules).
-        Optional<GuideBookingSettingsEntity> guideSettings = settings.findByGuideId(guideId);
+        // Always resolve a CONCRETE exception zone and always call the 4-arg overload, so
+        // rematerialize never propagates the pure engine's "exceptions-but-no-rules" throw for a
+        // plausible guide state (that throw stays in the pure 3-arg project for Task-2).
+        // Precedence:
+        //   1. settings row -> its timezone;
+        //   2. else rules present -> the pure engine's MODE-of-rules heuristic (reused, not
+        // copied);
+        //   3. else -> DEFAULT_TIMEZONE (the guide_booking_settings.timezone DB default).
+        String guideTimezone = resolveGuideTimezone(guideId, guideRules);
         ProjectionResult result =
-                guideSettings
-                        .map(
-                                s ->
-                                        AvailabilityProjection.project(
-                                                guideRules,
-                                                guideExceptions,
-                                                horizon,
-                                                s.getTimezone()))
-                        .orElseGet(
-                                () ->
-                                        AvailabilityProjection.project(
-                                                guideRules, guideExceptions, horizon));
+                AvailabilityProjection.project(guideRules, guideExceptions, horizon, guideTimezone);
 
         Instant generatedAt = clock.instant();
 
@@ -126,10 +129,11 @@ public class AvailabilityService {
         try {
             occurrences.saveAll(newOccurrences);
             dstNotices.saveAll(newNotices);
-            // Flush inside the try so the GIST constraint fires here (mapped below), not on a later
-            // auto-flush outside this handler.
+            // One flush inside the try so the GIST constraint fires here (mapped below), not on a
+            // later auto-flush outside this handler. occurrences.flush() flushes the whole shared
+            // persistence context (both repos use the same EntityManager in this tx), so the notice
+            // inserts are covered too — no separate dstNotices.flush() needed.
             occurrences.flush();
-            dstNotices.flush();
         } catch (DataIntegrityViolationException e) {
             // The projection coalesces the net-available set into a DISJOINT union before insert,
             // so
@@ -146,6 +150,24 @@ public class AvailabilityService {
                             + result.intervals(),
                     e);
         }
+    }
+
+    /**
+     * Resolves a concrete exception zone for the guide, never throwing: settings row -> its zone;
+     * else rules present -> the pure engine's MODE-of-rules heuristic (reused directly); else ->
+     * {@link #DEFAULT_TIMEZONE}. This is what lets a guide with exceptions but NO rules and NO
+     * settings row still materialize (in the default zone) instead of the pure engine throwing.
+     */
+    private String resolveGuideTimezone(
+            UUID guideId, List<GuideAvailabilityRuleEntity> guideRules) {
+        Optional<GuideBookingSettingsEntity> guideSettings = settings.findByGuideId(guideId);
+        if (guideSettings.isPresent()) {
+            return guideSettings.get().getTimezone();
+        }
+        if (!guideRules.isEmpty()) {
+            return AvailabilityProjection.resolveExceptionTimezone(guideRules);
+        }
+        return DEFAULT_TIMEZONE;
     }
 
     private static GuideAvailabilityOccurrenceEntity toOccurrence(

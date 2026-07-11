@@ -218,8 +218,13 @@ public final class AvailabilityProjection {
     /**
      * Resolves the shared timezone used to project exceptions (which carry no {@code timezone}
      * column of their own) — see the class-level javadoc "Exception timezone resolution" section.
+     *
+     * <p>Package-private so the persistence layer ({@link AvailabilityService}) can reuse the exact
+     * MODE-of-rules heuristic when a guide has no settings row but does have rules, instead of
+     * duplicating it. Still throws on empty {@code rules} — callers that may pass no rules (e.g.
+     * exceptions-without-rules) must guard for that and fall back to a default zone themselves.
      */
-    private static String resolveExceptionTimezone(List<GuideAvailabilityRuleEntity> rules) {
+    static String resolveExceptionTimezone(List<GuideAvailabilityRuleEntity> rules) {
         if (rules.isEmpty()) {
             throw new IllegalArgumentException(
                     "Cannot resolve a timezone for exceptions: no rules were supplied. Exceptions"
