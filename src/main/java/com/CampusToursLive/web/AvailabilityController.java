@@ -165,16 +165,81 @@ public class AvailabilityController {
      * has NOT been saved, returns the resulting net-available windows per date exactly as an actual
      * save would produce them, plus which existing exception segments the override would trim --
      * WITHOUT persisting anything. Owner-scoped like every other route here: the guide id is
-     * resolved from the caller's own guide profile, never from the request. No springdoc yet (Task
-     * 5).
+     * resolved from the caller's own guide profile, never from the request.
      */
+    @Operation(
+            summary = "Preview a date-specific override (dry-run, no persist)",
+            description =
+                    "Given a proposed date-specific override that has NOT been saved, returns the"
+                            + " resulting net-available windows per date exactly as an actual save"
+                            + " would produce them, plus which existing exception segments the"
+                            + " override would trim -- WITHOUT persisting anything. Read-only:"
+                            + " nothing is written to the database. Owner-scoped like every other"
+                            + " route here: the guide id is resolved from the caller's own guide"
+                            + " profile, never from the request.")
+    @ApiResponse(
+            responseCode = "200",
+            description =
+                    "The dry-run preview: per-date resulting net-available windows, trimmed"
+                            + " exception segments, and validity.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.OVERRIDE_PREVIEW)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "dateFrom/dateTo/kind/startLocal/windowMin missing or invalid, including the"
+                            + " override crossing midnight (startLocal + windowMin > 1440) or the"
+                            + " dateFrom..dateTo range exceeding 366 days."
+                            + NO_GUIDE_PROFILE_422,
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
     @GetMapping("/preview")
     public ApiEnvelope<OverridePreviewResponse> getOverridePreview(
-            @RequestParam String dateFrom,
-            @RequestParam String dateTo,
-            @RequestParam String kind,
-            @RequestParam String startLocal,
-            @RequestParam Integer windowMin) {
+            @Parameter(
+                            description = "ISO-8601 inclusive start date of the previewed range.",
+                            required = true)
+                    @RequestParam
+                    String dateFrom,
+            @Parameter(
+                            description = "ISO-8601 inclusive end date of the previewed range.",
+                            required = true)
+                    @RequestParam
+                    String dateTo,
+            @Parameter(
+                            description =
+                                    "UNAVAILABLE removes availability; ADDITIONAL adds"
+                                            + " availability.",
+                            required = true)
+                    @RequestParam
+                    String kind,
+            @Parameter(
+                            description = "Wall-clock start time in the guide's settings timezone.",
+                            required = true)
+                    @RequestParam
+                    String startLocal,
+            @Parameter(description = "Window length in minutes.", required = true) @RequestParam
+                    Integer windowMin) {
         var user = currentUser.requireRole(UserRole.GUIDE);
         UUID guideId = requireGuideId(user);
         OverridePreviewRequest req =
@@ -441,7 +506,12 @@ public class AvailabilityController {
                             + " succeeds and no booking is mutated.")
     @ApiResponse(
             responseCode = "200",
-            description = "The created exception, plus any newly-uncovered bookings (advisory).",
+            description =
+                    "The created exception, plus any newly-uncovered bookings (advisory). For a"
+                            + " multi-day range (dateFrom/dateTo), the response body represents"
+                            + " the exception created for dateFrom -- use GET"
+                            + " /availability/exceptions to retrieve the full expanded per-date"
+                            + " set.",
             content =
                     @Content(
                             mediaType = "application/json",

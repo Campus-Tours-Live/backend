@@ -272,6 +272,14 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String OVERRIDE_PREVIEW_JSON =
+            "{\"days\":[{\"date\":\"2026-07-12\",\"resultingWindows\":"
+                    + "[{\"startAt\":\"2026-07-12T16:00:00Z\",\"endAt\":\"2026-07-12T16:30:00Z\"}],"
+                    + "\"trimmed\":[{\"kind\":\"ADDITIONAL\",\"startLocal\":\"09:00\","
+                    + "\"windowMin\":60}]}],\"valid\":true,\"message\":null}";
+
+    String OVERRIDE_PREVIEW = "{\"data\":" + OVERRIDE_PREVIEW_JSON + "," + META + "}";
+
     String SLOT_LIST =
             "{\"data\":[{\"startAt\":\"2026-07-14T10:00:00Z\","
                     + "\"endAt\":\"2026-07-14T11:00:00Z\"}],"
