@@ -300,7 +300,11 @@ public class AvailabilityController {
                             + " occurrences in the same transaction, and the response also"
                             + " surfaces (CTL-54 Task 7) any of the guide's own future CONFIRMED"
                             + " bookings this edit left uncovered by any occurrence; the edit still"
-                            + " succeeds and no booking is mutated.")
+                            + " succeeds and no booking is mutated. Contiguous or overlapping"
+                            + " ACTIVE rules on the same day of week with the same effectiveFrom/"
+                            + " effectiveTo are coalesced into one stored rule on write; the"
+                            + " response is that merged rule (its id may differ from a rule id you"
+                            + " referenced earlier).")
     @ApiResponse(
             responseCode = "200",
             description = "The created rule, plus any newly-uncovered bookings (advisory).",
@@ -334,8 +338,13 @@ public class AvailabilityController {
     @ApiResponse(
             responseCode = "422",
             description =
-                    "Missing/invalid fields (dayOfWeek, startLocal, windowMin, effectiveTo before"
-                            + " effectiveFrom)."
+                    "Missing/invalid fields (dayOfWeek, startLocal, windowMin), the time range"
+                            + " crossing midnight (startLocal + windowMin > 1440), or effectiveTo"
+                            + " before effectiveFrom. A time overlap/touch with another ACTIVE rule"
+                            + " on the same day is NOT rejected when effectiveFrom/effectiveTo also"
+                            + " match — that case is coalesced (merged) into one rule instead, see"
+                            + " above; a DIFFERENT-but-overlapping effective range (e.g. two"
+                            + " overlapping seasons) is still rejected."
                             + NO_GUIDE_PROFILE_422,
             content =
                     @Content(
@@ -358,7 +367,10 @@ public class AvailabilityController {
                             + " updated from the request. The write re-materializes the guide's"
                             + " occurrences and the response surfaces (CTL-54 Task 7) any newly"
                             + " uncovered future CONFIRMED bookings; the edit still succeeds and no"
-                            + " booking is mutated.")
+                            + " booking is mutated. Contiguous or overlapping ACTIVE rules on the"
+                            + " same day of week with the same effectiveFrom/effectiveTo are"
+                            + " coalesced into one stored rule on write; the response is that"
+                            + " merged rule (its id may differ from the id you updated).")
     @ApiResponse(
             responseCode = "200",
             description = "The updated rule, plus any newly-uncovered bookings (advisory).",
@@ -393,8 +405,13 @@ public class AvailabilityController {
     @ApiResponse(
             responseCode = "422",
             description =
-                    "Missing/invalid fields (dayOfWeek, startLocal, windowMin, effectiveTo before"
-                            + " effectiveFrom)."
+                    "Missing/invalid fields (dayOfWeek, startLocal, windowMin), the time range"
+                            + " crossing midnight (startLocal + windowMin > 1440), or effectiveTo"
+                            + " before effectiveFrom. A time overlap/touch with another ACTIVE rule"
+                            + " on the same day is NOT rejected when effectiveFrom/effectiveTo also"
+                            + " match — that case is coalesced (merged) into one rule instead, see"
+                            + " above; a DIFFERENT-but-overlapping effective range (e.g. two"
+                            + " overlapping seasons) is still rejected."
                             + NO_GUIDE_PROFILE_422,
             content =
                     @Content(

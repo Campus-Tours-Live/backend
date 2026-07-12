@@ -327,32 +327,28 @@ class AvailabilityWriteServiceIntegrationTest {
     }
 
     @Test
-    void createRule_rejectsOverlappingSameDaySameEffectiveRange() {
+    void createRule_coalescesOverlappingSameDaySameEffectiveRange() {
+        // CTL-54 coalesce: this used to 422 (T2's original overlap guard); a same-day,
+        // same-effective-range ACTIVE overlap now MERGES into one rule instead of being rejected.
         writeService.createRule(
                 actingUser(guideAUserId),
                 new AvailabilityRuleRequest(MONDAY_DOW, "10:00", 60, null, null, null));
 
         AvailabilityRuleRequest overlapping =
                 new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 240, null, null, null);
+        AvailabilityRuleResponse merged =
+                writeService.createRule(actingUser(guideAUserId), overlapping);
 
-        assertThatThrownBy(() -> writeService.createRule(actingUser(guideAUserId), overlapping))
-                .isInstanceOf(ValidationException.class);
-        assertThat(rules.findByGuideId(guideAId)).hasSize(1);
-    }
+        // The candidate's own span (09:00-13:00) already fully contains the sibling's
+        // (10:00-11:00), so the union equals the candidate's own span.
+        assertThat(merged.startLocal()).isEqualTo("09:00");
+        assertThat(merged.windowMin()).isEqualTo(240);
 
-    @Test
-    void createRule_allowsTouchingSameDayRanges() {
-        writeService.createRule(
-                actingUser(guideAUserId),
-                new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 240, null, null, null));
-
-        AvailabilityRuleRequest touching =
-                new AvailabilityRuleRequest(MONDAY_DOW, "13:00", 60, null, null, null);
-        AvailabilityRuleResponse created =
-                writeService.createRule(actingUser(guideAUserId), touching);
-
-        assertThat(created.startLocal()).isEqualTo("13:00");
-        assertThat(rules.findByGuideId(guideAId)).hasSize(2);
+        List<GuideAvailabilityRuleEntity> stored =
+                rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) MONDAY_DOW);
+        assertThat(stored).hasSize(1);
+        assertThat(stored.get(0).getStartLocal().toString()).isEqualTo("09:00");
+        assertThat(stored.get(0).getWindowMin()).isEqualTo(240);
     }
 
     @Test
@@ -420,7 +416,10 @@ class AvailabilityWriteServiceIntegrationTest {
     }
 
     @Test
-    void updateRule_rejectsMovingIntoOverlapWithSibling() {
+    void updateRule_movingIntoAdjacency_coalesces() {
+        // CTL-54 coalesce: this used to 422 (moving into an overlap with a same-effective
+        // sibling); moving a rule's span into adjacency/overlap with a same-effective ACTIVE
+        // sibling now MERGES them into one rule instead of being rejected.
         writeService.createRule(
                 actingUser(guideAUserId),
                 new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 60, null, null, null));
@@ -429,24 +428,21 @@ class AvailabilityWriteServiceIntegrationTest {
                         actingUser(guideAUserId),
                         new AvailabilityRuleRequest(MONDAY_DOW, "12:00", 60, null, null, null));
 
-        AvailabilityRuleRequest movedIntoOverlap =
-                new AvailabilityRuleRequest(MONDAY_DOW, "09:30", 60, null, null, null);
+        // Move the second rule (12:00-13:00) to 10:00-11:00, touching the first (09:00-10:00).
+        AvailabilityRuleRequest movedIntoAdjacency =
+                new AvailabilityRuleRequest(MONDAY_DOW, "10:00", 60, null, null, null);
+        AvailabilityRuleResponse updated =
+                writeService.updateRule(
+                        actingUser(guideAUserId), UUID.fromString(second.id()), movedIntoAdjacency);
 
-        assertThatThrownBy(
-                        () ->
-                                writeService.updateRule(
-                                        actingUser(guideAUserId),
-                                        UUID.fromString(second.id()),
-                                        movedIntoOverlap))
-                .isInstanceOf(ValidationException.class);
+        assertThat(updated.startLocal()).isEqualTo("09:00");
+        assertThat(updated.windowMin()).isEqualTo(120);
 
-        // Untouched.
-        assertThat(
-                        rules.findById(UUID.fromString(second.id()))
-                                .orElseThrow()
-                                .getStartLocal()
-                                .toString())
-                .isEqualTo("12:00");
+        List<GuideAvailabilityRuleEntity> stored =
+                rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) MONDAY_DOW);
+        assertThat(stored).hasSize(1);
+        assertThat(stored.get(0).getStartLocal().toString()).isEqualTo("09:00");
+        assertThat(stored.get(0).getWindowMin()).isEqualTo(120);
     }
 
     @Test
@@ -496,9 +492,9 @@ class AvailabilityWriteServiceIntegrationTest {
     }
 
     @Test
-    void updateRule_partialReactivate_stillRunsOverlapCheck() {
-        // B is created first (active, no sibling yet) then deactivated, so an overlapping A can
-        // later be created active (validateNoOverlap only rejects against ACTIVE siblings).
+    void updateRule_partialReactivate_resolvesStoredFieldsAndCoalesces() {
+        // B is created first (active, no sibling yet) then deactivated, so an identical-span A
+        // can later be created active (validateNoOverlap only rejects against ACTIVE siblings).
         AvailabilityRuleResponse b =
                 writeService.createRule(
                         actingUser(guideAUserId),
@@ -514,15 +510,24 @@ class AvailabilityWriteServiceIntegrationTest {
                 new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 60, null, null, null));
 
         // Partial PATCH: ONLY active=true (re-activate B) -- must still resolve B's stored
-        // dayOfWeek/startLocal/windowMin and run the overlap check against A, not skip it.
+        // dayOfWeek/startLocal/windowMin/effectiveFrom/effectiveTo. B and A land in the SAME
+        // coalesce group (same day + same default effective range) with an identical span, so
+        // CTL-54 coalesce now MERGES them into one active rule instead of the old 422.
         AvailabilityRuleRequest reactivateOnly =
                 new AvailabilityRuleRequest(null, null, null, null, null, true);
 
-        assertThatThrownBy(
-                        () ->
-                                writeService.updateRule(
-                                        actingUser(guideAUserId), bId, reactivateOnly))
-                .isInstanceOf(ValidationException.class);
+        AvailabilityRuleResponse updated =
+                writeService.updateRule(actingUser(guideAUserId), bId, reactivateOnly);
+
+        assertThat(updated.active()).isTrue();
+        assertThat(updated.startLocal()).isEqualTo("09:00");
+        assertThat(updated.windowMin()).isEqualTo(60);
+
+        List<GuideAvailabilityRuleEntity> stored =
+                rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) MONDAY_DOW);
+        assertThat(stored).hasSize(1);
+        assertThat(stored.get(0).getStartLocal().toString()).isEqualTo("09:00");
+        assertThat(stored.get(0).getWindowMin()).isEqualTo(60);
     }
 
     @Test
@@ -542,6 +547,176 @@ class AvailabilityWriteServiceIntegrationTest {
                                         actingUser(guideAUserId), ruleId, invalidDayOfWeek))
                 .isInstanceOf(ValidationException.class)
                 .hasMessage("dayOfWeek must be between 0 (Sunday) and 6 (Saturday)");
+    }
+
+    // ---------------------------------------------------------------------
+    // CTL-54 — write-time coalesce: contiguous/overlapping same-effective-range ACTIVE weekly
+    // rules merge into one stored rule instead of being rejected as an overlap.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void createRule_coalescesTouchingRanges() {
+        // The user-reported case: Sunday 9:00-10:00 + 10:00-10:45 -> ONE rule, 9:00-10:45.
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(0, "09:00", 60, null, null, null));
+
+        AvailabilityRuleResponse merged =
+                writeService.createRule(
+                        actingUser(guideAUserId),
+                        new AvailabilityRuleRequest(0, "10:00", 45, null, null, null));
+
+        assertThat(merged.startLocal()).isEqualTo("09:00");
+        assertThat(merged.windowMin()).isEqualTo(105);
+
+        List<GuideAvailabilityRuleEntity> stored =
+                rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) 0);
+        assertThat(stored).hasSize(1);
+        assertThat(stored.get(0).getStartLocal().toString()).isEqualTo("09:00");
+        assertThat(stored.get(0).getWindowMin()).isEqualTo(105);
+
+        // Every weekly-recurring materialized occurrence is one contiguous 105-minute block, not
+        // two separate 60/45-minute ones.
+        List<GuideAvailabilityOccurrenceEntity> occ =
+                occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId);
+        assertThat(occ).isNotEmpty();
+        assertThat(occ)
+                .allSatisfy(
+                        o ->
+                                assertThat(
+                                                java.time.Duration.between(
+                                                                o.getDuringStartAt(),
+                                                                o.getDuringEndAt())
+                                                        .toMinutes())
+                                        .isEqualTo(105));
+    }
+
+    @Test
+    void createRule_coalescesOverlappingRanges() {
+        // 09:00-10:30 + 10:00-11:00 overlap (previously the 2nd create would 422) -> ONE rule,
+        // 09:00-11:00.
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(0, "09:00", 90, null, null, null));
+
+        AvailabilityRuleResponse merged =
+                writeService.createRule(
+                        actingUser(guideAUserId),
+                        new AvailabilityRuleRequest(0, "10:00", 60, null, null, null));
+
+        assertThat(merged.startLocal()).isEqualTo("09:00");
+        assertThat(merged.windowMin()).isEqualTo(120);
+
+        List<GuideAvailabilityRuleEntity> stored =
+                rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) 0);
+        assertThat(stored).hasSize(1);
+        assertThat(stored.get(0).getWindowMin()).isEqualTo(120);
+    }
+
+    @Test
+    void createRule_bridgingRangeUnionsWholeRun() {
+        // 09:00-10:00 and 11:00-12:00 (a 1-hour gap -- disjoint, no merge yet) then a bridging
+        // 10:00-11:00 unions the whole run into ONE rule, 09:00-12:00.
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(0, "09:00", 60, null, null, null));
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(0, "11:00", 60, null, null, null));
+        assertThat(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) 0)).hasSize(2);
+
+        AvailabilityRuleResponse merged =
+                writeService.createRule(
+                        actingUser(guideAUserId),
+                        new AvailabilityRuleRequest(0, "10:00", 60, null, null, null));
+
+        assertThat(merged.startLocal()).isEqualTo("09:00");
+        assertThat(merged.windowMin()).isEqualTo(180);
+
+        List<GuideAvailabilityRuleEntity> stored =
+                rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) 0);
+        assertThat(stored).hasSize(1);
+        assertThat(stored.get(0).getStartLocal().toString()).isEqualTo("09:00");
+        assertThat(stored.get(0).getWindowMin()).isEqualTo(180);
+    }
+
+    @Test
+    void createRule_differentEffectiveFrom_notMerged() {
+        // Same dayOfWeek/touching times, but the second create runs against a clock advanced by
+        // >= 1 day -- a different default effectiveFrom means a DIFFERENT coalesce group, so the
+        // two rules stay separate (not merged, and not rejected -- touching bounds never overlap).
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 60, null, null, null));
+
+        Clock nextDayClock = Clock.offset(FIXED_CLOCK, java.time.Duration.ofDays(1));
+        AvailabilityService nextDayAvailabilityService =
+                new AvailabilityService(
+                        rules, exceptions, occurrences, dstNotices, settingsRepo, nextDayClock);
+        AvailabilityWriteService nextDayWriteService =
+                new AvailabilityWriteService(
+                        rules,
+                        exceptions,
+                        settingsRepo,
+                        guides,
+                        nextDayAvailabilityService,
+                        entityManager,
+                        bookings,
+                        occurrences,
+                        nextDayClock);
+
+        AvailabilityRuleResponse second =
+                nextDayWriteService.createRule(
+                        actingUser(guideAUserId),
+                        new AvailabilityRuleRequest(MONDAY_DOW, "10:00", 60, null, null, null));
+
+        assertThat(second.effectiveFrom()).isNotEqualTo(FIXED_TODAY.toString());
+
+        List<GuideAvailabilityRuleEntity> stored =
+                rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) MONDAY_DOW);
+        assertThat(stored).hasSize(2);
+    }
+
+    @Test
+    void createRule_inactiveSibling_notMerged() {
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(0, "10:00", 60, null, null, null));
+
+        AvailabilityRuleResponse created =
+                writeService.createRule(
+                        actingUser(guideAUserId),
+                        new AvailabilityRuleRequest(0, "09:00", 60, null, null, false));
+
+        assertThat(created.active()).isFalse();
+
+        List<GuideAvailabilityRuleEntity> stored = rules.findByGuideId(guideAId);
+        assertThat(stored).hasSize(2);
+        assertThat(stored)
+                .extracting(GuideAvailabilityRuleEntity::isActive)
+                .containsExactlyInAnyOrder(true, false);
+    }
+
+    @Test
+    void coalesce_unionStaysWithinDay() {
+        // 22:00-23:00 + 23:00-24:00 touch exactly at end-of-day -> ONE rule, 22:00-24:00 (1440
+        // minutes total, the allowed exactly-midnight-ending boundary).
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(MONDAY_DOW, "22:00", 60, null, null, null));
+
+        AvailabilityRuleResponse merged =
+                writeService.createRule(
+                        actingUser(guideAUserId),
+                        new AvailabilityRuleRequest(MONDAY_DOW, "23:00", 60, null, null, null));
+
+        assertThat(merged.startLocal()).isEqualTo("22:00");
+        assertThat(merged.windowMin()).isEqualTo(120);
+
+        List<GuideAvailabilityRuleEntity> stored =
+                rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) MONDAY_DOW);
+        assertThat(stored).hasSize(1);
+        assertThat(stored.get(0).getWindowMin()).isEqualTo(120);
     }
 
     // ---------------------------------------------------------------------

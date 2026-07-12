@@ -26,7 +26,9 @@ import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -55,6 +57,17 @@ import org.springframework.transaction.annotation.Transactional;
  * settings row (inserting the V1 defaults if not), both so the new rule's timezone has a concrete
  * settings zone to copy and so {@link AvailabilityService#rematerialize} always has a settings tz
  * to resolve (closing the T3 "no settings row" edge at the source).
+ *
+ * <p><b>Write-time coalesce (CTL-54).</b> {@code createRule}/{@code updateRule} no longer reject a
+ * sibling that is a same-day, same-effective-range, ACTIVE overlap or touch (e.g. Sunday {@code
+ * 9:00-10:00} + {@code 10:00-10:45}) — they MERGE it into one stored rule instead. The coalesce
+ * GROUP key is the identical tuple {@code (dayOfWeek, effectiveFrom, effectiveTo, active=true)}:
+ * only rules sharing every one of those merge, because two rules with different effective ranges
+ * have different validity windows and merging their spans would leak availability into dates one of
+ * them never covered; inactive rules never merge (deactivate-preserve). A sibling whose effective
+ * range is DIFFERENT but still overlaps the candidate's (e.g. two overlapping "seasons") still
+ * conflicts — {@link #validateNoOverlap} keeps that guard. See {@link #coalesceActiveGroup(UUID,
+ * short, LocalDate, LocalDate)} for the merge algorithm.
  */
 @Service
 public class AvailabilityWriteService {
@@ -162,8 +175,9 @@ public class AvailabilityWriteService {
                 r.getEffectiveTo());
 
         rules.save(r);
+        AvailabilityRuleResponse result = coalesceAndResolveResult(guideId, r);
         availabilityService.rematerialize(guideId);
-        return toRuleResponse(r);
+        return result;
     }
 
     @Transactional
@@ -220,8 +234,9 @@ public class AvailabilityWriteService {
         }
 
         rules.save(r);
+        AvailabilityRuleResponse result = coalesceAndResolveResult(guideId, r);
         availabilityService.rematerialize(guideId);
-        return toRuleResponse(r);
+        return result;
     }
 
     @Transactional
@@ -517,9 +532,16 @@ public class AvailabilityWriteService {
     /**
      * Rejects the candidate rule (day/time/effective-range) against the guide's other ACTIVE rules
      * on the same {@code dayOfWeek}, when {@code excludeId} is non-null the rule with that id is
-     * self-excluded (the update-in-place case). Two rules conflict only when BOTH their time-of-day
-     * spans overlap (touching bounds do not) AND their effective ranges overlap — a same-time rule
-     * with a disjoint effective range (e.g. a different season) never conflicts.
+     * self-excluded (the update-in-place case).
+     *
+     * <p><b>CTL-54 coalesce.</b> A sibling in the SAME coalesce group as the candidate — identical
+     * {@code (effectiveFrom, effectiveTo)}, null-safe — is skipped here entirely: it is never
+     * rejected for a time overlap/touch, because {@link #coalesceActiveGroup} merges it into the
+     * candidate right after this candidate is saved instead. Two rules conflict here ONLY when BOTH
+     * their time-of-day spans overlap (touching bounds do not) AND they are in DIFFERENT
+     * effective-range groups that still overlap in time (e.g. two overlapping "seasons") — a
+     * same-time rule with a disjoint effective range (e.g. a different, non-overlapping season)
+     * never conflicts either way.
      */
     private void validateNoOverlap(
             UUID guideId,
@@ -536,6 +558,9 @@ public class AvailabilityWriteService {
             if (excludeId != null && excludeId.equals(existing.getId())) {
                 continue;
             }
+            if (isSameCoalesceGroup(effectiveFrom, effectiveTo, existing)) {
+                continue;
+            }
             IntervalMath.Span existingSpan =
                     IntervalMath.spanOf(existing.getStartLocal(), existing.getWindowMin());
             if (IntervalMath.overlaps(candidateSpan, existingSpan)
@@ -548,6 +573,177 @@ public class AvailabilityWriteService {
                         "This time range overlaps another range on " + dayLabel(dayOfWeek) + ".");
             }
         }
+    }
+
+    /**
+     * Whether {@code existing} belongs to the same CTL-54 coalesce group as a candidate with the
+     * given {@code effectiveFrom}/{@code effectiveTo} — i.e. identical {@code effectiveFrom} AND
+     * null-safe-equal {@code effectiveTo}. {@code dayOfWeek} and {@code active=true} are already
+     * fixed by the caller (every sibling here came from {@code
+     * findByGuideIdAndDayOfWeekAndActiveTrue} for the candidate's own {@code dayOfWeek}), so this
+     * method only needs to compare the effective-range half of the group key.
+     */
+    private static boolean isSameCoalesceGroup(
+            LocalDate effectiveFrom, LocalDate effectiveTo, GuideAvailabilityRuleEntity existing) {
+        return existing.getEffectiveFrom().equals(effectiveFrom)
+                && Objects.equals(existing.getEffectiveTo(), effectiveTo);
+    }
+
+    /**
+     * Loads a guide's ACTIVE rules for one {@code (dayOfWeek, effectiveFrom, effectiveTo)} coalesce
+     * group, sorted by minute-of-day start — the read half of {@link #coalesceActiveGroup} and
+     * {@link #findCoveringActiveRule}'s plan-then-apply split.
+     */
+    private List<GuideAvailabilityRuleEntity> loadActiveGroup(
+            UUID guideId, short dayOfWeek, LocalDate effectiveFrom, LocalDate effectiveTo) {
+        return rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, dayOfWeek).stream()
+                .filter(r -> isSameCoalesceGroup(effectiveFrom, effectiveTo, r))
+                .sorted(
+                        Comparator.comparingInt(
+                                r ->
+                                        IntervalMath.spanOf(r.getStartLocal(), r.getWindowMin())
+                                                .startMin()))
+                .toList();
+    }
+
+    /**
+     * A computed-but-not-yet-applied merge for one maximal run of {@code >= 2} touching/
+     * overlapping rules in a coalesce group: {@code keep} (the run's smallest-start rule, kept and
+     * resized in place) gets a new {@code windowMin} spanning the run's union ({@code maxEnd -
+     * keep.startMin}); every other rule in the run is deleted. A run of exactly 1 rule needs no
+     * plan (nothing to merge) — see {@link #planMerge}, which returns {@code null} for that case.
+     */
+    private record RuleMergePlan(
+            GuideAvailabilityRuleEntity keep,
+            int windowMin,
+            List<GuideAvailabilityRuleEntity> toDelete) {}
+
+    /**
+     * CTL-54 write-time coalesce: reduces a guide's ACTIVE rules sharing {@code (dayOfWeek,
+     * effectiveFrom, effectiveTo)} into disjoint maximal weekly intervals, merging any run of rules
+     * whose minute-of-day spans touch ({@code currStart == prevEnd}) or overlap. Called once at the
+     * end of every rule create/update whose result is active — a deactivation never coalesces
+     * (inactive rules never merge, see {@link #validateNoOverlap}'s deactivate-preserve contract).
+     * Idempotent: this also sweeps up any PRE-EXISTING un-merged rows left in the group from before
+     * this feature shipped, the next time the guide writes to that group — no data migration
+     * needed.
+     *
+     * <p><b>Auto-flush safety.</b> Loads the ENTIRE group in ONE read (which auto-flushes the
+     * candidate save that just ran, so the candidate is included), computes the full merge plan
+     * from that in-memory snapshot with NO further repository queries, and only then applies
+     * deletes/resizes — the same plan-then-apply discipline {@link #createException} already uses
+     * via {@link #planOverrideForDate}, needed for the same reason documented on this class:
+     * {@code @DataJpaTest} + {@code FlushModeType.AUTO} + this class's {@code new}-constructed (no
+     * Spring transactional proxy) instantiation means any repository query auto-flushes pending
+     * entity mutations, so interleaving reads and writes here could silently persist a half-applied
+     * merge.
+     */
+    private void coalesceActiveGroup(
+            UUID guideId, short dayOfWeek, LocalDate effectiveFrom, LocalDate effectiveTo) {
+        List<GuideAvailabilityRuleEntity> group =
+                loadActiveGroup(guideId, dayOfWeek, effectiveFrom, effectiveTo);
+
+        // Plan (read-only, pure in-memory sweep — no repository calls below this point): a new
+        // run starts whenever the next rule's start is strictly past the current run's end so far;
+        // otherwise (touching or overlapping) it extends the current run.
+        List<RuleMergePlan> plans = new ArrayList<>();
+        List<GuideAvailabilityRuleEntity> run = new ArrayList<>();
+        int runEnd = -1;
+        for (GuideAvailabilityRuleEntity r : group) {
+            int start = IntervalMath.spanOf(r.getStartLocal(), r.getWindowMin()).startMin();
+            int end = IntervalMath.spanOf(r.getStartLocal(), r.getWindowMin()).endMin();
+            if (!run.isEmpty() && start > runEnd) {
+                plans.add(planMerge(run));
+                run = new ArrayList<>();
+            }
+            run.add(r);
+            runEnd = run.size() == 1 ? end : Math.max(runEnd, end);
+        }
+        if (!run.isEmpty()) {
+            plans.add(planMerge(run));
+        }
+
+        // Apply.
+        for (RuleMergePlan plan : plans) {
+            if (plan == null) {
+                continue; // a singleton run -- nothing to merge, left physically untouched.
+            }
+            plan.toDelete().forEach(rules::delete);
+            plan.keep().setWindowMin(plan.windowMin());
+            rules.save(plan.keep());
+        }
+    }
+
+    /**
+     * Builds the {@link RuleMergePlan} for one maximal run, or {@code null} for a singleton run.
+     */
+    private static RuleMergePlan planMerge(List<GuideAvailabilityRuleEntity> run) {
+        if (run.size() < 2) {
+            return null;
+        }
+        // `run` is a slice of `group`, which loadActiveGroup already sorted by startMin, so the
+        // first element has the run's smallest start -- the deterministic rule kept in place.
+        GuideAvailabilityRuleEntity keep = run.get(0);
+        int minStart = IntervalMath.spanOf(keep.getStartLocal(), keep.getWindowMin()).startMin();
+        int maxEnd = minStart;
+        for (GuideAvailabilityRuleEntity r : run) {
+            maxEnd =
+                    Math.max(
+                            maxEnd,
+                            IntervalMath.spanOf(r.getStartLocal(), r.getWindowMin()).endMin());
+        }
+        return new RuleMergePlan(keep, maxEnd - minStart, run.subList(1, run.size()));
+    }
+
+    /**
+     * Re-finds, within a coalesce group, the ACTIVE rule whose span covers {@code
+     * candidateStartMin} — after {@link #coalesceActiveGroup} runs, the row the caller just
+     * created/updated may have been deleted and merged into a different (earlier-starting) row, so
+     * the caller cannot simply re-read its own id.
+     */
+    private AvailabilityRuleResponse findCoveringActiveRule(
+            UUID guideId,
+            short dayOfWeek,
+            LocalDate effectiveFrom,
+            LocalDate effectiveTo,
+            int candidateStartMin) {
+        return loadActiveGroup(guideId, dayOfWeek, effectiveFrom, effectiveTo).stream()
+                .filter(
+                        r -> {
+                            IntervalMath.Span span =
+                                    IntervalMath.spanOf(r.getStartLocal(), r.getWindowMin());
+                            return span.startMin() <= candidateStartMin
+                                    && candidateStartMin < span.endMin();
+                        })
+                .findFirst()
+                .map(AvailabilityWriteService::toRuleResponse)
+                .orElseThrow(
+                        () ->
+                                new IllegalStateException(
+                                        "CTL-54 coalesce invariant violated: no active rule in the"
+                                                + " group covers the candidate's own start minute"));
+    }
+
+    /**
+     * Shared create/update tail (CTL-54): if the just-saved candidate {@code r} is ACTIVE, runs
+     * {@link #coalesceActiveGroup} for its group and returns the (possibly different, merged) rule
+     * whose span now covers {@code r}'s original start; if {@code r} is INACTIVE (a deactivation),
+     * skips coalesce entirely (inactive rules never merge) and returns {@code r} itself unchanged.
+     * Callers still run {@link AvailabilityService#rematerialize} once, AFTER this returns.
+     */
+    private AvailabilityRuleResponse coalesceAndResolveResult(
+            UUID guideId, GuideAvailabilityRuleEntity r) {
+        if (!r.isActive()) {
+            return toRuleResponse(r);
+        }
+        int candidateStartMin = IntervalMath.spanOf(r.getStartLocal(), r.getWindowMin()).startMin();
+        coalesceActiveGroup(guideId, r.getDayOfWeek(), r.getEffectiveFrom(), r.getEffectiveTo());
+        return findCoveringActiveRule(
+                guideId,
+                r.getDayOfWeek(),
+                r.getEffectiveFrom(),
+                r.getEffectiveTo(),
+                candidateStartMin);
     }
 
     /**
