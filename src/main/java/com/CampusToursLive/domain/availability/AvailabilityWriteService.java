@@ -173,16 +173,31 @@ public class AvailabilityWriteService {
         GuideAvailabilityRuleEntity r =
                 rules.findByIdAndGuideId(id, guideId)
                         .orElseThrow(() -> new NotFoundException("Availability rule not found"));
-        validateRuleInput(req);
+        if (req == null) {
+            throw new ValidationException("Request body is required");
+        }
 
+        // TRUE partial PATCH (unlike createRule's all-fields-required validateRuleInput):
+        // dayOfWeek/startLocal/windowMin fall back to the stored rule `r`'s current values when
+        // omitted from the request, exactly like effectiveFrom/effectiveTo/active already do below
+        // -- this is what lets a client PATCH just `{ "active": false }` without resending the
+        // whole rule.
+        //
         // Resolve every candidate value into LOCALS first and validate BEFORE mutating the managed
         // entity -- `r` came from `findByIdAndGuideId`, so it is already attached to this
         // transaction's persistence context; a repository query inside validateNoOverlap triggers
         // Hibernate's auto-flush, which would silently persist a rejected update if the entity's
         // setters had already run.
-        short dayOfWeek = req.dayOfWeek().shortValue();
-        LocalTime startLocal = parseLocalTime(req.startLocal());
-        int windowMin = req.windowMin();
+        short dayOfWeek = req.dayOfWeek() != null ? req.dayOfWeek().shortValue() : r.getDayOfWeek();
+        if (dayOfWeek < 0 || dayOfWeek > 6) {
+            throw new ValidationException("dayOfWeek must be between 0 (Sunday) and 6 (Saturday)");
+        }
+        LocalTime startLocal =
+                req.startLocal() != null ? parseLocalTime(req.startLocal()) : r.getStartLocal();
+        int windowMin = req.windowMin() != null ? req.windowMin() : r.getWindowMin();
+        if (windowMin <= 0) {
+            throw new ValidationException("windowMin must be greater than 0");
+        }
         // timezone is NEVER updated from the request — it stays = the guide's settings timezone.
         LocalDate effectiveFrom =
                 req.effectiveFrom() != null

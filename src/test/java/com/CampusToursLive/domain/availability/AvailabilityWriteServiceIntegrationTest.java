@@ -466,6 +466,84 @@ class AvailabilityWriteServiceIntegrationTest {
         assertThat(updated.active()).isFalse();
     }
 
+    @Test
+    void updateRule_partialActiveOnly_preservesOtherFieldsAndFlipsActive() {
+        AvailabilityRuleResponse created =
+                writeService.createRule(
+                        actingUser(guideAUserId),
+                        new AvailabilityRuleRequest(0, "09:00", 60, null, null, true));
+        UUID ruleId = UUID.fromString(created.id());
+
+        // Partial PATCH: ONLY active is set -- dayOfWeek/startLocal/windowMin/effectiveFrom/
+        // effectiveTo are all null, exactly what the weekly Available/Unavailable toggle sends.
+        AvailabilityRuleRequest activeOnly =
+                new AvailabilityRuleRequest(null, null, null, null, null, false);
+
+        AvailabilityRuleResponse updated =
+                writeService.updateRule(actingUser(guideAUserId), ruleId, activeOnly);
+
+        assertThat(updated.active()).isFalse();
+        assertThat(updated.dayOfWeek()).isEqualTo(0);
+        assertThat(updated.startLocal()).isEqualTo("09:00");
+        assertThat(updated.windowMin()).isEqualTo(60);
+
+        // Persisted, not just the returned response.
+        GuideAvailabilityRuleEntity stored = rules.findById(ruleId).orElseThrow();
+        assertThat(stored.isActive()).isFalse();
+        assertThat(stored.getDayOfWeek()).isEqualTo((short) 0);
+        assertThat(stored.getStartLocal().toString()).isEqualTo("09:00");
+        assertThat(stored.getWindowMin()).isEqualTo(60);
+    }
+
+    @Test
+    void updateRule_partialReactivate_stillRunsOverlapCheck() {
+        // B is created first (active, no sibling yet) then deactivated, so an overlapping A can
+        // later be created active (validateNoOverlap only rejects against ACTIVE siblings).
+        AvailabilityRuleResponse b =
+                writeService.createRule(
+                        actingUser(guideAUserId),
+                        new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 60, null, null, true));
+        UUID bId = UUID.fromString(b.id());
+        writeService.updateRule(
+                actingUser(guideAUserId),
+                bId,
+                new AvailabilityRuleRequest(null, null, null, null, null, false));
+
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 60, null, null, null));
+
+        // Partial PATCH: ONLY active=true (re-activate B) -- must still resolve B's stored
+        // dayOfWeek/startLocal/windowMin and run the overlap check against A, not skip it.
+        AvailabilityRuleRequest reactivateOnly =
+                new AvailabilityRuleRequest(null, null, null, null, null, true);
+
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateRule(
+                                        actingUser(guideAUserId), bId, reactivateOnly))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void updateRule_providedInvalidDayOfWeek_stillRejected() {
+        AvailabilityRuleResponse created =
+                writeService.createRule(
+                        actingUser(guideAUserId),
+                        new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null));
+        UUID ruleId = UUID.fromString(created.id());
+
+        AvailabilityRuleRequest invalidDayOfWeek =
+                new AvailabilityRuleRequest(7, null, null, null, null, null);
+
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateRule(
+                                        actingUser(guideAUserId), ruleId, invalidDayOfWeek))
+                .isInstanceOf(ValidationException.class)
+                .hasMessage("dayOfWeek must be between 0 (Sunday) and 6 (Saturday)");
+    }
+
     // ---------------------------------------------------------------------
     // Task 3 (CTL-54 v2.1) — date-specific newest-wins trim/replace, stored non-overlapping.
     // ---------------------------------------------------------------------
