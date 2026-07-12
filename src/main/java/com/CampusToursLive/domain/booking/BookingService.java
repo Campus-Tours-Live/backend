@@ -483,8 +483,8 @@ public class BookingService {
                     "Cart item "
                             + b.getBookingNumber()
                             + " starts too soon — bookings need at least "
-                            + minNotice.toHours()
-                            + " hours notice");
+                            + formatNoticeWindow(minNotice)
+                            + " notice");
         }
         Duration maxAdvance = Duration.ofDays(guideSettings.getMaxAdvanceDays());
         if (b.getScheduledStartAt().isAfter(now.plus(maxAdvance))) {
@@ -595,13 +595,29 @@ public class BookingService {
         Duration minNotice = Duration.ofMinutes(guideSettings.getMinNoticeMin());
         if (start.isBefore(now.plus(minNotice))) {
             throw new ValidationException(
-                    "Bookings need at least " + minNotice.toHours() + " hours notice");
+                    "Bookings need at least " + formatNoticeWindow(minNotice) + " notice");
         }
         Duration maxAdvance = Duration.ofDays(guideSettings.getMaxAdvanceDays());
         if (start.isAfter(now.plus(maxAdvance))) {
             throw new ValidationException(
                     "Bookings can be made at most " + maxAdvance.toDays() + " days in advance");
         }
+    }
+
+    /**
+     * Renders a guide-configurable minimum-notice window for error messages. {@code
+     * Duration.toHours()} TRUNCATES non-hour-aligned values (e.g. 90 minutes -> "1 hours", which is
+     * both wrong and ungrammatical), and {@code minNoticeMin} is guide-configurable so it is no
+     * longer guaranteed to be an exact multiple of 60. Whole-hour values (including the
+     * schema-default 1440min) still read as "{n} hour(s)"; anything else reads as "{n} minutes".
+     */
+    private static String formatNoticeWindow(Duration minNotice) {
+        long minutes = minNotice.toMinutes();
+        if (minutes % 60 == 0) {
+            long hours = minutes / 60;
+            return hours + (hours == 1 ? " hour" : " hours");
+        }
+        return minutes + " minutes";
     }
 
     /**

@@ -729,14 +729,20 @@ class BookingServiceTest {
 
         // Less than 24h notice
         String tooSoon = Instant.now().plus(2, ChronoUnit.HOURS).toString();
-        assertThrows(
-                ValidationException.class,
-                () ->
-                        service()
-                                .createBooking(
-                                        participant,
-                                        new CreateBookingRequest(
-                                                ctx.offeringId().toString(), tooSoon, null)));
+        ValidationException tooSoonEx =
+                assertThrows(
+                        ValidationException.class,
+                        () ->
+                                service()
+                                        .createBooking(
+                                                participant,
+                                                new CreateBookingRequest(
+                                                        ctx.offeringId().toString(),
+                                                        tooSoon,
+                                                        null)));
+        // Default minNoticeMin (schema default 1440min = 24h, a whole number of hours) must still
+        // read "24 hours" -- byte-identical to before the CTL-54 minutes-rendering fix.
+        assertTrue(tooSoonEx.getMessage().contains("24 hours"));
 
         // More than 30 days out
         String tooFar = Instant.now().plus(45, ChronoUnit.DAYS).toString();
@@ -804,6 +810,34 @@ class BookingServiceTest {
                                                         twentyFiveHoursOut,
                                                         null)));
         assertTrue(ex.getMessage().contains("48"));
+        verify(bookings, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createBooking_minNoticeMinNotHourAligned_rendersMinutesNotTruncatedHours() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setMinNoticeMin(90);
+        when(settings.findByGuideId(ctx.guideProfileId())).thenReturn(Optional.of(guideSettings));
+
+        // 60 min out -- inside this guide's 90-min window. Duration.toHours() TRUNCATES 90 minutes
+        // to "1 hours" (wrong value, wrong grammar); the message must read "90 minutes" instead.
+        String sixtyMinutesOut = Instant.now().plus(60, ChronoUnit.MINUTES).toString();
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () ->
+                                service()
+                                        .createBooking(
+                                                participant,
+                                                new CreateBookingRequest(
+                                                        ctx.offeringId().toString(),
+                                                        sixtyMinutesOut,
+                                                        null)));
+        assertTrue(ex.getMessage().contains("90 minutes"));
+        assertFalse(ex.getMessage().contains("1 hours"));
         verify(bookings, never()).saveAndFlush(any());
     }
 
@@ -1339,7 +1373,33 @@ class BookingServiceTest {
         guideSettings.setMinNoticeMin((int) Duration.ofHours(48).toMinutes());
         when(settings.findByGuideId(item.getGuideId())).thenReturn(Optional.of(guideSettings));
 
-        assertThrows(ValidationException.class, () -> service().checkout(participant));
+        ValidationException ex =
+                assertThrows(ValidationException.class, () -> service().checkout(participant));
+        assertTrue(ex.getMessage().contains(item.getBookingNumber()));
+        assertTrue(ex.getMessage().contains("48 hours"));
+        verify(bookings, never()).saveAllAndFlush(any());
+    }
+
+    @Test
+    void checkout_minNoticeMinNotHourAligned_rendersMinutesNotTruncatedHours() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        // 60 min out -- inside this guide's 90-min window. Duration.toHours() TRUNCATES 90 minutes
+        // to "1 hours" (wrong value, wrong grammar); the message must read "90 minutes" instead.
+        BookingEntity item =
+                draftItem(participant.getId(), Instant.now().plus(60, ChronoUnit.MINUTES), 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        stubCheckoutLookups(item, TourStatus.ACTIVE);
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setMinNoticeMin(90);
+        when(settings.findByGuideId(item.getGuideId())).thenReturn(Optional.of(guideSettings));
+
+        ValidationException ex =
+                assertThrows(ValidationException.class, () -> service().checkout(participant));
+        assertTrue(ex.getMessage().contains(item.getBookingNumber()));
+        assertTrue(ex.getMessage().contains("90 minutes"));
+        assertFalse(ex.getMessage().contains("1 hours"));
         verify(bookings, never()).saveAllAndFlush(any());
     }
 
