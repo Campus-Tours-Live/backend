@@ -166,8 +166,9 @@ public class BookingController {
                             + " guide at an ACTIVE university). The offering's price and duration"
                             + " are snapshotted onto the booking, which starts in"
                             + " PENDING_GUIDE_ACCEPTANCE with a 90-minute guide response window."
-                            + " Requires at least 24 hours notice and at most 30 days advance;"
-                            + " times conflicting with existing bookings are rejected.")
+                            + " Notice/advance/buffer requirements are the guide's own booking"
+                            + " settings (24h notice, 30-day advance by default); times conflicting"
+                            + " with existing bookings are rejected.")
     @ApiResponse(
             responseCode = "200",
             description = "The created booking, waiting for the guide's acceptance.",

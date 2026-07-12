@@ -418,7 +418,12 @@ class SlotGenerationServiceIntegrationTest {
         b.setScheduledStartAt(scheduledStart);
         b.setScheduledEndAt(scheduledEnd);
         b.setReservedStartAt(scheduledStart);
-        b.setReservedEndAt(scheduledEnd.plus(BookingService.RESERVED_BUFFER_AFTER));
+        // 15-minute post-tour buffer -- the guide_booking_settings schema default (no settings row
+        // exists for this guide in these tests), matching how BookingService now computes it.
+        b.setReservedEndAt(
+                scheduledEnd.plus(
+                        new GuideBookingSettingsEntity().getBufferAfterMin(),
+                        java.time.temporal.ChronoUnit.MINUTES));
         b.setBasePriceCents(5000L);
         b.setTotalCents(5000L);
         b.setPlatformFeeCents(0L);

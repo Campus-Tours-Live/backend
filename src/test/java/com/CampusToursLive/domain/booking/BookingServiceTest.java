@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.CampusToursLive.domain.availability.GuideAvailabilityOccurrenceRepository;
+import com.CampusToursLive.domain.availability.GuideBookingSettingsEntity;
+import com.CampusToursLive.domain.availability.GuideBookingSettingsRepository;
 import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
@@ -22,6 +24,7 @@ import com.CampusToursLive.web.dto.BookingDetailResponse;
 import com.CampusToursLive.web.dto.CancelBookingRequest;
 import com.CampusToursLive.web.dto.CreateBookingRequest;
 import com.CampusToursLive.web.dto.PendingActionsResponse;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -44,6 +47,7 @@ class BookingServiceTest {
     @Mock UniversityRepository universities;
     @Mock BookingStatusHistoryRepository statusHistory;
     @Mock GuideAvailabilityOccurrenceRepository availabilityOccurrences;
+    @Mock GuideBookingSettingsRepository settings;
 
     private BookingService service() {
         return new BookingService(
@@ -53,7 +57,8 @@ class BookingServiceTest {
                 users,
                 universities,
                 statusHistory,
-                availabilityOccurrences);
+                availabilityOccurrences,
+                settings);
     }
 
     // ── entity builders ──────────────────────────────────────────────────────
@@ -745,6 +750,91 @@ class BookingServiceTest {
                                                 ctx.offeringId().toString(), tooFar, null)));
     }
 
+    // ── createBooking: guide-configured notice/advance/buffers (CTL-54 design-gap fix) ─────────
+
+    @Test
+    void createBooking_customMaxAdvanceDays_acceptsBookingBeyondDefaultThirtyDayLimit() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        when(users.findById(ctx.guideUserId()))
+                .thenReturn(Optional.of(user(ctx.guideUserId(), "Jane Guide")));
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setMaxAdvanceDays(180);
+        when(settings.findByGuideId(ctx.guideProfileId())).thenReturn(Optional.of(guideSettings));
+        stubNoOverlaps();
+
+        // 90 days out -- would 422 against the OLD hardcoded 30-day MAX_ADVANCE, but this guide's
+        // own settings allow 180 days, so createBooking must accept it (the "listed-but-unbookable"
+        // bug this fix closes: SlotGenerationService already honored maxAdvanceDays here).
+        String ninetyDaysOut =
+                Instant.now().plus(90, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES).toString();
+
+        BookingDetailResponse resp =
+                service()
+                        .createBooking(
+                                participant,
+                                new CreateBookingRequest(
+                                        ctx.offeringId().toString(), ninetyDaysOut, null));
+
+        assertEquals("WAITING_FOR_GUIDE", resp.status());
+    }
+
+    @Test
+    void createBooking_customMinNoticeMin_rejectsBookingInsideGuidesStricterWindow() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setMinNoticeMin((int) Duration.ofHours(48).toMinutes());
+        when(settings.findByGuideId(ctx.guideProfileId())).thenReturn(Optional.of(guideSettings));
+
+        // 25h out -- would be ACCEPTED against the OLD hardcoded 24h MIN_NOTICE, but this guide's
+        // own settings require 48h, so createBooking must reject it (the unenforced-policy half of
+        // the bug: a guide who tightens notice must actually see it enforced at create).
+        String twentyFiveHoursOut = Instant.now().plus(25, ChronoUnit.HOURS).toString();
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () ->
+                                service()
+                                        .createBooking(
+                                                participant,
+                                                new CreateBookingRequest(
+                                                        ctx.offeringId().toString(),
+                                                        twentyFiveHoursOut,
+                                                        null)));
+        assertTrue(ex.getMessage().contains("48"));
+        verify(bookings, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createBooking_customBuffers_reservedIntervalUsesGuidesOwnSettings() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        when(users.findById(ctx.guideUserId()))
+                .thenReturn(Optional.of(user(ctx.guideUserId(), "Jane Guide")));
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setBufferBeforeMin(30);
+        guideSettings.setBufferAfterMin(45);
+        when(settings.findByGuideId(ctx.guideProfileId())).thenReturn(Optional.of(guideSettings));
+        stubNoOverlaps();
+
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
+        service()
+                .createBooking(
+                        participant,
+                        new CreateBookingRequest(
+                                ctx.offeringId().toString(), start.toString(), null));
+
+        ArgumentCaptor<BookingEntity> saved = ArgumentCaptor.forClass(BookingEntity.class);
+        verify(bookings).saveAndFlush(saved.capture());
+        BookingEntity b = saved.getValue();
+        assertEquals(start.minus(30, ChronoUnit.MINUTES), b.getReservedStartAt());
+        assertEquals(
+                start.plus(60, ChronoUnit.MINUTES).plus(45, ChronoUnit.MINUTES),
+                b.getReservedEndAt());
+    }
+
     @Test
     void createBooking_guideSlotTaken_isRejected() {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
@@ -1230,6 +1320,76 @@ class BookingServiceTest {
         assertEquals(9000L, resp.get(0).priceCents());
     }
 
+    // ── checkout: guide-configured notice/advance/buffers (CTL-54 design-gap fix — parity with
+    // buildDraftBooking / createBooking, since the guide's settings can tighten OR loosen while an
+    // item sits in the cart) ─────────────────────────────────────────────────────────────────
+
+    @Test
+    void checkout_customMinNoticeMin_rejectsItemInsideGuidesStricterWindow() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        // 25h out -- fine against the OLD hardcoded 24h MIN_NOTICE, but this guide's settings now
+        // require 48h notice, so checkout must reject it.
+        BookingEntity item =
+                draftItem(participant.getId(), Instant.now().plus(25, ChronoUnit.HOURS), 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        stubCheckoutLookups(item, TourStatus.ACTIVE);
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setMinNoticeMin((int) Duration.ofHours(48).toMinutes());
+        when(settings.findByGuideId(item.getGuideId())).thenReturn(Optional.of(guideSettings));
+
+        assertThrows(ValidationException.class, () -> service().checkout(participant));
+        verify(bookings, never()).saveAllAndFlush(any());
+    }
+
+    @Test
+    void checkout_customMaxAdvanceDays_acceptsItemBeyondDefaultThirtyDayLimit() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Instant start = Instant.now().plus(90, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
+        BookingEntity item = draftItem(participant.getId(), start, 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        UUID gu = stubCheckoutLookups(item, TourStatus.ACTIVE);
+        when(users.findById(gu)).thenReturn(Optional.of(user(gu, "G")));
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setMaxAdvanceDays(180);
+        when(settings.findByGuideId(item.getGuideId())).thenReturn(Optional.of(guideSettings));
+        stubNoOverlaps();
+        when(bookings.saveAllAndFlush(any())).thenReturn(List.of(item));
+
+        List<BookingDetailResponse> resp = service().checkout(participant);
+
+        assertEquals(1, resp.size());
+        assertEquals(BookingStatus.PENDING_GUIDE_ACCEPTANCE, item.getStatus());
+    }
+
+    @Test
+    void checkout_customBuffers_reReservesUsingGuidesOwnSettings() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
+        BookingEntity item = draftItem(participant.getId(), start, 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        UUID gu = stubCheckoutLookups(item, TourStatus.ACTIVE);
+        when(users.findById(gu)).thenReturn(Optional.of(user(gu, "G")));
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setBufferBeforeMin(30);
+        guideSettings.setBufferAfterMin(45);
+        when(settings.findByGuideId(item.getGuideId())).thenReturn(Optional.of(guideSettings));
+        stubNoOverlaps();
+        when(bookings.saveAllAndFlush(any())).thenReturn(List.of(item));
+
+        service().checkout(participant);
+
+        assertEquals(start.minus(30, ChronoUnit.MINUTES), item.getReservedStartAt());
+        assertEquals(
+                start.plus(60, ChronoUnit.MINUTES).plus(45, ChronoUnit.MINUTES),
+                item.getReservedEndAt());
+    }
+
     @Test
     void checkout_availabilityRemovedSinceCartAdd_isRejected() {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
@@ -1360,6 +1520,10 @@ class BookingServiceTest {
         lenient()
                 .when(availabilityOccurrences.existsContaining(eq(guideProfileId), any(), any()))
                 .thenReturn(true);
+        // Default: no settings row for this guide -- falls back to the schema defaults (24h
+        // notice, 30d advance, 0/15-min buffers), matching the pre-fix hardcoded behavior. Tests
+        // that want CUSTOM settings override this with an explicit (non-lenient) stub.
+        lenient().when(settings.findByGuideId(guideProfileId)).thenReturn(Optional.empty());
 
         return new Bookable(offeringId, guideProfileId, guideUserId, universityId);
     }
@@ -1451,6 +1615,9 @@ class BookingServiceTest {
                             availabilityOccurrences.existsContaining(
                                     eq(b.getGuideId()), any(), any()))
                     .thenReturn(true);
+            // Default: no settings row for this guide -- schema defaults, same as
+            // stubBookableOffering(); tests wanting custom settings override this explicitly.
+            lenient().when(settings.findByGuideId(b.getGuideId())).thenReturn(Optional.empty());
         }
         return guideUserId;
     }

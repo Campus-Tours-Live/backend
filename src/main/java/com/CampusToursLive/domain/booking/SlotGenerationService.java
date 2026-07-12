@@ -30,11 +30,13 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p><b>Reuse, not reinvention.</b> A slot listed here as "free" must actually be bookable — so the
  * would-be RESERVED interval of a candidate slot is computed with the EXACT same buffer math {@link
- * BookingService} uses when it creates a real booking ({@link
- * BookingService#RESERVED_BUFFER_AFTER}, no buffer before the scheduled start), and the existing
- * bookings subtracted are every {@link BookingService#SLOT_HOLDING_STATUSES} status — not just
- * CONFIRMED (that narrower, CONFIRMED-only view belongs to Task 7's "affected bookings" warning,
- * which answers a different question and is not reusable here).
+ * BookingService} uses when it creates a real booking: the guide's OWN {@code
+ * guide_booking_settings} {@code bufferBeforeMin}/{@code bufferAfterMin} (falling back to the
+ * schema defaults when the guide has no settings row — see {@link
+ * com.CampusToursLive.domain.availability.GuideBookingSettingsEntity}'s javadoc), not a hardcoded
+ * constant. The existing bookings subtracted are every {@link BookingService#SLOT_HOLDING_STATUSES}
+ * status — not just CONFIRMED (that narrower, CONFIRMED-only view belongs to Task 7's "affected
+ * bookings" warning, which answers a different question and is not reusable here).
  *
  * <p>{@code from}/{@code to} optionally narrow the considered occurrences to those intersecting
  * {@code [from, to)} (ISO {@code yyyy-MM-dd}), mirroring {@code AvailabilityReadService} (Task 5b).
@@ -113,8 +115,15 @@ public class SlotGenerationService {
             return List.of();
         }
 
-        candidates = subtractHeldBookings(guideId, candidates);
-        candidates = applyNoticeAndAdvanceWindow(guideId, candidates);
+        // Loaded ONCE and threaded through both steps below: the same row drives the buffer math
+        // (subtractHeldBookings) and the notice/advance window (applyNoticeAndAdvanceWindow), so
+        // there is exactly one settings read per request and no risk of the two steps seeing a
+        // guide's settings change mid-computation.
+        GuideBookingSettingsEntity guideSettings =
+                settings.findByGuideId(guideId).orElseGet(GuideBookingSettingsEntity::new);
+
+        candidates = subtractHeldBookings(guideId, candidates, guideSettings);
+        candidates = applyNoticeAndAdvanceWindow(candidates, guideSettings);
 
         return candidates.stream().map(s -> new SlotResponse(s.start(), s.end())).toList();
     }
@@ -152,17 +161,20 @@ public class SlotGenerationService {
 
     /**
      * Drops any candidate whose would-be RESERVED interval (same buffer math as {@link
-     * BookingService}: no buffer before, {@link BookingService#RESERVED_BUFFER_AFTER} after) would
+     * BookingService}: the guide's OWN {@code bufferBeforeMin}/{@code bufferAfterMin}) would
      * overlap an existing held booking's actual reserved interval.
      */
-    private List<Slot> subtractHeldBookings(UUID guideId, List<Slot> candidates) {
-        Instant queryStart = candidates.get(0).start();
+    private List<Slot> subtractHeldBookings(
+            UUID guideId, List<Slot> candidates, GuideBookingSettingsEntity guideSettings) {
+        Duration bufferBefore = Duration.ofMinutes(guideSettings.getBufferBeforeMin());
+        Duration bufferAfter = Duration.ofMinutes(guideSettings.getBufferAfterMin());
+        Instant queryStart = candidates.get(0).start().minus(bufferBefore);
         Instant queryEnd =
                 candidates.stream()
                         .map(Slot::end)
                         .max(Instant::compareTo)
                         .orElseThrow()
-                        .plus(BookingService.RESERVED_BUFFER_AFTER);
+                        .plus(bufferAfter);
 
         List<BookingEntity> held =
                 bookings
@@ -177,8 +189,8 @@ public class SlotGenerationService {
 
         List<Slot> free = new ArrayList<>();
         for (Slot candidate : candidates) {
-            Instant reservedStart = candidate.start();
-            Instant reservedEnd = candidate.end().plus(BookingService.RESERVED_BUFFER_AFTER);
+            Instant reservedStart = candidate.start().minus(bufferBefore);
+            Instant reservedEnd = candidate.end().plus(bufferAfter);
             boolean taken =
                     held.stream()
                             .anyMatch(
@@ -199,9 +211,8 @@ public class SlotGenerationService {
     /**
      * Drops slots starting before {@code now + minNoticeMin} or after {@code now + maxAdvanceDays}.
      */
-    private List<Slot> applyNoticeAndAdvanceWindow(UUID guideId, List<Slot> candidates) {
-        GuideBookingSettingsEntity guideSettings =
-                settings.findByGuideId(guideId).orElseGet(GuideBookingSettingsEntity::new);
+    private List<Slot> applyNoticeAndAdvanceWindow(
+            List<Slot> candidates, GuideBookingSettingsEntity guideSettings) {
         Instant now = clock.instant();
         Instant noticeBound = now.plus(Duration.ofMinutes(guideSettings.getMinNoticeMin()));
         Instant advanceBound = now.plus(Duration.ofDays(guideSettings.getMaxAdvanceDays()));
