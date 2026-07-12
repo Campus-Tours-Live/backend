@@ -149,6 +149,15 @@ public class AvailabilityWriteService {
         r.setEffectiveTo(req.effectiveTo() != null ? parseLocalDate(req.effectiveTo()) : null);
         r.setActive(req.active() == null || req.active());
         validateEffectiveRange(r.getEffectiveFrom(), r.getEffectiveTo());
+        validateSameDay(r.getStartLocal(), r.getWindowMin());
+        validateNoOverlap(
+                guideId,
+                null,
+                r.getDayOfWeek(),
+                r.getStartLocal(),
+                r.getWindowMin(),
+                r.getEffectiveFrom(),
+                r.getEffectiveTo());
 
         rules.save(r);
         availabilityService.rematerialize(guideId);
@@ -164,9 +173,14 @@ public class AvailabilityWriteService {
                         .orElseThrow(() -> new NotFoundException("Availability rule not found"));
         validateRuleInput(req);
 
-        r.setDayOfWeek(req.dayOfWeek().shortValue());
-        r.setStartLocal(parseLocalTime(req.startLocal()));
-        r.setWindowMin(req.windowMin());
+        // Resolve every candidate value into LOCALS first and validate BEFORE mutating the managed
+        // entity -- `r` came from `findByIdAndGuideId`, so it is already attached to this
+        // transaction's persistence context; a repository query inside validateNoOverlap triggers
+        // Hibernate's auto-flush, which would silently persist a rejected update if the entity's
+        // setters had already run.
+        short dayOfWeek = req.dayOfWeek().shortValue();
+        LocalTime startLocal = parseLocalTime(req.startLocal());
+        int windowMin = req.windowMin();
         // timezone is NEVER updated from the request — it stays = the guide's settings timezone.
         LocalDate effectiveFrom =
                 req.effectiveFrom() != null
@@ -175,6 +189,13 @@ public class AvailabilityWriteService {
         LocalDate effectiveTo =
                 req.effectiveTo() != null ? parseLocalDate(req.effectiveTo()) : r.getEffectiveTo();
         validateEffectiveRange(effectiveFrom, effectiveTo);
+        validateSameDay(startLocal, windowMin);
+        validateNoOverlap(
+                guideId, r.getId(), dayOfWeek, startLocal, windowMin, effectiveFrom, effectiveTo);
+
+        r.setDayOfWeek(dayOfWeek);
+        r.setStartLocal(startLocal);
+        r.setWindowMin(windowMin);
         r.setEffectiveFrom(effectiveFrom);
         r.setEffectiveTo(effectiveTo);
         if (req.active() != null) {
@@ -417,6 +438,76 @@ public class AvailabilityWriteService {
         if (effectiveTo != null && effectiveTo.isBefore(effectiveFrom)) {
             throw new ValidationException("effectiveTo must not be before effectiveFrom");
         }
+    }
+
+    /**
+     * A single weekly rule range is always same-day (a cross-midnight range must be modeled as two
+     * adjacent-day rows) — reject before any {@link IntervalMath.Span} is built so an out-of-range
+     * value never reaches {@code IntervalMath} as a raw (and less friendly) {@link
+     * IllegalArgumentException}. {@code windowMin} bringing the range to exactly {@code 1440}
+     * (ending at midnight) is allowed.
+     */
+    private static void validateSameDay(LocalTime startLocal, int windowMin) {
+        if (startLocal.toSecondOfDay() / 60 + windowMin > 1440) {
+            throw new ValidationException("This time range cannot cross midnight.");
+        }
+    }
+
+    /**
+     * Rejects the candidate rule (day/time/effective-range) against the guide's other ACTIVE rules
+     * on the same {@code dayOfWeek}, when {@code excludeId} is non-null the rule with that id is
+     * self-excluded (the update-in-place case). Two rules conflict only when BOTH their time-of-day
+     * spans overlap (touching bounds do not) AND their effective ranges overlap — a same-time rule
+     * with a disjoint effective range (e.g. a different season) never conflicts.
+     */
+    private void validateNoOverlap(
+            UUID guideId,
+            UUID excludeId,
+            short dayOfWeek,
+            LocalTime startLocal,
+            int windowMin,
+            LocalDate effectiveFrom,
+            LocalDate effectiveTo) {
+        IntervalMath.Span candidateSpan = IntervalMath.spanOf(startLocal, windowMin);
+        List<GuideAvailabilityRuleEntity> siblings =
+                rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, dayOfWeek);
+        for (GuideAvailabilityRuleEntity existing : siblings) {
+            if (excludeId != null && excludeId.equals(existing.getId())) {
+                continue;
+            }
+            IntervalMath.Span existingSpan =
+                    IntervalMath.spanOf(existing.getStartLocal(), existing.getWindowMin());
+            if (IntervalMath.overlaps(candidateSpan, existingSpan)
+                    && effectiveRangesOverlap(
+                            effectiveFrom,
+                            effectiveTo,
+                            existing.getEffectiveFrom(),
+                            existing.getEffectiveTo())) {
+                throw new ValidationException(
+                        "This time range overlaps another range on " + dayLabel(dayOfWeek) + ".");
+            }
+        }
+    }
+
+    /**
+     * Whether {@code [aFrom, aTo]} and {@code [bFrom, bTo]} overlap, treating a {@code null} "to"
+     * as open-ended ({@code +infinity}). {@code aFrom}/{@code bFrom} are never null (the entity
+     * column is NOT NULL).
+     */
+    private static boolean effectiveRangesOverlap(
+            LocalDate aFrom, LocalDate aTo, LocalDate bFrom, LocalDate bTo) {
+        boolean aStartsAtOrBeforeBEnd = bTo == null || !aFrom.isAfter(bTo);
+        boolean bStartsAtOrBeforeAEnd = aTo == null || !bFrom.isAfter(aTo);
+        return aStartsAtOrBeforeBEnd && bStartsAtOrBeforeAEnd;
+    }
+
+    private static final String[] DAY_OF_WEEK_LABELS = {
+        "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
+    };
+
+    /** {@code 0} = Sunday .. {@code 6} = Saturday, matching {@code dayOfWeek}'s own convention. */
+    private static String dayLabel(short dayOfWeek) {
+        return DAY_OF_WEEK_LABELS[dayOfWeek];
     }
 
     private static void validateExceptionInput(AvailabilityExceptionRequest req) {

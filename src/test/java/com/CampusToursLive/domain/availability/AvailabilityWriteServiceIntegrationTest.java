@@ -301,6 +301,171 @@ class AvailabilityWriteServiceIntegrationTest {
     }
 
     // ---------------------------------------------------------------------
+    // Task 2 (CTL-54 v2.1) — weekly rule same-day + effective-range-aware overlap validation.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void createRule_rejectsRangeCrossingMidnight() {
+        AvailabilityRuleRequest req =
+                new AvailabilityRuleRequest(MONDAY_DOW, "23:30", 60, null, null, null);
+
+        assertThatThrownBy(() -> writeService.createRule(actingUser(guideAUserId), req))
+                .isInstanceOf(ValidationException.class);
+        assertThat(rules.findByGuideId(guideAId)).isEmpty();
+    }
+
+    @Test
+    void createRule_allowsRangeEndingExactlyAtMidnight() {
+        AvailabilityRuleRequest req =
+                new AvailabilityRuleRequest(MONDAY_DOW, "22:00", 120, null, null, null);
+
+        AvailabilityRuleResponse created = writeService.createRule(actingUser(guideAUserId), req);
+
+        assertThat(created.startLocal()).isEqualTo("22:00");
+        assertThat(rules.findByGuideId(guideAId)).hasSize(1);
+    }
+
+    @Test
+    void createRule_rejectsOverlappingSameDaySameEffectiveRange() {
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(MONDAY_DOW, "10:00", 60, null, null, null));
+
+        AvailabilityRuleRequest overlapping =
+                new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 240, null, null, null);
+
+        assertThatThrownBy(() -> writeService.createRule(actingUser(guideAUserId), overlapping))
+                .isInstanceOf(ValidationException.class);
+        assertThat(rules.findByGuideId(guideAId)).hasSize(1);
+    }
+
+    @Test
+    void createRule_allowsTouchingSameDayRanges() {
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 240, null, null, null));
+
+        AvailabilityRuleRequest touching =
+                new AvailabilityRuleRequest(MONDAY_DOW, "13:00", 60, null, null, null);
+        AvailabilityRuleResponse created =
+                writeService.createRule(actingUser(guideAUserId), touching);
+
+        assertThat(created.startLocal()).isEqualTo("13:00");
+        assertThat(rules.findByGuideId(guideAId)).hasSize(2);
+    }
+
+    @Test
+    void createRule_allowsSameTimeOfDay_onADifferentDayOfWeek() {
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 240, null, null, null));
+
+        int tuesdayDow = (MONDAY_DOW + 1) % 7;
+        AvailabilityRuleRequest tuesday =
+                new AvailabilityRuleRequest(tuesdayDow, "09:00", 240, null, null, null);
+        AvailabilityRuleResponse created =
+                writeService.createRule(actingUser(guideAUserId), tuesday);
+
+        assertThat(created.dayOfWeek()).isEqualTo(tuesdayDow);
+        assertThat(rules.findByGuideId(guideAId)).hasSize(2);
+    }
+
+    @Test
+    void createRule_allowsSameTimeOfDay_withDisjointEffectiveRanges() {
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(
+                        MONDAY_DOW, "09:00", 240, "2026-01-01", "2026-03-31", null));
+
+        AvailabilityRuleRequest secondRange =
+                new AvailabilityRuleRequest(
+                        MONDAY_DOW, "09:00", 240, "2026-04-01", "2026-06-30", null);
+        AvailabilityRuleResponse created =
+                writeService.createRule(actingUser(guideAUserId), secondRange);
+
+        assertThat(created.effectiveFrom()).isEqualTo("2026-04-01");
+        assertThat(rules.findByGuideId(guideAId)).hasSize(2);
+    }
+
+    @Test
+    void createRule_rejectsSameTimeOfDay_withOverlappingEffectiveRanges() {
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(
+                        MONDAY_DOW, "09:00", 240, "2026-01-01", "2026-03-31", null));
+
+        AvailabilityRuleRequest overlappingRange =
+                new AvailabilityRuleRequest(
+                        MONDAY_DOW, "09:00", 240, "2026-03-15", "2026-06-30", null);
+
+        assertThatThrownBy(
+                        () -> writeService.createRule(actingUser(guideAUserId), overlappingRange))
+                .isInstanceOf(ValidationException.class);
+        assertThat(rules.findByGuideId(guideAId)).hasSize(1);
+    }
+
+    @Test
+    void createRule_rejectsSameTimeOfDay_withBothOpenEndedEffectiveRanges() {
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 240, "2026-01-01", null, null));
+
+        AvailabilityRuleRequest secondOpenEnded =
+                new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 240, "2026-06-01", null, null);
+
+        assertThatThrownBy(() -> writeService.createRule(actingUser(guideAUserId), secondOpenEnded))
+                .isInstanceOf(ValidationException.class);
+        assertThat(rules.findByGuideId(guideAId)).hasSize(1);
+    }
+
+    @Test
+    void updateRule_rejectsMovingIntoOverlapWithSibling() {
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 60, null, null, null));
+        AvailabilityRuleResponse second =
+                writeService.createRule(
+                        actingUser(guideAUserId),
+                        new AvailabilityRuleRequest(MONDAY_DOW, "12:00", 60, null, null, null));
+
+        AvailabilityRuleRequest movedIntoOverlap =
+                new AvailabilityRuleRequest(MONDAY_DOW, "09:30", 60, null, null, null);
+
+        assertThatThrownBy(
+                        () ->
+                                writeService.updateRule(
+                                        actingUser(guideAUserId),
+                                        UUID.fromString(second.id()),
+                                        movedIntoOverlap))
+                .isInstanceOf(ValidationException.class);
+
+        // Untouched.
+        assertThat(
+                        rules.findById(UUID.fromString(second.id()))
+                                .orElseThrow()
+                                .getStartLocal()
+                                .toString())
+                .isEqualTo("12:00");
+    }
+
+    @Test
+    void updateRule_allowsKeepingOwnTimes_selfExcludedFromOverlapCheck() {
+        AvailabilityRuleResponse created =
+                writeService.createRule(
+                        actingUser(guideAUserId),
+                        new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 60, null, null, null));
+
+        AvailabilityRuleRequest sameTimes =
+                new AvailabilityRuleRequest(MONDAY_DOW, "09:00", 60, null, null, false);
+        AvailabilityRuleResponse updated =
+                writeService.updateRule(
+                        actingUser(guideAUserId), UUID.fromString(created.id()), sameTimes);
+
+        assertThat(updated.startLocal()).isEqualTo("09:00");
+        assertThat(updated.active()).isFalse();
+    }
+
+    // ---------------------------------------------------------------------
     // Settings — auto-provision + tz cascade + reproject.
     // ---------------------------------------------------------------------
 
