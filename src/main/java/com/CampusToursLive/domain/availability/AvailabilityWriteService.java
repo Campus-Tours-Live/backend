@@ -24,6 +24,8 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -232,29 +234,65 @@ public class AvailabilityWriteService {
                 .toList();
     }
 
+    /**
+     * Creates a date-specific override (CTL-54 v2.1 Task 3): either a single {@code exceptionDate}
+     * or a {@code dateFrom}/{@code dateTo} multi-day range, applied per-date. Every date's stored
+     * same-date exceptions end up NON-OVERLAPPING (newest-wins trim/replace, symmetric across
+     * {@code UNAVAILABLE}/{@code ADDITIONAL}) — see {@link #computeTrimmedSet}.
+     *
+     * <p><b>Auto-flush safety.</b> {@link #requireOverrideValid} runs, and every date's trim PLAN
+     * is computed (read-only — no delete/insert), BEFORE any date's plan is applied. This class has
+     * no Spring transactional proxy under {@code @DataJpaTest} (constructed with {@code new}), so a
+     * rejected write must never leave partial state auto-flushed to the DB; validating and planning
+     * everything upfront, across every date, before any mutation guarantees that.
+     */
     @Transactional
     public AvailabilityExceptionResponse createException(
             UserEntity user, AvailabilityExceptionRequest req) {
         UUID guideId = requireGuideId(user);
         validateExceptionInput(req);
+
+        AvailabilityExceptionKind kind = parseKind(req.kind());
+        LocalTime startLocal = parseLocalTime(req.startLocal());
+        int windowMin = req.windowMin();
+        String reason = req.reason();
+        LocalDate[] range = resolveDateRange(req);
+        LocalDate dateFrom = range[0];
+        LocalDate dateTo = range[1];
+
+        requireOverrideValid(startLocal, windowMin, dateFrom, dateTo);
+        IntervalMath.Span newSpan = IntervalMath.spanOf(startLocal, windowMin);
+
         // Ensure a settings row exists so rematerialize always has a settings tz to resolve, even
         // for a guide who only ever adds exceptions and never a rule.
         getOrCreateSettings(guideId);
 
-        AvailabilityExceptionEntity e = new AvailabilityExceptionEntity();
-        e.setId(UUID.randomUUID());
-        e.setGuideId(guideId);
-        e.setExceptionDate(parseLocalDate(req.exceptionDate()));
-        e.setKind(parseKind(req.kind()));
-        e.setStartLocal(parseLocalTime(req.startLocal()));
-        e.setWindowMin(req.windowMin());
-        e.setReason(req.reason());
+        // Plan every date FIRST (read-only) -- see the auto-flush-safety note above -- then apply.
+        List<DatePlan> plans = new ArrayList<>();
+        long spanDays = ChronoUnit.DAYS.between(dateFrom, dateTo);
+        for (long i = 0; i <= spanDays; i++) {
+            plans.add(planOverrideForDate(guideId, dateFrom.plusDays(i), kind, newSpan, null));
+        }
 
-        exceptions.save(e);
+        AvailabilityExceptionEntity firstCreated = null;
+        for (DatePlan plan : plans) {
+            AvailabilityExceptionEntity created = applyPlan(plan, reason);
+            if (firstCreated == null) {
+                firstCreated = created;
+            }
+        }
+
         availabilityService.rematerialize(guideId);
-        return toExceptionResponse(e);
+        return toExceptionResponse(firstCreated);
     }
 
+    /**
+     * Edits an existing exception's time/kind/date (CTL-54 v2.1 Task 3): the old row is deleted and
+     * the new override re-applied via the SAME {@link #computeTrimmedSet} trim used by {@link
+     * #createException}, trimming overlapping SIBLINGS on the (possibly new) date while
+     * SELF-EXCLUDING the edited row (it never trims against its own new span). Single-date only —
+     * multi-day only applies to create.
+     */
     @Transactional
     public AvailabilityExceptionResponse updateException(
             UserEntity user, UUID id, AvailabilityExceptionRequest req) {
@@ -266,15 +304,23 @@ public class AvailabilityWriteService {
                                 () -> new NotFoundException("Availability exception not found"));
         validateExceptionInput(req);
 
-        e.setExceptionDate(parseLocalDate(req.exceptionDate()));
-        e.setKind(parseKind(req.kind()));
-        e.setStartLocal(parseLocalTime(req.startLocal()));
-        e.setWindowMin(req.windowMin());
-        e.setReason(req.reason());
+        AvailabilityExceptionKind kind = parseKind(req.kind());
+        LocalTime startLocal = parseLocalTime(req.startLocal());
+        int windowMin = req.windowMin();
+        String reason = req.reason();
+        LocalDate date = resolveDateRange(req)[0];
 
-        exceptions.save(e);
+        requireOverrideValid(startLocal, windowMin, date, date);
+        IntervalMath.Span newSpan = IntervalMath.spanOf(startLocal, windowMin);
+
+        // Plan BEFORE mutating anything (auto-flush safety, same as createException); the edited
+        // row is self-excluded from its own trim via `excludeId`.
+        DatePlan plan = planOverrideForDate(guideId, date, kind, newSpan, e.getId());
+        exceptions.delete(e);
+        AvailabilityExceptionEntity updated = applyPlan(plan, reason);
+
         availabilityService.rematerialize(guideId);
-        return toExceptionResponse(e);
+        return toExceptionResponse(updated);
     }
 
     @Transactional
@@ -514,7 +560,8 @@ public class AvailabilityWriteService {
         if (req == null) {
             throw new ValidationException("Request body is required");
         }
-        if (req.exceptionDate() == null || req.exceptionDate().isBlank()) {
+        boolean hasRange = req.dateFrom() != null || req.dateTo() != null;
+        if (!hasRange && (req.exceptionDate() == null || req.exceptionDate().isBlank())) {
             throw new ValidationException("exceptionDate is required");
         }
         if (req.kind() == null || req.kind().isBlank()) {
@@ -526,6 +573,193 @@ public class AvailabilityWriteService {
         if (req.windowMin() == null || req.windowMin() <= 0) {
             throw new ValidationException("windowMin must be greater than 0");
         }
+    }
+
+    /**
+     * Resolves the request's single date OR multi-day range into {@code [dateFrom, dateTo]}
+     * (inclusive, {@code dateFrom == dateTo} for a single date). {@code dateFrom}/{@code dateTo}
+     * take precedence when both are present; a partial pair (only one of the two set) is rejected.
+     */
+    private static LocalDate[] resolveDateRange(AvailabilityExceptionRequest req) {
+        if (req.dateFrom() != null || req.dateTo() != null) {
+            if (req.dateFrom() == null || req.dateTo() == null) {
+                throw new ValidationException(
+                        "dateFrom and dateTo must both be provided for a multi-day override.");
+            }
+            LocalDate dateFrom = parseLocalDate(req.dateFrom());
+            LocalDate dateTo = parseLocalDate(req.dateTo());
+            if (dateTo.isBefore(dateFrom)) {
+                throw new ValidationException("dateTo must not be before dateFrom.");
+            }
+            return new LocalDate[] {dateFrom, dateTo};
+        }
+        LocalDate date = parseLocalDate(req.exceptionDate());
+        return new LocalDate[] {date, date};
+    }
+
+    /**
+     * Shared entry guard (CTL-54 v2.1 Task 3) for create/edit exception AND (Task 4) the dry-run
+     * preview — called at the very entry, BEFORE any {@link IntervalMath.Span} is constructed, so
+     * an out-of-range value never reaches {@code IntervalMath} as a raw {@link
+     * IllegalArgumentException}: (a) same-day — the override cannot cross midnight ({@code
+     * windowMin} bringing it to exactly {@code 1440}, i.e. ending at midnight, is allowed); (b)
+     * operation-size — the multi-day range is capped at 366 days (this bounds the write's
+     * row-count, NOT date-reach: a far-future override beyond the materialization horizon is legal
+     * and stays inert until the roll-forward job reaches it).
+     */
+    static void requireOverrideValid(
+            LocalTime startLocal, int windowMin, LocalDate dateFrom, LocalDate dateTo) {
+        if (startLocal.toSecondOfDay() / 60 + windowMin > 1440) {
+            throw new ValidationException("This time off cannot cross midnight.");
+        }
+        if (ChronoUnit.DAYS.between(dateFrom, dateTo) > 366) {
+            throw new ValidationException("Date range too large (max 366 days).");
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Date-specific newest-wins trim/replace (CTL-54 v2.1 Task 3) -- shared with Task 4's dry-run.
+    // ---------------------------------------------------------------------
+
+    /**
+     * One of a date's CURRENT exceptions, as pure data (id + kind + span) for {@link
+     * #computeTrimmedSet}. The {@code id} lets a caller (here, {@link #planOverrideForDate})
+     * self-exclude a specific row (the edited row, on update) from being trimmed against its own
+     * new span; {@link #computeTrimmedSet} itself never looks at {@code id}.
+     */
+    record ExistingException(UUID id, AvailabilityExceptionKind kind, IntervalMath.Span span) {}
+
+    /**
+     * One row of a per-date newest-wins TRIMMED exception set — pure data (kind + span), no
+     * entity/DB. {@link #computeTrimmedSet} ALWAYS appends the new override as the LAST element of
+     * its returned list; every element before that is a remnant of one of the {@code existing}
+     * entries that overlapped the new span, or an unchanged non-overlapping entry passed straight
+     * through.
+     */
+    record TrimmedException(AvailabilityExceptionKind kind, IntervalMath.Span span) {}
+
+    /**
+     * PURE trim/replace primitive shared by the real write ({@link #createException}/{@link
+     * #updateException} via {@link #planOverrideForDate}) and Task 4's dry-run preview: given a
+     * date's current exceptions and a proposed new override, returns the new NON-OVERLAPPING
+     * exception set for that date under "newest wins" — every existing exception whose span
+     * overlaps {@code newSpan} is replaced by its {@link IntervalMath#subtract} remnants (same kind
+     * as its source; empty remnants dropped); every non-overlapping existing exception passes
+     * through unchanged; the new override ({@code newKind}/{@code newSpan}) is appended LAST. Pure
+     * — no DB, no Spring; takes/returns plain data so Task 4 can reuse it against a hypothetical
+     * set without writing anything.
+     */
+    static List<TrimmedException> computeTrimmedSet(
+            List<ExistingException> existing,
+            AvailabilityExceptionKind newKind,
+            IntervalMath.Span newSpan) {
+        List<TrimmedException> result = new ArrayList<>();
+        for (ExistingException ex : existing) {
+            if (IntervalMath.overlaps(ex.span(), newSpan)) {
+                for (IntervalMath.Span remnant : IntervalMath.subtract(ex.span(), newSpan)) {
+                    result.add(new TrimmedException(ex.kind(), remnant));
+                }
+            } else {
+                result.add(new TrimmedException(ex.kind(), ex.span()));
+            }
+        }
+        result.add(new TrimmedException(newKind, newSpan));
+        return result;
+    }
+
+    /**
+     * A computed-but-not-yet-applied per-date write plan: the OVERLAPPING existing rows to delete
+     * (siblings whose span intersects the new override; non-overlapping siblings are left
+     * physically untouched — never deleted/reinserted) and the {@link #computeTrimmedSet} result to
+     * insert in their place. Separating "plan" from "apply" is what lets {@link #createException}
+     * compute every date's plan (read-only) before mutating any date (auto-flush safety).
+     */
+    private record DatePlan(
+            UUID guideId,
+            LocalDate date,
+            List<AvailabilityExceptionEntity> toDelete,
+            List<TrimmedException> toInsert) {}
+
+    /**
+     * Computes (without writing) the {@link DatePlan} for applying {@code newKind}/{@code newSpan}
+     * to {@code date}: loads the date's current exceptions, self-excludes {@code excludeId} (the
+     * edited row, on update — {@code null} on create), partitions the rest into overlapping (with
+     * {@code newSpan}) vs. non-overlapping, and runs {@link #computeTrimmedSet} over ONLY the
+     * overlapping subset (the non-overlapping ones are already the correct final state and are
+     * simply left out of {@code toDelete} — re-trimming/reinserting them would be redundant and
+     * would need to fabricate a lost {@code reason}).
+     */
+    private DatePlan planOverrideForDate(
+            UUID guideId,
+            LocalDate date,
+            AvailabilityExceptionKind newKind,
+            IntervalMath.Span newSpan,
+            UUID excludeId) {
+        List<AvailabilityExceptionEntity> existingEntities =
+                exceptions.findByGuideIdAndExceptionDate(guideId, date);
+
+        List<AvailabilityExceptionEntity> overlapping = new ArrayList<>();
+        List<ExistingException> overlappingPure = new ArrayList<>();
+        for (AvailabilityExceptionEntity ex : existingEntities) {
+            if (excludeId != null && excludeId.equals(ex.getId())) {
+                continue; // self-exclusion: never trim the edited row against its own new span.
+            }
+            IntervalMath.Span existingSpan =
+                    IntervalMath.spanOf(ex.getStartLocal(), ex.getWindowMin());
+            if (IntervalMath.overlaps(existingSpan, newSpan)) {
+                overlapping.add(ex);
+                overlappingPure.add(new ExistingException(ex.getId(), ex.getKind(), existingSpan));
+            }
+        }
+
+        List<TrimmedException> trimmed = computeTrimmedSet(overlappingPure, newKind, newSpan);
+        return new DatePlan(guideId, date, overlapping, trimmed);
+    }
+
+    /**
+     * Applies a {@link DatePlan}: deletes the overlapped rows, then inserts every entry of {@code
+     * toInsert} — the last of which is always the new override itself (see {@link
+     * #computeTrimmedSet}), given {@code reason}; every earlier (remnant) entry gets a {@code null}
+     * reason (a clipped remnant of a prior exception is not the same logical override anymore).
+     * Returns the newly-inserted override entity (for the caller's response).
+     */
+    private AvailabilityExceptionEntity applyPlan(DatePlan plan, String reason) {
+        plan.toDelete().forEach(exceptions::delete);
+
+        List<TrimmedException> trimmed = plan.toInsert();
+        AvailabilityExceptionEntity created = null;
+        for (int i = 0; i < trimmed.size(); i++) {
+            boolean isNewOverride = i == trimmed.size() - 1;
+            AvailabilityExceptionEntity inserted =
+                    insertException(
+                            plan.guideId(),
+                            plan.date(),
+                            trimmed.get(i).kind(),
+                            trimmed.get(i).span(),
+                            isNewOverride ? reason : null);
+            if (isNewOverride) {
+                created = inserted;
+            }
+        }
+        return created;
+    }
+
+    private AvailabilityExceptionEntity insertException(
+            UUID guideId,
+            LocalDate date,
+            AvailabilityExceptionKind kind,
+            IntervalMath.Span span,
+            String reason) {
+        AvailabilityExceptionEntity e = new AvailabilityExceptionEntity();
+        e.setId(UUID.randomUUID());
+        e.setGuideId(guideId);
+        e.setExceptionDate(date);
+        e.setKind(kind);
+        e.setStartLocal(LocalTime.ofSecondOfDay(span.startMin() * 60L));
+        e.setWindowMin(span.endMin() - span.startMin());
+        e.setReason(reason);
+        exceptions.save(e);
+        return e;
     }
 
     private static void validateSettingsInput(GuideBookingSettingsUpdateRequest req) {

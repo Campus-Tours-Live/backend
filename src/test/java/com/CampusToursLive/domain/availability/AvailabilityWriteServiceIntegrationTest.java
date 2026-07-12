@@ -2,6 +2,7 @@ package com.CampusToursLive.domain.availability;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.CampusToursLive.domain.booking.AcceptanceMode;
 import com.CampusToursLive.domain.booking.BookingEntity;
@@ -463,6 +464,280 @@ class AvailabilityWriteServiceIntegrationTest {
 
         assertThat(updated.startLocal()).isEqualTo("09:00");
         assertThat(updated.active()).isFalse();
+    }
+
+    // ---------------------------------------------------------------------
+    // Task 3 (CTL-54 v2.1) — date-specific newest-wins trim/replace, stored non-overlapping.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void createException_trimsPriorAdditional_whenNewUnavailableOverlaps() {
+        LocalDate d = FIXED_TODAY;
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(d.toString(), "ADDITIONAL", "09:00", 60, null));
+
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(d.toString(), "UNAVAILABLE", "09:30", 90, null));
+
+        List<AvailabilityExceptionEntity> stored =
+                exceptions.findByGuideIdAndExceptionDate(guideAId, d);
+        assertThat(stored)
+                .extracting(
+                        AvailabilityExceptionEntity::getKind,
+                        e -> e.getStartLocal().toString(),
+                        AvailabilityExceptionEntity::getWindowMin)
+                .containsExactlyInAnyOrder(
+                        tuple(AvailabilityExceptionKind.ADDITIONAL, "09:00", 30),
+                        tuple(AvailabilityExceptionKind.UNAVAILABLE, "09:30", 90));
+
+        // Stored same-date exceptions are non-overlapping.
+        IntervalMath.Span spanA =
+                IntervalMath.spanOf(stored.get(0).getStartLocal(), stored.get(0).getWindowMin());
+        IntervalMath.Span spanB =
+                IntervalMath.spanOf(stored.get(1).getStartLocal(), stored.get(1).getWindowMin());
+        assertThat(IntervalMath.overlaps(spanA, spanB)).isFalse();
+
+        // Resolved net: 09:00-09:30 available; 09:30-11:00 is a BLOCK, i.e. no positive occurrence.
+        List<GuideAvailabilityOccurrenceEntity> occ =
+                occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId);
+        assertThat(occ).hasSize(1);
+        assertThat(occ.get(0).getDuringStartAt())
+                .isEqualTo(d.atTime(9, 0).atZone(LA_ZONE).toInstant());
+        assertThat(occ.get(0).getDuringEndAt())
+                .isEqualTo(d.atTime(9, 30).atZone(LA_ZONE).toInstant());
+    }
+
+    @Test
+    void createException_trimsPriorUnavailable_whenNewAdditionalOverlaps_symmetric() {
+        LocalDate d = FIXED_TODAY;
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(d.toString(), "UNAVAILABLE", "09:30", 90, null));
+
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(d.toString(), "ADDITIONAL", "09:00", 60, null));
+
+        List<AvailabilityExceptionEntity> stored =
+                exceptions.findByGuideIdAndExceptionDate(guideAId, d);
+        assertThat(stored)
+                .extracting(
+                        AvailabilityExceptionEntity::getKind,
+                        e -> e.getStartLocal().toString(),
+                        AvailabilityExceptionEntity::getWindowMin)
+                .containsExactlyInAnyOrder(
+                        tuple(AvailabilityExceptionKind.UNAVAILABLE, "10:00", 60),
+                        tuple(AvailabilityExceptionKind.ADDITIONAL, "09:00", 60));
+
+        // The ADDITIONAL wins on 09:00-10:00.
+        List<GuideAvailabilityOccurrenceEntity> occ =
+                occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId);
+        assertThat(occ).hasSize(1);
+        assertThat(occ.get(0).getDuringStartAt())
+                .isEqualTo(d.atTime(9, 0).atZone(LA_ZONE).toInstant());
+        assertThat(occ.get(0).getDuringEndAt())
+                .isEqualTo(d.atTime(10, 0).atZone(LA_ZONE).toInstant());
+    }
+
+    @Test
+    void createException_multiDay_appliesPerDate_andTrimsEachDatesOverlaps() {
+        LocalDate d0 = FIXED_TODAY;
+        LocalDate d1 = d0.plusDays(1);
+        LocalDate d2 = d0.plusDays(2);
+
+        // A prior ADDITIONAL on the middle day that the all-day block should fully cover (and
+        // therefore fully trim away -- an empty remnant, per IntervalMath.subtract).
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(d1.toString(), "ADDITIONAL", "09:00", 60, null));
+
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(
+                        null,
+                        "UNAVAILABLE",
+                        "00:00",
+                        1440,
+                        "closed",
+                        d0.toString(),
+                        d2.toString()));
+
+        for (LocalDate d : List.of(d0, d1, d2)) {
+            List<AvailabilityExceptionEntity> stored =
+                    exceptions.findByGuideIdAndExceptionDate(guideAId, d);
+            assertThat(stored).hasSize(1);
+            assertThat(stored.get(0).getKind()).isEqualTo(AvailabilityExceptionKind.UNAVAILABLE);
+            assertThat(stored.get(0).getStartLocal().toString()).isEqualTo("00:00");
+            assertThat(stored.get(0).getWindowMin()).isEqualTo(1440);
+        }
+        // Fully blocked on all three dates -> no resolved occurrences.
+        assertThat(occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId)).isEmpty();
+    }
+
+    @Test
+    void createException_leavesNonOverlappingPriorException_physicallyUntouched() {
+        LocalDate d = FIXED_TODAY;
+        var untouched =
+                writeService.createException(
+                        actingUser(guideAUserId),
+                        new AvailabilityExceptionRequest(
+                                d.toString(), "ADDITIONAL", "14:00", 60, "afternoon"));
+
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(d.toString(), "UNAVAILABLE", "09:30", 90, null));
+
+        assertThat(exceptions.findByGuideIdAndExceptionDate(guideAId, d)).hasSize(2);
+
+        // Left PHYSICALLY untouched: same row (same id), same reason, unchanged fields -- never
+        // deleted/reinserted just because a sibling on the same date changed.
+        AvailabilityExceptionEntity untouchedRow =
+                exceptions.findById(UUID.fromString(untouched.id())).orElseThrow();
+        assertThat(untouchedRow.getKind()).isEqualTo(AvailabilityExceptionKind.ADDITIONAL);
+        assertThat(untouchedRow.getStartLocal().toString()).isEqualTo("14:00");
+        assertThat(untouchedRow.getWindowMin()).isEqualTo(60);
+        assertThat(untouchedRow.getReason()).isEqualTo("afternoon");
+    }
+
+    @Test
+    void createException_trim_leavesBookingsTableUntouched() {
+        AvailabilityRuleRequest ruleReq =
+                new AvailabilityRuleRequest(MONDAY_DOW, "10:00", 240, null, null, null);
+        writeService.createRule(actingUser(guideAUserId), ruleReq);
+
+        Instant scheduledStart = NEXT_MONDAY.atTime(12, 0).atZone(LA_ZONE).toInstant();
+        Instant scheduledEnd = NEXT_MONDAY.atTime(13, 0).atZone(LA_ZONE).toInstant();
+        BookingEntity booking =
+                bookings.saveAndFlush(
+                        confirmedBooking(guideAId, offeringId, scheduledStart, scheduledEnd));
+
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(
+                        NEXT_MONDAY.toString(), "ADDITIONAL", "09:00", 60, null));
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(
+                        NEXT_MONDAY.toString(), "UNAVAILABLE", "09:30", 90, null));
+
+        BookingEntity reloaded = bookings.findById(booking.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(BookingStatus.CONFIRMED);
+        assertThat(reloaded.getScheduledStartAt()).isEqualTo(scheduledStart);
+        assertThat(reloaded.getScheduledEndAt()).isEqualTo(scheduledEnd);
+    }
+
+    @Test
+    void createException_rejectsDateRangeOver366Days() {
+        LocalDate from = FIXED_TODAY;
+        LocalDate to = from.plusDays(367);
+        AvailabilityExceptionRequest req =
+                new AvailabilityExceptionRequest(
+                        null, "UNAVAILABLE", "09:00", 60, null, from.toString(), to.toString());
+
+        assertThatThrownBy(() -> writeService.createException(actingUser(guideAUserId), req))
+                .isInstanceOf(ValidationException.class);
+        assertThat(exceptions.findByGuideId(guideAId)).isEmpty();
+    }
+
+    @Test
+    void createException_accepts366DayRange() {
+        LocalDate from = FIXED_TODAY;
+        LocalDate to = from.plusDays(366);
+        AvailabilityExceptionRequest req =
+                new AvailabilityExceptionRequest(
+                        null, "UNAVAILABLE", "00:00", 60, null, from.toString(), to.toString());
+
+        writeService.createException(actingUser(guideAUserId), req);
+
+        // Inclusive [from, to] -> 367 dates, one exception row per date.
+        assertThat(exceptions.findByGuideId(guideAId)).hasSize(367);
+    }
+
+    @Test
+    void createException_rejectsOverrideCrossingMidnight() {
+        AvailabilityExceptionRequest req =
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "UNAVAILABLE", "22:00", 240, null);
+
+        assertThatThrownBy(() -> writeService.createException(actingUser(guideAUserId), req))
+                .isInstanceOf(ValidationException.class);
+        assertThat(exceptions.findByGuideId(guideAId)).isEmpty();
+    }
+
+    @Test
+    void createException_allowsOverrideEndingExactlyAtMidnight() {
+        AvailabilityExceptionRequest req =
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "UNAVAILABLE", "22:00", 120, null);
+
+        var created = writeService.createException(actingUser(guideAUserId), req);
+
+        assertThat(created.startLocal()).isEqualTo("22:00");
+        assertThat(exceptions.findByGuideId(guideAId)).hasSize(1);
+    }
+
+    @Test
+    void createException_beyondHorizon_persistsButStaysInert() {
+        LocalDate farFuture = FIXED_TODAY.plusDays(400); // horizon is HORIZON_DAYS=375.
+        assertThat(farFuture).isAfter(FIXED_TODAY.plusDays(AvailabilityService.HORIZON_DAYS));
+
+        AvailabilityRuleRequest ruleReq =
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null);
+        writeService.createRule(actingUser(guideAUserId), ruleReq);
+        int occurrencesBefore = occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId).size();
+
+        var created =
+                writeService.createException(
+                        actingUser(guideAUserId),
+                        new AvailabilityExceptionRequest(
+                                farFuture.toString(), "UNAVAILABLE", "09:00", 60, null));
+
+        assertThat(created.exceptionDate()).isEqualTo(farFuture.toString());
+        assertThat(exceptions.findByGuideIdAndExceptionDate(guideAId, farFuture)).hasSize(1);
+        // Inert -- occurrences within the horizon are unchanged (the far-future date is outside the
+        // materialization window, so the projection never evaluates it).
+        assertThat(occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId))
+                .hasSize(occurrencesBefore);
+    }
+
+    @Test
+    void updateException_selfExcludesEditedRow_whileTrimmingSiblings() {
+        LocalDate d = FIXED_TODAY;
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(d.toString(), "ADDITIONAL", "14:00", 60, null));
+        var edited =
+                writeService.createException(
+                        actingUser(guideAUserId),
+                        new AvailabilityExceptionRequest(
+                                d.toString(), "UNAVAILABLE", "09:00", 60, "orig"));
+
+        // Shift the edited exception's OWN span forward by 30 min (09:00-10:00 -> 09:30-10:30). If
+        // self-exclusion were broken, the pre-edit row would be treated as a SIBLING overlapping
+        // its
+        // own new span and leave a spurious [09:00,09:30) UNAVAILABLE remnant of itself behind.
+        AvailabilityExceptionRequest updateReq =
+                new AvailabilityExceptionRequest(d.toString(), "UNAVAILABLE", "09:30", 60, "moved");
+        var updated =
+                writeService.updateException(
+                        actingUser(guideAUserId), UUID.fromString(edited.id()), updateReq);
+
+        assertThat(updated.startLocal()).isEqualTo("09:30");
+        assertThat(updated.reason()).isEqualTo("moved");
+
+        // Exactly the untouched sibling + the cleanly-moved row -- NO spurious self-trim remnant.
+        List<AvailabilityExceptionEntity> stored =
+                exceptions.findByGuideIdAndExceptionDate(guideAId, d);
+        assertThat(stored)
+                .extracting(
+                        AvailabilityExceptionEntity::getKind,
+                        e -> e.getStartLocal().toString(),
+                        AvailabilityExceptionEntity::getWindowMin)
+                .containsExactlyInAnyOrder(
+                        tuple(AvailabilityExceptionKind.ADDITIONAL, "14:00", 60),
+                        tuple(AvailabilityExceptionKind.UNAVAILABLE, "09:30", 60));
     }
 
     // ---------------------------------------------------------------------

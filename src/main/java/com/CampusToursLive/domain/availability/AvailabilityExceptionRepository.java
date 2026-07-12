@@ -1,5 +1,6 @@
 package com.CampusToursLive.domain.availability;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -14,6 +15,13 @@ public interface AvailabilityExceptionRepository
 
     /** A guide's own exception — scopes writes/deletes so a guide can only touch their own rows. */
     Optional<AvailabilityExceptionEntity> findByIdAndGuideId(UUID id, UUID guideId);
+
+    /**
+     * A guide's exceptions on ONE date (CTL-54 v2.1 Task 3) — the per-date sibling set that
+     * newest-wins trim/replace validates a new override against, and the same-date scope Task 4's
+     * dry-run preview loads without writing.
+     */
+    List<AvailabilityExceptionEntity> findByGuideIdAndExceptionDate(UUID guideId, LocalDate date);
 
     /**
      * Every distinct guide id that has at least one exception — the other half of the union {@link
