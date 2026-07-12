@@ -10,8 +10,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.CampusToursLive.domain.availability.AvailabilityPreviewService;
 import com.CampusToursLive.domain.availability.AvailabilityReadService;
 import com.CampusToursLive.domain.availability.AvailabilityWriteService;
+import com.CampusToursLive.domain.guide.GuideProfileEntity;
+import com.CampusToursLive.domain.guide.GuideProfileRepository;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.error.ForbiddenException;
@@ -22,10 +25,12 @@ import com.CampusToursLive.web.dto.AffectedBookingResponse;
 import com.CampusToursLive.web.dto.AvailabilityExceptionResponse;
 import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
+import com.CampusToursLive.web.dto.OverridePreviewResponse;
 import com.CampusToursLive.web.dto.ResolvedAvailabilityResponse;
 import com.CampusToursLive.web.dto.ResolvedOccurrence;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,6 +63,8 @@ class AvailabilityControllerTest {
     @MockitoBean private CurrentUser currentUser;
     @MockitoBean private AvailabilityWriteService availability;
     @MockitoBean private AvailabilityReadService availabilityRead;
+    @MockitoBean private AvailabilityPreviewService availabilityPreview;
+    @MockitoBean private GuideProfileRepository guides;
 
     private static UserEntity user() {
         UserEntity u = new UserEntity();
@@ -165,6 +172,132 @@ class AvailabilityControllerTest {
                 .thenThrow(new ValidationException("to must be after from"));
 
         mvc.perform(get("/availability").param("from", "2026-07-11").param("to", "2026-07-01"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422));
+    }
+
+    // ---------------------------------------------------------------------
+    // Date-specific override dry-run preview (CTL-54 v2.1 Task 4).
+    // ---------------------------------------------------------------------
+
+    @Test
+    void getOverridePreview_returnsEnvelope_whenAuthorized() throws Exception {
+        UserEntity u = user();
+        UUID guideId = UUID.randomUUID();
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(guideId);
+        guide.setUserId(u.getId());
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(guides.findByUserId(u.getId())).thenReturn(Optional.of(guide));
+
+        OverridePreviewResponse preview =
+                new OverridePreviewResponse(
+                        List.of(
+                                new OverridePreviewResponse.DatePreview(
+                                        "2026-07-12",
+                                        List.of(
+                                                new ResolvedOccurrence(
+                                                        Instant.parse("2026-07-12T16:00:00Z"),
+                                                        Instant.parse("2026-07-12T16:30:00Z"))),
+                                        List.of(
+                                                new OverridePreviewResponse.TrimmedSegment(
+                                                        "ADDITIONAL", "09:00", 60)))),
+                        true,
+                        null);
+        when(availabilityPreview.preview(eq(guideId), any())).thenReturn(preview);
+
+        mvc.perform(
+                        get("/availability/preview")
+                                .param("dateFrom", "2026-07-12")
+                                .param("dateTo", "2026-07-12")
+                                .param("kind", "UNAVAILABLE")
+                                .param("startLocal", "09:30")
+                                .param("windowMin", "90"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.valid").value(true))
+                .andExpect(jsonPath("$.data.days[0].date").value("2026-07-12"))
+                .andExpect(
+                        jsonPath("$.data.days[0].resultingWindows[0].startAt")
+                                .value("2026-07-12T16:00:00Z"))
+                .andExpect(jsonPath("$.data.days[0].trimmed[0].kind").value("ADDITIONAL"))
+                .andExpect(jsonPath("$.meta.requestId").exists());
+    }
+
+    @Test
+    void getOverridePreview_403_whenNonGuideCaller() throws Exception {
+        when(currentUser.requireRole(UserRole.GUIDE))
+                .thenThrow(new ForbiddenException("Missing required role: GUIDE"));
+
+        mvc.perform(
+                        get("/availability/preview")
+                                .param("dateFrom", "2026-07-12")
+                                .param("dateTo", "2026-07-12")
+                                .param("kind", "UNAVAILABLE")
+                                .param("startLocal", "09:30")
+                                .param("windowMin", "90"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
+    }
+
+    @Test
+    void getOverridePreview_422_whenNoGuideProfile() throws Exception {
+        UserEntity u = user();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(guides.findByUserId(u.getId())).thenReturn(Optional.empty());
+
+        mvc.perform(
+                        get("/availability/preview")
+                                .param("dateFrom", "2026-07-12")
+                                .param("dateTo", "2026-07-12")
+                                .param("kind", "UNAVAILABLE")
+                                .param("startLocal", "09:30")
+                                .param("windowMin", "90"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422));
+    }
+
+    @Test
+    void getOverridePreview_422_whenServiceRejectsCrossMidnightOverride() throws Exception {
+        UserEntity u = user();
+        UUID guideId = UUID.randomUUID();
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(guideId);
+        guide.setUserId(u.getId());
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(guides.findByUserId(u.getId())).thenReturn(Optional.of(guide));
+        when(availabilityPreview.preview(eq(guideId), any()))
+                .thenThrow(new ValidationException("This time off cannot cross midnight."));
+
+        mvc.perform(
+                        get("/availability/preview")
+                                .param("dateFrom", "2026-07-12")
+                                .param("dateTo", "2026-07-12")
+                                .param("kind", "UNAVAILABLE")
+                                .param("startLocal", "22:00")
+                                .param("windowMin", "240"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422));
+    }
+
+    @Test
+    void getOverridePreview_422_whenServiceRejectsOver366DayRange() throws Exception {
+        UserEntity u = user();
+        UUID guideId = UUID.randomUUID();
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(guideId);
+        guide.setUserId(u.getId());
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(guides.findByUserId(u.getId())).thenReturn(Optional.of(guide));
+        when(availabilityPreview.preview(eq(guideId), any()))
+                .thenThrow(new ValidationException("Date range too large (max 366 days)."));
+
+        mvc.perform(
+                        get("/availability/preview")
+                                .param("dateFrom", "2026-07-12")
+                                .param("dateTo", "2027-07-14")
+                                .param("kind", "UNAVAILABLE")
+                                .param("startLocal", "09:00")
+                                .param("windowMin", "60"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.status").value(422));
     }

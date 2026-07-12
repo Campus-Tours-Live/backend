@@ -1,9 +1,13 @@
 package com.CampusToursLive.web;
 
+import com.CampusToursLive.domain.availability.AvailabilityPreviewService;
 import com.CampusToursLive.domain.availability.AvailabilityReadService;
 import com.CampusToursLive.domain.availability.AvailabilityWriteService;
+import com.CampusToursLive.domain.guide.GuideProfileEntity;
+import com.CampusToursLive.domain.guide.GuideProfileRepository;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
+import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.AffectedBookingResponse;
@@ -15,6 +19,8 @@ import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.AvailabilityWriteResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
+import com.CampusToursLive.web.dto.OverridePreviewRequest;
+import com.CampusToursLive.web.dto.OverridePreviewResponse;
 import com.CampusToursLive.web.dto.Problem;
 import com.CampusToursLive.web.dto.ResolvedAvailabilityResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -76,14 +82,20 @@ public class AvailabilityController {
     private final CurrentUser currentUser;
     private final AvailabilityWriteService availability;
     private final AvailabilityReadService availabilityRead;
+    private final AvailabilityPreviewService availabilityPreview;
+    private final GuideProfileRepository guides;
 
     public AvailabilityController(
             CurrentUser currentUser,
             AvailabilityWriteService availability,
-            AvailabilityReadService availabilityRead) {
+            AvailabilityReadService availabilityRead,
+            AvailabilityPreviewService availabilityPreview,
+            GuideProfileRepository guides) {
         this.currentUser = currentUser;
         this.availability = availability;
         this.availabilityRead = availabilityRead;
+        this.availabilityPreview = availabilityPreview;
+        this.guides = guides;
     }
 
     /**
@@ -146,6 +158,28 @@ public class AvailabilityController {
                     String to) {
         var user = currentUser.requireRole(UserRole.GUIDE);
         return ApiEnvelope.of(availabilityRead.getResolvedAvailability(user, from, to));
+    }
+
+    /**
+     * Date-specific override dry-run/preview (CTL-54 v2.1 Task 4): given a proposed override that
+     * has NOT been saved, returns the resulting net-available windows per date exactly as an actual
+     * save would produce them, plus which existing exception segments the override would trim --
+     * WITHOUT persisting anything. Owner-scoped like every other route here: the guide id is
+     * resolved from the caller's own guide profile, never from the request. No springdoc yet (Task
+     * 5).
+     */
+    @GetMapping("/preview")
+    public ApiEnvelope<OverridePreviewResponse> getOverridePreview(
+            @RequestParam String dateFrom,
+            @RequestParam String dateTo,
+            @RequestParam String kind,
+            @RequestParam String startLocal,
+            @RequestParam Integer windowMin) {
+        var user = currentUser.requireRole(UserRole.GUIDE);
+        UUID guideId = requireGuideId(user);
+        OverridePreviewRequest req =
+                new OverridePreviewRequest(dateFrom, dateTo, kind, startLocal, windowMin);
+        return ApiEnvelope.of(availabilityPreview.preview(guideId, req));
     }
 
     /** List the guide's recurring availability rules. */
@@ -670,5 +704,25 @@ public class AvailabilityController {
      */
     private List<AffectedBookingResponse> affectedBookings(UserEntity user) {
         return availability.findAffectedBookings(user);
+    }
+
+    /**
+     * Resolves the caller's own {@code guide_profiles.id} for {@link #getOverridePreview} (the only
+     * route here that needs a bare guide id rather than a {@link UserEntity} -- {@link
+     * AvailabilityPreviewService#preview} takes the id directly). Deliberately REPLICATED (not
+     * extracted into a shared helper) from {@link AvailabilityWriteService}'s private {@code
+     * requireGuideId} / {@link AvailabilityReadService}'s private {@code requireGuideId} -- the
+     * same 3-line lookup, kept independent per this codebase's convention (see {@link
+     * AvailabilityReadService}'s class javadoc for the same rationale).
+     */
+    private UUID requireGuideId(UserEntity user) {
+        GuideProfileEntity guide =
+                guides.findByUserId(user.getId())
+                        .orElseThrow(
+                                () ->
+                                        new ValidationException(
+                                                "No guide profile -- complete guide onboarding"
+                                                        + " first"));
+        return guide.getId();
     }
 }
