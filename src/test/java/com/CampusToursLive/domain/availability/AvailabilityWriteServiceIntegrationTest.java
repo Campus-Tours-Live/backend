@@ -629,9 +629,10 @@ class AvailabilityWriteServiceIntegrationTest {
     }
 
     @Test
-    void createException_rejectsDateRangeOver366Days() {
+    void createException_rejectsRangeOver366InclusiveDates() {
         LocalDate from = FIXED_TODAY;
-        LocalDate to = from.plusDays(367);
+        // Difference of 366 days -> 367 inclusive dates, one over the 366 inclusive-date cap.
+        LocalDate to = from.plusDays(366);
         AvailabilityExceptionRequest req =
                 new AvailabilityExceptionRequest(
                         null, "UNAVAILABLE", "09:00", 60, null, from.toString(), to.toString());
@@ -642,17 +643,52 @@ class AvailabilityWriteServiceIntegrationTest {
     }
 
     @Test
-    void createException_accepts366DayRange() {
+    void createException_accepts366InclusiveDates() {
         LocalDate from = FIXED_TODAY;
-        LocalDate to = from.plusDays(366);
+        // Difference of 365 days -> exactly 366 inclusive dates, right at the cap.
+        LocalDate to = from.plusDays(365);
         AvailabilityExceptionRequest req =
                 new AvailabilityExceptionRequest(
                         null, "UNAVAILABLE", "00:00", 60, null, from.toString(), to.toString());
 
         writeService.createException(actingUser(guideAUserId), req);
 
-        // Inclusive [from, to] -> 367 dates, one exception row per date.
-        assertThat(exceptions.findByGuideId(guideAId)).hasSize(367);
+        // Inclusive [from, to] -> 366 dates, one exception row per date.
+        assertThat(exceptions.findByGuideId(guideAId)).hasSize(366);
+    }
+
+    @Test
+    void createException_multiDayExpandsAcross229InLeapYear() {
+        // 2028 is a leap year -- Feb has 29 days. This pins that the multi-day expansion loop
+        // (dateFrom.plusDays(i), a LocalDate) is leap-aware and does not skip/mis-land on 2/29.
+        LocalDate d0 = LocalDate.of(2028, 2, 28);
+        LocalDate d1 = LocalDate.of(2028, 2, 29);
+        LocalDate d2 = LocalDate.of(2028, 3, 1);
+
+        AvailabilityExceptionRequest req =
+                new AvailabilityExceptionRequest(
+                        null, "UNAVAILABLE", "00:00", 1440, "closed", d0.toString(), d2.toString());
+
+        writeService.createException(actingUser(guideAUserId), req);
+
+        List<AvailabilityExceptionEntity> stored = exceptions.findByGuideId(guideAId);
+        assertThat(stored).hasSize(3);
+        assertThat(stored)
+                .extracting(AvailabilityExceptionEntity::getExceptionDate)
+                .containsExactlyInAnyOrder(d0, d1, d2);
+    }
+
+    @Test
+    void createException_rejectsNonExistentLeapDate() {
+        // 2027 is NOT a leap year -- Feb 29 does not exist. Must be a clean 422
+        // (ValidationException
+        // via parseLocalDate's DateTimeParseException catch), never a raw 500.
+        AvailabilityExceptionRequest req =
+                new AvailabilityExceptionRequest("2027-02-29", "UNAVAILABLE", "09:00", 60, null);
+
+        assertThatThrownBy(() -> writeService.createException(actingUser(guideAUserId), req))
+                .isInstanceOf(ValidationException.class);
+        assertThat(exceptions.findByGuideId(guideAId)).isEmpty();
     }
 
     @Test

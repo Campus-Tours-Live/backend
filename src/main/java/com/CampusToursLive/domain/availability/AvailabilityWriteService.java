@@ -603,16 +603,17 @@ public class AvailabilityWriteService {
      * an out-of-range value never reaches {@code IntervalMath} as a raw {@link
      * IllegalArgumentException}: (a) same-day — the override cannot cross midnight ({@code
      * windowMin} bringing it to exactly {@code 1440}, i.e. ending at midnight, is allowed); (b)
-     * operation-size — the multi-day range is capped at 366 days (this bounds the write's
-     * row-count, NOT date-reach: a far-future override beyond the materialization horizon is legal
-     * and stays inert until the roll-forward job reaches it).
+     * operation-size — the multi-day range is capped at, at most, 366 INCLUSIVE dates ({@code
+     * dateTo - dateFrom + 1 <= 366}, i.e. one leap year's worth of dates counting both endpoints;
+     * this bounds the write's row-count, NOT date-reach: a far-future override beyond the
+     * materialization horizon is legal and stays inert until the roll-forward job reaches it).
      */
     static void requireOverrideValid(
             LocalTime startLocal, int windowMin, LocalDate dateFrom, LocalDate dateTo) {
         if (startLocal.toSecondOfDay() / 60 + windowMin > 1440) {
             throw new ValidationException("This time off cannot cross midnight.");
         }
-        if (ChronoUnit.DAYS.between(dateFrom, dateTo) > 366) {
+        if (ChronoUnit.DAYS.between(dateFrom, dateTo) + 1 > 366) {
             throw new ValidationException("Date range too large (max 366 days).");
         }
     }
