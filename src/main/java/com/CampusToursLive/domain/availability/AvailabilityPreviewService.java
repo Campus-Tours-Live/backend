@@ -271,6 +271,15 @@ public class AvailabilityPreviewService {
                         .map(iv -> new ResolvedOccurrence(iv.startAt(), iv.endAt()))
                         .toList();
 
+        // Which of the date's existing exceptions this override would drop/clip on save (CTL-54
+        // #trimmedSegments). An existing exception is reported when it OVERLAPS one of the new
+        // windows (it gets trimmed newest-wins) OR -- in replace mode only -- when it is a
+        // SAME-KIND
+        // sibling being wholesale replaced, EVEN IF it does not overlap any new window (replace
+        // mode
+        // drops every same-kind existing, not just the overlapping ones). Without the same-kind
+        // clause a non-overlapping dropped sibling (e.g. an ADDITIONAL 14:00-15:00 dropped by a
+        // replace that keeps only 09:00-10:00) would silently vanish from the preview.
         List<TrimmedSegment> trimmed =
                 fullExisting.stream()
                         .filter(
@@ -278,8 +287,15 @@ public class AvailabilityPreviewService {
                                     IntervalMath.Span existingSpan =
                                             IntervalMath.spanOf(
                                                     e.getStartLocal(), e.getWindowMin());
-                                    return spans.stream()
-                                            .anyMatch(s -> IntervalMath.overlaps(existingSpan, s));
+                                    boolean sameKindDropped =
+                                            replaceExisting && e.getKind() == newKind;
+                                    boolean overlapsWindow =
+                                            spans.stream()
+                                                    .anyMatch(
+                                                            s ->
+                                                                    IntervalMath.overlaps(
+                                                                            existingSpan, s));
+                                    return sameKindDropped || overlapsWindow;
                                 })
                         .map(
                                 e ->

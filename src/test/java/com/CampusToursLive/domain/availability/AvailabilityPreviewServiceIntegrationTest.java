@@ -504,6 +504,30 @@ class AvailabilityPreviewServiceIntegrationTest {
     }
 
     @Test
+    void previewMulti_replaceExisting_trimmedReportsNonOverlappingDroppedSameKindSibling() {
+        LocalDate d = FIXED_TODAY; // Saturday.
+        // Two ADDITIONAL blocks. Replace mode keeping only 09:00-10:00 DROPS the non-overlapping
+        // 14:00-15:00 same-kind sibling -- it must appear in trimmedSegments, not just the
+        // overlapping 09:00-10:00 one (which the new window replaces in place).
+        seedException(guideAId, d, AvailabilityExceptionKind.ADDITIONAL, "09:00", 60, null);
+        seedException(guideAId, d, AvailabilityExceptionKind.ADDITIONAL, "14:00", 60, null);
+
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(),
+                        d.toString(),
+                        "ADDITIONAL",
+                        List.of(new Window("09:00", 60)),
+                        true);
+
+        DatePreview dp = previewService.previewMulti(guideAId, req).days().get(0);
+        assertThat(dp.trimmed())
+                .extracting(
+                        TrimmedSegment::kind, TrimmedSegment::startLocal, TrimmedSegment::windowMin)
+                .contains(tuple("ADDITIONAL", "14:00", 60));
+    }
+
+    @Test
     void previewMulti_default_appliesOnTop_unchanged() {
         LocalDate d = FIXED_TODAY; // Saturday.
         seedRule(guideAId, 6, "09:00", 180, LA_ZONE.getId(), d.minusDays(30), null);
