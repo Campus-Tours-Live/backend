@@ -14,6 +14,15 @@ public interface GuideAvailabilityOccurrenceRepository
     List<GuideAvailabilityOccurrenceEntity> findByGuideIdOrderByDuringStartAtAsc(UUID guideId);
 
     /**
+     * Derived readiness signal {@code bookable} (CTL-54 v2.1 B1): {@code true} iff this guide has
+     * at least one materialized occurrence that has not yet ended ({@code during_end_at > now}). A
+     * plain Spring-Data derived query — {@code duringEndAt} is the entity's {@code Instant} mapping
+     * of the {@code during_end_at} column. This is a pure existence probe, never re-coalesced or
+     * read into memory.
+     */
+    boolean existsByGuideIdAndDuringEndAtAfter(UUID guideId, Instant now);
+
+    /**
      * Wholesale delete of a guide's occurrences — the "replace" half of rematerialize (Task 3):
      * this is a derived cache, never edited row-by-row.
      */

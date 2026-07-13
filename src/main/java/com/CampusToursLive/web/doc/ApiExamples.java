@@ -268,7 +268,8 @@ public interface ApiExamples {
             "{\"data\":{\"rules\":["
                     + AVAILABILITY_RULE_JSON
                     + "],\"occurrences\":[{\"startAt\":\"2026-07-13T16:00:00Z\","
-                    + "\"endAt\":\"2026-07-13T17:00:00Z\"}],\"dstGapDays\":[\"2026-03-08\"]},"
+                    + "\"endAt\":\"2026-07-13T17:00:00Z\"}],\"dstGapDays\":[\"2026-03-08\"],"
+                    + "\"bookable\":true,\"hasWeeklyHours\":true},"
                     + META
                     + "}";
 

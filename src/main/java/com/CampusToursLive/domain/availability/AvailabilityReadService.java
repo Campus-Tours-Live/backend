@@ -96,7 +96,16 @@ public class AvailabilityReadService {
                         .map(LocalDate::toString)
                         .toList();
 
-        return new ResolvedAvailabilityResponse(ruleResponses, occurrenceResponses, dstGapDays);
+        // Derived readiness signals (CTL-54 v2.1 B1, Contract B) -- computed, never stored:
+        //   bookable       = the guide has an occurrence that has not yet ended (something to
+        // book).
+        //   hasWeeklyHours = the guide has at least one active weekly rule (an expired-but-active
+        //                    rule still counts; a soft-deleted/inactive rule does not).
+        boolean bookable = occurrences.existsByGuideIdAndDuringEndAtAfter(guideId, Instant.now());
+        boolean hasWeeklyHours = rules.existsByGuideIdAndActiveTrue(guideId);
+
+        return new ResolvedAvailabilityResponse(
+                ruleResponses, occurrenceResponses, dstGapDays, bookable, hasWeeklyHours);
     }
 
     /** {@code [windowStart, windowEnd)} intersection; a null bound is unbounded on that side. */

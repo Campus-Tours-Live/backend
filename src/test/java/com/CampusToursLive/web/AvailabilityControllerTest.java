@@ -111,7 +111,9 @@ class AvailabilityControllerTest {
                                 new ResolvedOccurrence(
                                         Instant.parse("2026-07-13T16:00:00Z"),
                                         Instant.parse("2026-07-13T17:00:00Z"))),
-                        List.of("2026-03-08"));
+                        List.of("2026-03-08"),
+                        true,
+                        true);
         when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
         when(availabilityRead.getResolvedAvailability(u, null, null)).thenReturn(resolved);
 
@@ -121,14 +123,32 @@ class AvailabilityControllerTest {
                 .andExpect(jsonPath("$.data.occurrences[0].startAt").value("2026-07-13T16:00:00Z"))
                 .andExpect(jsonPath("$.data.occurrences[0].endAt").value("2026-07-13T17:00:00Z"))
                 .andExpect(jsonPath("$.data.dstGapDays[0]").value("2026-03-08"))
+                .andExpect(jsonPath("$.data.bookable").value(true))
+                .andExpect(jsonPath("$.data.hasWeeklyHours").value(true))
                 .andExpect(jsonPath("$.meta.requestId").exists());
+    }
+
+    @Test
+    void getResolvedAvailability_carriesReadinessSignals_whenNotYetReady() throws Exception {
+        UserEntity u = user();
+        // Guide has occurrences to book but no active weekly rule -> bookable true, no weekly
+        // hours.
+        ResolvedAvailabilityResponse resolved =
+                new ResolvedAvailabilityResponse(List.of(), List.of(), List.of(), true, false);
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(availabilityRead.getResolvedAvailability(u, null, null)).thenReturn(resolved);
+
+        mvc.perform(get("/availability"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.bookable").value(true))
+                .andExpect(jsonPath("$.data.hasWeeklyHours").value(false));
     }
 
     @Test
     void getResolvedAvailability_passesWindowParams_whenProvided() throws Exception {
         UserEntity u = user();
         ResolvedAvailabilityResponse resolved =
-                new ResolvedAvailabilityResponse(List.of(), List.of(), List.of());
+                new ResolvedAvailabilityResponse(List.of(), List.of(), List.of(), false, false);
         when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
         when(availabilityRead.getResolvedAvailability(u, "2026-07-01", "2026-08-01"))
                 .thenReturn(resolved);

@@ -19,7 +19,10 @@ import com.CampusToursLive.web.dto.ResolvedAvailabilityResponse;
 import com.CampusToursLive.web.dto.ResolvedOccurrence;
 import jakarta.persistence.EntityManager;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
@@ -354,8 +357,108 @@ class AvailabilityReadServiceIntegrationTest {
     }
 
     // ---------------------------------------------------------------------
+    // Readiness signals -- bookable (occurrence) + hasWeeklyHours (rule) (B1).
+    //
+    // Four-quadrant matrix over the two independent derived booleans:
+    //   (1) ADDITIONAL-only future occurrence, no rule -> bookable true,  hasWeeklyHours false
+    //   (2) expired ACTIVE rule, zero future occurrence -> bookable false, hasWeeklyHours true
+    //   (3) active rule + future occurrence             -> bookable true,  hasWeeklyHours true
+    //   (4) brand-new guide (nothing)                   -> bookable false, hasWeeklyHours false
+    // ---------------------------------------------------------------------
+
+    @Test
+    void readiness_additionalOnlyOccurrence_bookableTrue_hasWeeklyHoursFalse() {
+        // An ADDITIONAL-style future occurrence with NO weekly rule behind it.
+        Instant start = Instant.now().plus(Duration.ofDays(2));
+        seedOccurrence(guideAId, start, start.plus(Duration.ofHours(1)));
+
+        ResolvedAvailabilityResponse s =
+                readService.getResolvedAvailability(actingUser(guideAUserId), null, null);
+
+        assertThat(s.bookable()).isTrue();
+        assertThat(s.hasWeeklyHours()).isFalse();
+    }
+
+    @Test
+    void readiness_expiredActiveRule_bookableFalse_hasWeeklyHoursTrue() {
+        // active = true (a soft-delete/enable flag) with effective_to in the PAST -> the rule still
+        // counts for hasWeeklyHours, but rematerialize yields no future occurrence, so NOT
+        // bookable.
+        // Must be an EXPIRED rule, never an inactive one (inactive would make hasWeeklyHours false
+        // and miss this quadrant).
+        seedRule(guideAId, true, FIXED_TODAY.minusDays(30), FIXED_TODAY.minusDays(1));
+
+        ResolvedAvailabilityResponse s =
+                readService.getResolvedAvailability(actingUser(guideAUserId), null, null);
+
+        assertThat(s.bookable()).isFalse();
+        assertThat(s.hasWeeklyHours()).isTrue();
+    }
+
+    @Test
+    void readiness_healthyActiveRuleWithFutureOccurrence_bothTrue() {
+        seedRule(guideAId, true, FIXED_TODAY.minusDays(1), FIXED_TODAY.plusDays(30));
+        Instant start = Instant.now().plus(Duration.ofDays(2));
+        seedOccurrence(guideAId, start, start.plus(Duration.ofHours(1)));
+
+        ResolvedAvailabilityResponse s =
+                readService.getResolvedAvailability(actingUser(guideAUserId), null, null);
+
+        assertThat(s.bookable()).isTrue();
+        assertThat(s.hasWeeklyHours()).isTrue();
+    }
+
+    @Test
+    void readiness_brandNewGuide_bothFalse() {
+        ResolvedAvailabilityResponse s =
+                readService.getResolvedAvailability(actingUser(guideAUserId), null, null);
+
+        assertThat(s.bookable()).isFalse();
+        assertThat(s.hasWeeklyHours()).isFalse();
+    }
+
+    // A past occurrence (already ended) must NOT count as bookable -- guards the "After now" edge.
+    @Test
+    void readiness_onlyPastOccurrence_bookableFalse() {
+        Instant end = Instant.now().minus(Duration.ofDays(1));
+        seedOccurrence(guideAId, end.minus(Duration.ofHours(1)), end);
+
+        ResolvedAvailabilityResponse s =
+                readService.getResolvedAvailability(actingUser(guideAUserId), null, null);
+
+        assertThat(s.bookable()).isFalse();
+        assertThat(s.hasWeeklyHours()).isFalse();
+    }
+
+    // ---------------------------------------------------------------------
     // Fixtures.
     // ---------------------------------------------------------------------
+
+    private GuideAvailabilityOccurrenceEntity seedOccurrence(
+            UUID guideId, Instant start, Instant end) {
+        GuideAvailabilityOccurrenceEntity o = new GuideAvailabilityOccurrenceEntity();
+        o.setId(UUID.randomUUID());
+        o.setGuideId(guideId);
+        o.setDuringStartAt(start);
+        o.setDuringEndAt(end);
+        o.setGeneratedAt(Instant.now());
+        return occurrences.save(o);
+    }
+
+    private GuideAvailabilityRuleEntity seedRule(
+            UUID guideId, boolean active, LocalDate effectiveFrom, LocalDate effectiveTo) {
+        GuideAvailabilityRuleEntity r = new GuideAvailabilityRuleEntity();
+        r.setId(UUID.randomUUID());
+        r.setGuideId(guideId);
+        r.setDayOfWeek((short) DOW_A);
+        r.setStartLocal(LocalTime.of(9, 0));
+        r.setWindowMin(60);
+        r.setTimezone(LA);
+        r.setEffectiveFrom(effectiveFrom);
+        r.setEffectiveTo(effectiveTo);
+        r.setActive(active);
+        return rules.save(r);
+    }
 
     private GuideProfileEntity seedGuide(String displayName) {
         UserEntity guideUser = users.save(user(displayName));
