@@ -1,6 +1,7 @@
 package com.CampusToursLive.domain.availability;
 
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.web.dto.OverrideMultiPreviewRequest;
 import com.CampusToursLive.web.dto.OverridePreviewRequest;
 import com.CampusToursLive.web.dto.OverridePreviewResponse;
 import com.CampusToursLive.web.dto.OverridePreviewResponse.DatePreview;
@@ -94,6 +95,143 @@ public class AvailabilityPreviewService {
         }
 
         return new OverridePreviewResponse(days, true, null);
+    }
+
+    /**
+     * Computes the per-date preview of applying a MULTI-WINDOW proposed override (CTL-54 v2.1 Task
+     * 4, multi-window) to {@code guideId}'s availability over {@code [dateFrom, dateTo]} inclusive.
+     * All windows of the same {@code kind} are applied TOGETHER and previewed as ONE combined
+     * result per date, so the frontend never has to merge N single-window previews (which would
+     * recompute overlap/trim/net itself). Persists nothing.
+     *
+     * <p>Every window is validated up front via the SAME {@link
+     * AvailabilityWriteService#requireOverrideValid} guard the single-window {@link #preview} and
+     * the real write use (same-day + 366-inclusive-date cap), BEFORE any {@link IntervalMath.Span}
+     * is built. {@code windows} must be non-empty (else 422).
+     *
+     * <p><b>Iterative trim/replace across the windows.</b> For each date the hypothetical set
+     * starts as the date's FULL existing exceptions; then each window in order is folded in with
+     * the SAME pure {@link AvailabilityWriteService#computeTrimmedSet} the real write uses, its
+     * result fed forward as the input for the next window -- so newest-wins holds ACROSS the
+     * windows too (a later window trims an earlier one), yielding the net non-overlapping
+     * hypothetical set with ALL windows applied. That set is projected into net-available windows
+     * exactly as an actual sequence of saves would produce.
+     */
+    @Transactional(readOnly = true)
+    public OverridePreviewResponse previewMulti(UUID guideId, OverrideMultiPreviewRequest req) {
+        if (req == null) {
+            throw new ValidationException("Request is required");
+        }
+        AvailabilityExceptionKind kind = parseKind(req.kind());
+        LocalDate dateFrom = parseLocalDate(req.dateFrom(), "dateFrom");
+        LocalDate dateTo = parseLocalDate(req.dateTo(), "dateTo");
+        if (dateTo.isBefore(dateFrom)) {
+            throw new ValidationException("dateTo must not be before dateFrom.");
+        }
+        List<OverrideMultiPreviewRequest.Window> windows = req.windows();
+        if (windows == null || windows.isEmpty()) {
+            throw new ValidationException("windows must not be empty");
+        }
+
+        // Validate EVERY window (same-day + 366 cap) BEFORE building any Span, then build all
+        // spans.
+        List<IntervalMath.Span> spans = new ArrayList<>();
+        for (OverrideMultiPreviewRequest.Window w : windows) {
+            LocalTime startLocal = parseLocalTime(w.startLocal());
+            int windowMin = requireWindowMin(w.windowMin());
+            AvailabilityWriteService.requireOverrideValid(startLocal, windowMin, dateFrom, dateTo);
+            spans.add(IntervalMath.spanOf(startLocal, windowMin));
+        }
+
+        List<GuideAvailabilityRuleEntity> guideRules = rules.findByGuideId(guideId);
+        String guideTimezone = resolveGuideTimezone(guideId, guideRules);
+
+        List<DatePreview> days = new ArrayList<>();
+        long spanDays = ChronoUnit.DAYS.between(dateFrom, dateTo);
+        for (long i = 0; i <= spanDays; i++) {
+            LocalDate date = dateFrom.plusDays(i);
+            days.add(previewMultiForDate(guideId, date, guideRules, guideTimezone, kind, spans));
+        }
+
+        return new OverridePreviewResponse(days, true, null);
+    }
+
+    /**
+     * Builds one date's MULTI-WINDOW preview: loads the date's FULL existing-exception list once,
+     * folds every window through the shared {@link AvailabilityWriteService#computeTrimmedSet} in
+     * order (each window's result feeding the next -- newest-wins across the windows), projects the
+     * final hypothetical set into net-available windows, and reports which existing exceptions ANY
+     * of the windows would trim.
+     */
+    private DatePreview previewMultiForDate(
+            UUID guideId,
+            LocalDate date,
+            List<GuideAvailabilityRuleEntity> guideRules,
+            String guideTimezone,
+            AvailabilityExceptionKind newKind,
+            List<IntervalMath.Span> spans) {
+        List<AvailabilityExceptionEntity> fullExisting =
+                exceptions.findByGuideIdAndExceptionDate(guideId, date);
+
+        List<AvailabilityWriteService.ExistingException> currentSet =
+                fullExisting.stream()
+                        .map(
+                                e ->
+                                        new AvailabilityWriteService.ExistingException(
+                                                e.getId(),
+                                                e.getKind(),
+                                                IntervalMath.spanOf(
+                                                        e.getStartLocal(), e.getWindowMin())))
+                        .toList();
+
+        // Fold every window into the hypothetical set in order: each window's trim/replace result
+        // becomes the input for the next, so a later window trims an earlier one (newest-wins
+        // across
+        // the windows too). computeTrimmedSet never inspects the id, so a fresh id is fine here.
+        List<AvailabilityWriteService.TrimmedException> hypotheticalSet = List.of();
+        for (IntervalMath.Span span : spans) {
+            hypotheticalSet = AvailabilityWriteService.computeTrimmedSet(currentSet, newKind, span);
+            currentSet =
+                    hypotheticalSet.stream()
+                            .map(
+                                    t ->
+                                            new AvailabilityWriteService.ExistingException(
+                                                    UUID.randomUUID(), t.kind(), t.span()))
+                            .toList();
+        }
+
+        List<AvailabilityExceptionEntity> hypotheticalEntities =
+                hypotheticalSet.stream().map(t -> transientException(guideId, date, t)).toList();
+
+        AvailabilityHorizon oneDayHorizon = new AvailabilityHorizon(date, date.plusDays(1));
+        ProjectionResult result =
+                AvailabilityProjection.project(
+                        guideRules, hypotheticalEntities, oneDayHorizon, guideTimezone);
+
+        List<ResolvedOccurrence> resultingWindows =
+                result.intervals().stream()
+                        .map(iv -> new ResolvedOccurrence(iv.startAt(), iv.endAt()))
+                        .toList();
+
+        List<TrimmedSegment> trimmed =
+                fullExisting.stream()
+                        .filter(
+                                e -> {
+                                    IntervalMath.Span existingSpan =
+                                            IntervalMath.spanOf(
+                                                    e.getStartLocal(), e.getWindowMin());
+                                    return spans.stream()
+                                            .anyMatch(s -> IntervalMath.overlaps(existingSpan, s));
+                                })
+                        .map(
+                                e ->
+                                        new TrimmedSegment(
+                                                e.getKind().name(),
+                                                e.getStartLocal().toString(),
+                                                e.getWindowMin()))
+                        .toList();
+
+        return new DatePreview(date.toString(), resultingWindows, trimmed);
     }
 
     /**

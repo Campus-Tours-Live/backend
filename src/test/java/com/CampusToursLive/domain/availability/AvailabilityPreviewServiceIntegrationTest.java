@@ -16,6 +16,8 @@ import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.AvailabilityExceptionRequest;
+import com.CampusToursLive.web.dto.OverrideMultiPreviewRequest;
+import com.CampusToursLive.web.dto.OverrideMultiPreviewRequest.Window;
 import com.CampusToursLive.web.dto.OverridePreviewRequest;
 import com.CampusToursLive.web.dto.OverridePreviewResponse;
 import com.CampusToursLive.web.dto.OverridePreviewResponse.DatePreview;
@@ -250,8 +252,178 @@ class AvailabilityPreviewServiceIntegrationTest {
     }
 
     // ---------------------------------------------------------------------
+    // Multi-window preview (POST) -- all windows applied together as one combined result.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void previewMulti_combinesMultipleAdditionalWindows() {
+        LocalDate d = FIXED_TODAY;
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(),
+                        d.toString(),
+                        "ADDITIONAL",
+                        List.of(new Window("09:00", 60), new Window("14:00", 60)));
+
+        OverridePreviewResponse preview = previewService.previewMulti(guideAId, req);
+
+        assertThat(preview.valid()).isTrue();
+        assertThat(preview.days()).hasSize(1);
+        DatePreview dp = preview.days().get(0);
+        assertThat(dp.resultingWindows())
+                .extracting(o -> o.startAt(), o -> o.endAt())
+                .containsExactlyInAnyOrder(
+                        tuple(
+                                d.atTime(9, 0).atZone(LA_ZONE).toInstant(),
+                                d.atTime(10, 0).atZone(LA_ZONE).toInstant()),
+                        tuple(
+                                d.atTime(14, 0).atZone(LA_ZONE).toInstant(),
+                                d.atTime(15, 0).atZone(LA_ZONE).toInstant()));
+    }
+
+    @Test
+    void previewMulti_blockWindowsTrimExistingAvailability() {
+        LocalDate d = FIXED_TODAY; // 2026-07-11 is a Saturday (dayOfWeek == 6).
+        // Weekly rule makes 09:00-12:00 available.
+        seedRule(guideAId, 6, "09:00", 180, LA_ZONE.getId(), d.minusDays(30), null);
+
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(),
+                        d.toString(),
+                        "UNAVAILABLE",
+                        List.of(new Window("09:30", 30), new Window("11:00", 30)));
+
+        OverridePreviewResponse preview = previewService.previewMulti(guideAId, req);
+
+        DatePreview dp = preview.days().get(0);
+        assertThat(dp.resultingWindows())
+                .extracting(o -> o.startAt(), o -> o.endAt())
+                .containsExactly(
+                        tuple(
+                                d.atTime(9, 0).atZone(LA_ZONE).toInstant(),
+                                d.atTime(9, 30).atZone(LA_ZONE).toInstant()),
+                        tuple(
+                                d.atTime(10, 0).atZone(LA_ZONE).toInstant(),
+                                d.atTime(11, 0).atZone(LA_ZONE).toInstant()),
+                        tuple(
+                                d.atTime(11, 30).atZone(LA_ZONE).toInstant(),
+                                d.atTime(12, 0).atZone(LA_ZONE).toInstant()));
+    }
+
+    @Test
+    void previewMulti_laterWindowTrimsEarlier_sameKind() {
+        LocalDate d = FIXED_TODAY;
+        // Two overlapping same-kind windows: 09:00-10:00 and 09:30-10:30. Applied together they
+        // collapse to the net 09:00-10:30 (no double-count, no overlap in the result).
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(),
+                        d.toString(),
+                        "ADDITIONAL",
+                        List.of(new Window("09:00", 60), new Window("09:30", 60)));
+
+        OverridePreviewResponse preview = previewService.previewMulti(guideAId, req);
+
+        DatePreview dp = preview.days().get(0);
+        assertThat(dp.resultingWindows())
+                .extracting(o -> o.startAt(), o -> o.endAt())
+                .containsExactly(
+                        tuple(
+                                d.atTime(9, 0).atZone(LA_ZONE).toInstant(),
+                                d.atTime(10, 30).atZone(LA_ZONE).toInstant()));
+    }
+
+    @Test
+    void previewMulti_persistsNothing() {
+        LocalDate d = FIXED_TODAY;
+        seedException(guideAId, d, AvailabilityExceptionKind.ADDITIONAL, "09:00", 60, null);
+        int rowCountBefore = exceptions.findByGuideIdAndExceptionDate(guideAId, d).size();
+
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(),
+                        d.toString(),
+                        "UNAVAILABLE",
+                        List.of(new Window("09:30", 30), new Window("11:00", 30)));
+
+        previewService.previewMulti(guideAId, req);
+
+        assertThat(exceptions.findByGuideIdAndExceptionDate(guideAId, d)).hasSize(rowCountBefore);
+    }
+
+    @Test
+    void previewMulti_rejectsEmptyWindows() {
+        LocalDate d = FIXED_TODAY;
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(), d.toString(), "UNAVAILABLE", List.of());
+
+        assertThatThrownBy(() -> previewService.previewMulti(guideAId, req))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void previewMulti_rejectsCrossMidnightWindow() {
+        LocalDate d = FIXED_TODAY;
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(),
+                        d.toString(),
+                        "UNAVAILABLE",
+                        // First window is fine; the second crosses midnight (22:00 + 240 > 1440).
+                        List.of(new Window("09:00", 60), new Window("22:00", 240)));
+
+        assertThatThrownBy(() -> previewService.previewMulti(guideAId, req))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void previewMulti_multiDay_returnsPerDate() {
+        LocalDate d0 = FIXED_TODAY;
+        LocalDate d1 = d0.plusDays(1);
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d0.toString(),
+                        d1.toString(),
+                        "ADDITIONAL",
+                        List.of(new Window("09:00", 60), new Window("14:00", 60)));
+
+        OverridePreviewResponse preview = previewService.previewMulti(guideAId, req);
+
+        assertThat(preview.days())
+                .extracting(DatePreview::date)
+                .containsExactly(d0.toString(), d1.toString());
+        // Each date has BOTH windows applied.
+        for (DatePreview dp : preview.days()) {
+            assertThat(dp.resultingWindows()).hasSize(2);
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // Fixtures.
     // ---------------------------------------------------------------------
+
+    private void seedRule(
+            UUID guideId,
+            int dayOfWeek,
+            String startLocal,
+            int windowMin,
+            String timezone,
+            LocalDate effectiveFrom,
+            LocalDate effectiveTo) {
+        GuideAvailabilityRuleEntity r = new GuideAvailabilityRuleEntity();
+        r.setId(UUID.randomUUID());
+        r.setGuideId(guideId);
+        r.setDayOfWeek((short) dayOfWeek);
+        r.setStartLocal(LocalTime.parse(startLocal));
+        r.setWindowMin(windowMin);
+        r.setTimezone(timezone);
+        r.setEffectiveFrom(effectiveFrom);
+        r.setEffectiveTo(effectiveTo);
+        r.setActive(true);
+        rules.save(r);
+    }
 
     private void seedException(
             UUID guideId,

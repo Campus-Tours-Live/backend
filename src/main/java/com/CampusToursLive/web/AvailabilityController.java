@@ -19,6 +19,7 @@ import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.AvailabilityWriteResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
+import com.CampusToursLive.web.dto.OverrideMultiPreviewRequest;
 import com.CampusToursLive.web.dto.OverridePreviewRequest;
 import com.CampusToursLive.web.dto.OverridePreviewResponse;
 import com.CampusToursLive.web.dto.Problem;
@@ -245,6 +246,78 @@ public class AvailabilityController {
         OverridePreviewRequest req =
                 new OverridePreviewRequest(dateFrom, dateTo, kind, startLocal, windowMin);
         return ApiEnvelope.of(availabilityPreview.preview(guideId, req));
+    }
+
+    /**
+     * Multi-window date-specific override dry-run/preview (CTL-54 v2.1 Task 4, multi-window): given
+     * a proposed override made of MULTIPLE time windows (multiple slots on one date or date range)
+     * that have NOT been saved, returns ONE combined resulting net-available window set per date --
+     * all windows applied together (newest-wins trim/replace across the windows too) exactly as an
+     * actual sequence of saves would produce -- plus which existing exception segments any window
+     * would trim, WITHOUT persisting anything. This is the additive companion to the single-window
+     * {@code GET /availability/preview}: the frontend sends the full {@code windows} list and the
+     * backend computes the net result, so the frontend never merges N single-window previews
+     * itself. A POST with a body is the clean way to carry {@code windows[]}. Owner-scoped like
+     * every other route here: the guide id is resolved from the caller's own guide profile, never
+     * the request.
+     */
+    @Operation(
+            summary = "Preview a multi-window date-specific override (dry-run, no persist)",
+            description =
+                    "Given a proposed date-specific override made of MULTIPLE time windows (multiple"
+                            + " slots on one date or date range) that have NOT been saved, returns"
+                            + " one combined resulting net-available window set per date -- all"
+                            + " windows applied together (newest-wins trim/replace across the"
+                            + " windows too) exactly as an actual sequence of saves would produce --"
+                            + " plus which existing exception segments any window would trim,"
+                            + " WITHOUT persisting anything. Read-only: nothing is written to the"
+                            + " database. Additive companion to the single-window GET"
+                            + " /availability/preview. Owner-scoped: the guide id is resolved from"
+                            + " the caller's own guide profile, never from the request.")
+    @ApiResponse(
+            responseCode = "200",
+            description =
+                    "The combined dry-run preview: per-date resulting net-available windows (all"
+                            + " windows applied together), trimmed exception segments, and validity.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.OVERRIDE_PREVIEW)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "dateFrom/dateTo/kind invalid, windows empty, or a window's startLocal/windowMin"
+                            + " missing or invalid, including a window crossing midnight (startLocal"
+                            + " + windowMin > 1440) or the dateFrom..dateTo range exceeding 366"
+                            + " days."
+                            + NO_GUIDE_PROFILE_422,
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @PostMapping("/preview")
+    public ApiEnvelope<OverridePreviewResponse> postOverrideMultiPreview(
+            @RequestBody OverrideMultiPreviewRequest req) {
+        var user = currentUser.requireRole(UserRole.GUIDE);
+        UUID guideId = requireGuideId(user);
+        return ApiEnvelope.of(availabilityPreview.previewMulti(guideId, req));
     }
 
     /** List the guide's recurring availability rules. */
