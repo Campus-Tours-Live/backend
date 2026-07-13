@@ -43,6 +43,12 @@ public class GuideHorizonClaimService {
     public void claimAndRematerialize(UUID guideId) {
         List<UUID> claimed = claims.claimForUpdateSkipLocked(guideId);
         if (!claimed.isEmpty()) {
+            // CTL-54 B5: rematerialize takes the per-guide advisory lock at the start of THIS
+            // transaction (it joins under REQUIRED propagation), so this per-guide horizon
+            // roll-forward is serialized against a concurrent guide-facing rematerialize for the
+            // same guide on the identical key — the two paths never interleave their wholesale
+            // delete+insert. (The SKIP LOCKED claim above only de-dupes competing scheduler
+            // instances; it does not cover the write-path race, which the advisory lock does.)
             availabilityService.rematerialize(guideId);
         }
     }

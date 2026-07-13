@@ -20,6 +20,7 @@ import com.CampusToursLive.domain.university.UniversityStatus;
 import com.CampusToursLive.domain.user.AccountStatus;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
+import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -70,6 +71,7 @@ class AvailabilityServiceIntegrationTest {
     @Autowired private UniversityRepository universities;
     @Autowired private TourOfferingRepository offerings;
     @Autowired private BookingRepository bookings;
+    @Autowired private EntityManager entityManager;
 
     private AvailabilityService service;
     private UUID guideId;
@@ -97,7 +99,13 @@ class AvailabilityServiceIntegrationTest {
 
         service =
                 new AvailabilityService(
-                        rules, exceptions, occurrences, dstNotices, settings, FIXED_CLOCK);
+                        rules,
+                        exceptions,
+                        occurrences,
+                        dstNotices,
+                        settings,
+                        entityManager,
+                        FIXED_CLOCK);
     }
 
     @Test

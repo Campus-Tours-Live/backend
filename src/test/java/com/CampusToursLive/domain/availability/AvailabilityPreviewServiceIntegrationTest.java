@@ -96,7 +96,13 @@ class AvailabilityPreviewServiceIntegrationTest {
 
         AvailabilityService availabilityService =
                 new AvailabilityService(
-                        rules, exceptions, occurrences, dstNotices, settingsRepo, FIXED_CLOCK);
+                        rules,
+                        exceptions,
+                        occurrences,
+                        dstNotices,
+                        settingsRepo,
+                        entityManager,
+                        FIXED_CLOCK);
         writeService =
                 new AvailabilityWriteService(
                         rules,

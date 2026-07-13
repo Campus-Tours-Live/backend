@@ -101,7 +101,13 @@ class AvailabilityReadServiceIntegrationTest {
     private AvailabilityWriteService writeServiceWithClock(Clock clock) {
         AvailabilityService availabilityService =
                 new AvailabilityService(
-                        rules, exceptions, occurrences, dstNotices, settingsRepo, clock);
+                        rules,
+                        exceptions,
+                        occurrences,
+                        dstNotices,
+                        settingsRepo,
+                        entityManager,
+                        clock);
         return new AvailabilityWriteService(
                 rules,
                 exceptions,

@@ -108,7 +108,13 @@ class AvailabilityWriteServiceIntegrationTest {
 
         availabilityService =
                 new AvailabilityService(
-                        rules, exceptions, occurrences, dstNotices, settingsRepo, FIXED_CLOCK);
+                        rules,
+                        exceptions,
+                        occurrences,
+                        dstNotices,
+                        settingsRepo,
+                        entityManager,
+                        FIXED_CLOCK);
         writeService =
                 new AvailabilityWriteService(
                         rules,
@@ -652,7 +658,13 @@ class AvailabilityWriteServiceIntegrationTest {
         Clock nextDayClock = Clock.offset(FIXED_CLOCK, java.time.Duration.ofDays(1));
         AvailabilityService nextDayAvailabilityService =
                 new AvailabilityService(
-                        rules, exceptions, occurrences, dstNotices, settingsRepo, nextDayClock);
+                        rules,
+                        exceptions,
+                        occurrences,
+                        dstNotices,
+                        settingsRepo,
+                        entityManager,
+                        nextDayClock);
         AvailabilityWriteService nextDayWriteService =
                 new AvailabilityWriteService(
                         rules,

@@ -1,5 +1,6 @@
 package com.CampusToursLive.domain.availability;
 
+import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -51,6 +52,7 @@ public class AvailabilityService {
     private final GuideAvailabilityOccurrenceRepository occurrences;
     private final GuideAvailabilityDstNoticeRepository dstNotices;
     private final GuideBookingSettingsRepository settings;
+    private final EntityManager entityManager;
     private final Clock clock;
 
     /**
@@ -62,8 +64,16 @@ public class AvailabilityService {
             AvailabilityExceptionRepository exceptions,
             GuideAvailabilityOccurrenceRepository occurrences,
             GuideAvailabilityDstNoticeRepository dstNotices,
-            GuideBookingSettingsRepository settings) {
-        this(rules, exceptions, occurrences, dstNotices, settings, Clock.systemUTC());
+            GuideBookingSettingsRepository settings,
+            EntityManager entityManager) {
+        this(
+                rules,
+                exceptions,
+                occurrences,
+                dstNotices,
+                settings,
+                entityManager,
+                Clock.systemUTC());
     }
 
     /** Test seam: inject a fixed {@link Clock} to pin "today" (and thus the horizon). */
@@ -73,12 +83,14 @@ public class AvailabilityService {
             GuideAvailabilityOccurrenceRepository occurrences,
             GuideAvailabilityDstNoticeRepository dstNotices,
             GuideBookingSettingsRepository settings,
+            EntityManager entityManager,
             Clock clock) {
         this.rules = rules;
         this.exceptions = exceptions;
         this.occurrences = occurrences;
         this.dstNotices = dstNotices;
         this.settings = settings;
+        this.entityManager = entityManager;
         this.clock = clock;
     }
 
@@ -88,6 +100,14 @@ public class AvailabilityService {
      */
     @Transactional
     public void rematerialize(UUID guideId) {
+        // CTL-54 B5: take the per-guide advisory lock BEFORE reading inputs or touching the derived
+        // cache, so two concurrent rematerializes for this guide (a guide-facing write racing the
+        // daily horizon roll-forward job, both of which funnel through this method) serialize
+        // instead of interleaving their wholesale delete+insert and tripping the no-overlap GIST
+        // exclusion constraint. The lock is transaction-scoped, so it auto-releases on commit or
+        // rollback with no explicit unlock.
+        lockGuide(guideId);
+
         LocalDate today = LocalDate.now(clock);
         AvailabilityHorizon horizon = new AvailabilityHorizon(today, today.plusDays(HORIZON_DAYS));
 
@@ -150,6 +170,31 @@ public class AvailabilityService {
                             + result.intervals(),
                     e);
         }
+    }
+
+    /**
+     * Acquires the per-guide, TRANSACTION-scoped PostgreSQL advisory lock (CTL-54 B5) that
+     * serializes concurrent {@link #rematerialize(UUID)} calls for one guide. The key is {@code
+     * hashtextextended(guideId::text, 0)} — a stable 64-bit hash of the guide's canonical UUID
+     * string. EVERY path that re-derives a guide's occurrences funnels through {@code
+     * rematerialize} (guide-facing rule/exception/settings writes AND the daily {@link
+     * OccurrenceHorizonJob} via {@link GuideHorizonClaimService#claimAndRematerialize(UUID)}), so
+     * they all acquire this same lock with an identical key and contend correctly.
+     *
+     * <p><b>Why {@code pg_advisory_xact_lock} (not the session-scoped variant):</b> it
+     * auto-releases when this transaction commits or rolls back — no explicit unlock, and no leaked
+     * lock if the work throws. Because {@code rematerialize} runs at Spring {@code REQUIRED}
+     * propagation (never {@code REQUIRES_NEW}), when a replace endpoint calls it inside the
+     * caller's transaction the lock is held across that whole transaction — the delete/insert and
+     * the rematerialize sit under one lock. Re-acquiring the same key twice in one transaction is a
+     * harmless no-op (PostgreSQL advisory locks are re-entrant within a session/transaction).
+     */
+    private void lockGuide(UUID guideId) {
+        entityManager
+                .createNativeQuery(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(CAST(:guideId AS text), 0))")
+                .setParameter("guideId", guideId.toString())
+                .getSingleResult();
     }
 
     /**

@@ -120,9 +120,10 @@ class OccurrenceHorizonJobTest {
                 GuideAvailabilityOccurrenceRepository occurrences,
                 GuideAvailabilityDstNoticeRepository dstNotices,
                 GuideBookingSettingsRepository settings,
+                jakarta.persistence.EntityManager entityManager,
                 MutableClock clock) {
             return new AvailabilityService(
-                    rules, exceptions, occurrences, dstNotices, settings, clock);
+                    rules, exceptions, occurrences, dstNotices, settings, entityManager, clock);
         }
     }
 
