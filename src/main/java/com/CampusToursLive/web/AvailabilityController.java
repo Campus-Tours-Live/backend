@@ -840,9 +840,12 @@ public class AvailabilityController {
                             + " advisory lock. An empty windows list clears that weekday's rules;"
                             + " every other weekday — and any inactive rule on this weekday — is left"
                             + " untouched. Each inserted rule takes the guide's settings timezone, an"
-                            + " open-ended effective range starting today, and is active. Validation"
-                            + " (same-day + no self-overlapping windows) runs BEFORE any mutation, and"
-                            + " any mid-transaction failure rolls the whole replace back, so prior"
+                            + " open-ended effective range starting today, and is active. Per-window"
+                            + " validation (same-day: a window may not cross midnight) runs BEFORE any"
+                            + " mutation; overlapping or touching windows are NOT rejected — they are"
+                            + " accepted and coalesced (merged) into disjoint maximal rules, the same"
+                            + " accept-and-resolve behaviour as single-rule create. Any"
+                            + " mid-transaction failure rolls the whole replace back, so prior"
                             + " rules are never partially lost. The write re-materializes the guide's"
                             + " occurrences in the same transaction and the response surfaces (CTL-54"
                             + " Task 7) any newly uncovered future CONFIRMED bookings; the edit still"
@@ -879,8 +882,10 @@ public class AvailabilityController {
             description =
                     "dayOfWeek missing or out of range (0-6), or a window's startLocal/windowMin"
                             + " missing or invalid, including a window crossing midnight (startLocal"
-                            + " + windowMin > 1440) or two windows overlapping each other. Rejected"
-                            + " BEFORE any mutation, so prior rules are left intact."
+                            + " + windowMin > 1440). Overlapping or touching windows are NOT a 422 —"
+                            + " they are coalesced (merged) into disjoint rules and the replace"
+                            + " succeeds (200). A validation failure is raised BEFORE any mutation, so"
+                            + " prior rules are left intact."
                             + NO_GUIDE_PROFILE_422,
             content =
                     @Content(

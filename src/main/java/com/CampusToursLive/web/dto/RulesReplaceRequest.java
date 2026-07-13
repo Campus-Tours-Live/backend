@@ -41,8 +41,10 @@ public record RulesReplaceRequest(
                                         description =
                                                 "The time windows this weekday should have after the"
                                                         + " replace. MAY be empty — an empty list"
-                                                        + " clears this weekday's rules. Windows must"
-                                                        + " not overlap each other.",
+                                                        + " clears this weekday's rules. Overlapping"
+                                                        + " or touching windows are accepted and"
+                                                        + " merged (coalesced) into disjoint rules,"
+                                                        + " not rejected.",
                                         requiredMode = Schema.RequiredMode.REQUIRED))
                 List<Window> windows) {
 
