@@ -302,10 +302,10 @@ public class AvailabilityController {
     @ApiResponse(
             responseCode = "422",
             description =
-                    "dateFrom/dateTo/kind invalid, windows empty, or a window's startLocal/windowMin"
-                            + " missing or invalid, including a window crossing midnight (startLocal"
-                            + " + windowMin > 1440) or the dateFrom..dateTo range exceeding 366"
-                            + " days."
+                    "dateFrom/dateTo/kind invalid, windows empty when replaceExisting is not true,"
+                            + " or a window's startLocal/windowMin missing or invalid, including a"
+                            + " window crossing midnight (startLocal + windowMin > 1440) or the"
+                            + " dateFrom..dateTo range exceeding 366 days."
                             + NO_GUIDE_PROFILE_422,
             content =
                     @Content(

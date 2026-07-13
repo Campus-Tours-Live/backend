@@ -107,15 +107,22 @@ public class AvailabilityPreviewService {
      * <p>Every window is validated up front via the SAME {@link
      * AvailabilityWriteService#requireOverrideValid} guard the single-window {@link #preview} and
      * the real write use (same-day + 366-inclusive-date cap), BEFORE any {@link IntervalMath.Span}
-     * is built. {@code windows} must be non-empty (else 422).
+     * is built. {@code windows} must be non-empty (else 422) UNLESS {@code replaceExisting} is
+     * true, in which case an empty list is allowed and means "clear this kind for the day".
+     *
+     * <p><b>replaceExisting.</b> When absent/false (default) the windows are folded on top of the
+     * date's FULL existing exceptions (unchanged behavior). When true, the date's same-kind
+     * existing exceptions are DROPPED before folding (other-kind kept), so the dry-run shows the
+     * day as if this kind were REPLACED by exactly {@code windows} -- making removals/edits (and
+     * the empty = cleared case) render correctly.
      *
      * <p><b>Iterative trim/replace across the windows.</b> For each date the hypothetical set
-     * starts as the date's FULL existing exceptions; then each window in order is folded in with
-     * the SAME pure {@link AvailabilityWriteService#computeTrimmedSet} the real write uses, its
-     * result fed forward as the input for the next window -- so newest-wins holds ACROSS the
-     * windows too (a later window trims an earlier one), yielding the net non-overlapping
-     * hypothetical set with ALL windows applied. That set is projected into net-available windows
-     * exactly as an actual sequence of saves would produce.
+     * starts as the seeded existing exceptions; then each window in order is folded in with the
+     * SAME pure {@link AvailabilityWriteService#computeTrimmedSet} the real write uses, its result
+     * fed forward as the input for the next window -- so newest-wins holds ACROSS the windows too
+     * (a later window trims an earlier one), yielding the net non-overlapping hypothetical set with
+     * ALL windows applied. That set is projected into net-available windows exactly as an actual
+     * sequence of saves would produce.
      */
     @Transactional(readOnly = true)
     public OverridePreviewResponse previewMulti(UUID guideId, OverrideMultiPreviewRequest req) {
@@ -128,13 +135,17 @@ public class AvailabilityPreviewService {
         if (dateTo.isBefore(dateFrom)) {
             throw new ValidationException("dateTo must not be before dateFrom.");
         }
-        List<OverrideMultiPreviewRequest.Window> windows = req.windows();
-        if (windows == null || windows.isEmpty()) {
+        boolean replaceExisting = Boolean.TRUE.equals(req.replaceExisting());
+        List<OverrideMultiPreviewRequest.Window> windows =
+                req.windows() == null ? List.of() : req.windows();
+        // Empty windows are allowed ONLY in replace mode (the "clear this kind for the day" case).
+        // In the default on-top mode, windows must still be non-empty.
+        if (windows.isEmpty() && !replaceExisting) {
             throw new ValidationException("windows must not be empty");
         }
 
-        // Validate EVERY window (same-day + 366 cap) BEFORE building any Span, then build all
-        // spans.
+        // Validate EVERY window that IS present (same-day + 366 cap) BEFORE building any Span, then
+        // build all spans.
         List<IntervalMath.Span> spans = new ArrayList<>();
         for (OverrideMultiPreviewRequest.Window w : windows) {
             LocalTime startLocal = parseLocalTime(w.startLocal());
@@ -150,7 +161,15 @@ public class AvailabilityPreviewService {
         long spanDays = ChronoUnit.DAYS.between(dateFrom, dateTo);
         for (long i = 0; i <= spanDays; i++) {
             LocalDate date = dateFrom.plusDays(i);
-            days.add(previewMultiForDate(guideId, date, guideRules, guideTimezone, kind, spans));
+            days.add(
+                    previewMultiForDate(
+                            guideId,
+                            date,
+                            guideRules,
+                            guideTimezone,
+                            kind,
+                            spans,
+                            replaceExisting));
         }
 
         return new OverridePreviewResponse(days, true, null);
@@ -169,12 +188,23 @@ public class AvailabilityPreviewService {
             List<GuideAvailabilityRuleEntity> guideRules,
             String guideTimezone,
             AvailabilityExceptionKind newKind,
-            List<IntervalMath.Span> spans) {
+            List<IntervalMath.Span> spans,
+            boolean replaceExisting) {
         List<AvailabilityExceptionEntity> fullExisting =
                 exceptions.findByGuideIdAndExceptionDate(guideId, date);
 
+        // Seed the hypothetical set. Default (on-top) mode seeds ALL existing exceptions. Replace
+        // mode DROPS the same-kind existing (they are being replaced by exactly `spans`) and KEEPS
+        // the other-kind existing, which the new windows then trim via the normal newest-wins model
+        // -- so removals/edits render correctly and empty `spans` clears just this kind for the
+        // day.
+        List<AvailabilityExceptionEntity> seedExisting =
+                replaceExisting
+                        ? fullExisting.stream().filter(e -> e.getKind() != newKind).toList()
+                        : fullExisting;
+
         List<AvailabilityWriteService.ExistingException> currentSet =
-                fullExisting.stream()
+                seedExisting.stream()
                         .map(
                                 e ->
                                         new AvailabilityWriteService.ExistingException(
@@ -186,9 +216,13 @@ public class AvailabilityPreviewService {
 
         // Fold every window into the hypothetical set in order: each window's trim/replace result
         // becomes the input for the next, so a later window trims an earlier one (newest-wins
-        // across
-        // the windows too). computeTrimmedSet never inspects the id, so a fresh id is fine here.
-        List<AvailabilityWriteService.TrimmedException> hypotheticalSet = List.of();
+        // across the windows too). computeTrimmedSet never inspects the id, so a fresh id is fine
+        // here. Seed the result from `currentSet` so that with NO windows (replace-mode "clear this
+        // kind" case) the kept other-kind exceptions still project.
+        List<AvailabilityWriteService.TrimmedException> hypotheticalSet =
+                currentSet.stream()
+                        .map(e -> new AvailabilityWriteService.TrimmedException(e.kind(), e.span()))
+                        .toList();
         for (IntervalMath.Span span : spans) {
             hypotheticalSet = AvailabilityWriteService.computeTrimmedSet(currentSet, newKind, span);
             currentSet =

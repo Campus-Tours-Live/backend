@@ -47,11 +47,36 @@ public record OverrideMultiPreviewRequest(
                                 @Schema(
                                         description =
                                                 "The time windows to apply together on each date"
-                                                        + " in the range; must be non-empty. Later"
-                                                        + " windows trim earlier overlapping ones"
-                                                        + " (newest-wins).",
+                                                        + " in the range. Must be non-empty UNLESS"
+                                                        + " replaceExisting is true, in which case an"
+                                                        + " empty list clears this kind for the day."
+                                                        + " Later windows trim earlier overlapping"
+                                                        + " ones (newest-wins).",
                                         requiredMode = Schema.RequiredMode.REQUIRED))
-                List<Window> windows) {
+                List<Window> windows,
+        @Schema(
+                        description =
+                                "When true, preview the day as if this kind's EXISTING exceptions"
+                                        + " were REPLACED by exactly these windows (same-kind"
+                                        + " existing dropped first, other-kind preserved) -- so"
+                                        + " removals/edits render correctly and an empty windows"
+                                        + " list clears this kind for the day. When false or absent"
+                                        + " (default), the windows are applied ON TOP of ALL"
+                                        + " existing exceptions (windows must then be non-empty).",
+                        example = "true",
+                        defaultValue = "false",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                Boolean replaceExisting) {
+
+    /**
+     * Backward-compatible constructor for callers that predate {@code replaceExisting}: defaults it
+     * to {@code false} (windows applied on top of ALL existing exceptions -- the original
+     * behavior).
+     */
+    public OverrideMultiPreviewRequest(
+            String dateFrom, String dateTo, String kind, List<Window> windows) {
+        this(dateFrom, dateTo, kind, windows, false);
+    }
 
     /**
      * One proposed time window (a wall-clock start plus a length in minutes) within a {@link

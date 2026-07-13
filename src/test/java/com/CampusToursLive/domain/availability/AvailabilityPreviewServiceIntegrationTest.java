@@ -401,6 +401,141 @@ class AvailabilityPreviewServiceIntegrationTest {
     }
 
     // ---------------------------------------------------------------------
+    // Multi-window preview -- replace-existing-kind mode (replaceExisting=true).
+    // ---------------------------------------------------------------------
+
+    @Test
+    void previewMulti_replaceExisting_dropsSameKindBeforeApplying() {
+        LocalDate d = FIXED_TODAY; // Saturday (dayOfWeek == 6).
+        // Weekly rule makes 09:00-12:00 available.
+        seedRule(guideAId, 6, "09:00", 180, LA_ZONE.getId(), d.minusDays(30), null);
+        // Existing same-kind block that replace mode must DROP before applying the new windows.
+        seedException(guideAId, d, AvailabilityExceptionKind.UNAVAILABLE, "09:00", 60, null);
+        int rowCountBefore = exceptions.findByGuideIdAndExceptionDate(guideAId, d).size();
+
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(),
+                        d.toString(),
+                        "UNAVAILABLE",
+                        List.of(new Window("10:00", 60)),
+                        true);
+
+        OverridePreviewResponse preview = previewService.previewMulti(guideAId, req);
+
+        DatePreview dp = preview.days().get(0);
+        // Only the NEW 10:00-11:00 block applies; the dropped old 09:00-10:00 block is available
+        // again -- so 09:00-10:00 and 11:00-12:00 are open (NOT 11:00-12:00 alone as on-top mode).
+        assertThat(dp.resultingWindows())
+                .extracting(o -> o.startAt(), o -> o.endAt())
+                .containsExactly(
+                        tuple(
+                                d.atTime(9, 0).atZone(LA_ZONE).toInstant(),
+                                d.atTime(10, 0).atZone(LA_ZONE).toInstant()),
+                        tuple(
+                                d.atTime(11, 0).atZone(LA_ZONE).toInstant(),
+                                d.atTime(12, 0).atZone(LA_ZONE).toInstant()));
+        // Persists nothing.
+        assertThat(exceptions.findByGuideIdAndExceptionDate(guideAId, d)).hasSize(rowCountBefore);
+    }
+
+    @Test
+    void previewMulti_replaceExisting_emptyWindows_clearsThatKind() {
+        LocalDate d = FIXED_TODAY; // Saturday.
+        // Weekly rule makes 09:00-12:00 available; an existing UNAVAILABLE block carves a hole.
+        seedRule(guideAId, 6, "09:00", 180, LA_ZONE.getId(), d.minusDays(30), null);
+        seedException(guideAId, d, AvailabilityExceptionKind.UNAVAILABLE, "10:00", 60, null);
+
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(), d.toString(), "UNAVAILABLE", List.of(), true);
+
+        // No 422 for empty windows in replace mode; the same-kind block is cleared for the day.
+        OverridePreviewResponse preview = previewService.previewMulti(guideAId, req);
+
+        DatePreview dp = preview.days().get(0);
+        assertThat(dp.resultingWindows())
+                .extracting(o -> o.startAt(), o -> o.endAt())
+                .containsExactly(
+                        tuple(
+                                d.atTime(9, 0).atZone(LA_ZONE).toInstant(),
+                                d.atTime(12, 0).atZone(LA_ZONE).toInstant()));
+    }
+
+    @Test
+    void previewMulti_replaceExisting_keepsOtherKind() {
+        LocalDate d = FIXED_TODAY; // Saturday.
+        // Base availability 09:00-12:00 via a rule; an other-kind ADDITIONAL block adds
+        // 14:00-15:00.
+        seedRule(guideAId, 6, "09:00", 180, LA_ZONE.getId(), d.minusDays(30), null);
+        seedException(guideAId, d, AvailabilityExceptionKind.ADDITIONAL, "14:00", 60, null);
+        // Same-kind UNAVAILABLE block that replace mode drops.
+        seedException(guideAId, d, AvailabilityExceptionKind.UNAVAILABLE, "09:00", 60, null);
+
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(),
+                        d.toString(),
+                        "UNAVAILABLE",
+                        List.of(new Window("11:00", 60)),
+                        true);
+
+        OverridePreviewResponse preview = previewService.previewMulti(guideAId, req);
+
+        DatePreview dp = preview.days().get(0);
+        // Same-kind replaced (old 09:00-10:00 block gone, new 11:00-12:00 applied) -> rule leaves
+        // 09:00-11:00 open; the OTHER-kind ADDITIONAL 14:00-15:00 is preserved.
+        assertThat(dp.resultingWindows())
+                .extracting(o -> o.startAt(), o -> o.endAt())
+                .containsExactlyInAnyOrder(
+                        tuple(
+                                d.atTime(9, 0).atZone(LA_ZONE).toInstant(),
+                                d.atTime(11, 0).atZone(LA_ZONE).toInstant()),
+                        tuple(
+                                d.atTime(14, 0).atZone(LA_ZONE).toInstant(),
+                                d.atTime(15, 0).atZone(LA_ZONE).toInstant()));
+    }
+
+    @Test
+    void previewMulti_default_appliesOnTop_unchanged() {
+        LocalDate d = FIXED_TODAY; // Saturday.
+        seedRule(guideAId, 6, "09:00", 180, LA_ZONE.getId(), d.minusDays(30), null);
+        // Existing same-kind block; default (on-top) mode must KEEP it and stack the new window.
+        seedException(guideAId, d, AvailabilityExceptionKind.UNAVAILABLE, "09:00", 60, null);
+
+        // replaceExisting absent (4-arg ctor) -> defaults false -> on-top.
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(),
+                        d.toString(),
+                        "UNAVAILABLE",
+                        List.of(new Window("10:00", 60)));
+
+        OverridePreviewResponse preview = previewService.previewMulti(guideAId, req);
+
+        DatePreview dp = preview.days().get(0);
+        // BOTH blocks apply on top: 09:00-11:00 blocked, only 11:00-12:00 open.
+        assertThat(dp.resultingWindows())
+                .extracting(o -> o.startAt(), o -> o.endAt())
+                .containsExactly(
+                        tuple(
+                                d.atTime(11, 0).atZone(LA_ZONE).toInstant(),
+                                d.atTime(12, 0).atZone(LA_ZONE).toInstant()));
+    }
+
+    @Test
+    void previewMulti_rejectsEmptyWindows_whenNotReplaceMode() {
+        LocalDate d = FIXED_TODAY;
+        // Explicit replaceExisting=false with empty windows -> still 422.
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(), d.toString(), "UNAVAILABLE", List.of(), false);
+
+        assertThatThrownBy(() -> previewService.previewMulti(guideAId, req))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    // ---------------------------------------------------------------------
     // Fixtures.
     // ---------------------------------------------------------------------
 
