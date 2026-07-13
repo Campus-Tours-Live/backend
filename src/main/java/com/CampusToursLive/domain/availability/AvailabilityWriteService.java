@@ -17,6 +17,7 @@ import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
 import com.CampusToursLive.web.dto.OverrideReplaceRequest;
+import com.CampusToursLive.web.dto.RulesReplaceRequest;
 import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.time.DateTimeException;
@@ -481,6 +482,122 @@ public class AvailabilityWriteService {
         return exceptions.findByGuideIdAndExceptionDate(guideId, date).stream()
                 .map(AvailabilityWriteService::toExceptionResponse)
                 .toList();
+    }
+
+    /**
+     * ATOMIC weekly-rule replace (CTL-54 v2.1 remediation B2, Task 5): replaces the guide's ACTIVE
+     * recurring rules for {@code dayOfWeek} with exactly {@code windows}, in ONE transaction under
+     * the per-guide advisory lock. This is the weekly counterpart to {@link #replaceOverrides} (the
+     * single-day exception replace). An EMPTY {@code windows} list is allowed and CLEARS that
+     * weekday's rules; every other weekday — and any INACTIVE (soft-deleted) rule on this weekday —
+     * is left untouched. Every inserted rule takes the guide's settings timezone (the read-only-tz
+     * invariant), an open-ended effective range starting today, and is active. Returns the
+     * weekday's resulting ACTIVE rules.
+     *
+     * <p><b>Entry guard BEFORE any mutation (B2 data-loss guard).</b> Every present window's same-
+     * day guard ({@link #validateSameDay}) AND the weekly same-day-of-week overlap invariant
+     * ({@link #validateRuleWindowsNoOverlap}) run FIRST, before a single row is deleted — so an
+     * invalid window (crossing midnight) or a self-overlapping pair of windows throws a {@link
+     * ValidationException} while the prior rules are still fully intact, never after a partial
+     * delete.
+     *
+     * <p><b>Reused overlap invariant, not re-invented.</b> The overlap check reuses the same {@link
+     * IntervalMath#overlaps} primitive (and the identical "overlaps another range on &lt;day&gt;"
+     * message) that {@link #validateNoOverlap} enforces between rules. {@code validateNoOverlap}
+     * itself cannot be called for these windows: it reads the DB and SKIPS same-coalesce-group
+     * siblings (it would MERGE, not reject, same-group overlaps), whereas an atomic "replace this
+     * weekday with exactly these windows" contract must reject self-contradictory input up front so
+     * the stored set is exactly what was asked for. Touching bounds (e.g. 09:00-10:00 +
+     * 10:00-11:00) do not overlap and are kept as separate rules.
+     *
+     * <p><b>One transaction under the advisory lock.</b> {@link #lockGuide} is taken before the
+     * delete/insert, and {@link AvailabilityService#rematerialize} runs at Spring {@code REQUIRED}
+     * propagation so it JOINS this transaction (re-acquiring the SAME per-guide xact-advisory key
+     * is a harmless re-entrant no-op). Because delete + insert + rematerialize share one
+     * transaction, ANY mid-transaction failure rolls the WHOLE thing back — the prior rules are
+     * never lost.
+     */
+    @Transactional
+    public List<AvailabilityRuleResponse> replaceRules(UUID guideId, RulesReplaceRequest req) {
+        if (req == null) {
+            throw new ValidationException("Request body is required");
+        }
+        if (req.dayOfWeek() == null || req.dayOfWeek() < 0 || req.dayOfWeek() > 6) {
+            throw new ValidationException("dayOfWeek must be between 0 (Sunday) and 6 (Saturday)");
+        }
+        short dayOfWeek = req.dayOfWeek().shortValue();
+        List<RulesReplaceRequest.Window> windows =
+                req.windows() == null ? List.of() : req.windows();
+
+        // ENTRY GUARD, BEFORE ANY MUTATION: per-window same-day guard (validateSameDay runs before
+        // IntervalMath.spanOf, which would otherwise throw a raw IllegalArgumentException on a
+        // cross-midnight window), then the weekly overlap invariant across the request windows.
+        // Building the spans here (before the lock/delete) guarantees a bad or self-overlapping
+        // window throws while the prior rules are still fully intact.
+        List<IntervalMath.Span> spans = new ArrayList<>();
+        for (RulesReplaceRequest.Window w : windows) {
+            LocalTime startLocal = parseLocalTime(w.startLocal());
+            if (w.windowMin() == null || w.windowMin() <= 0) {
+                throw new ValidationException("windowMin must be greater than 0");
+            }
+            validateSameDay(startLocal, w.windowMin());
+            spans.add(IntervalMath.spanOf(startLocal, w.windowMin()));
+        }
+        validateRuleWindowsNoOverlap(spans, dayOfWeek);
+
+        // Per-guide advisory lock (CTL-54 B5) — held across delete + insert + rematerialize, all in
+        // this one transaction. rematerialize re-acquires the same xact-scoped key (re-entrant).
+        lockGuide(guideId);
+
+        // Ensure a settings row exists so every inserted rule (and rematerialize) has a concrete
+        // tz.
+        GuideBookingSettingsEntity settings = getOrCreateSettings(guideId);
+
+        // Delete the weekday's ACTIVE rules (inactive/soft-deleted rules on this weekday are left
+        // untouched, matching validateNoOverlap's deactivate-preserve contract).
+        rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, dayOfWeek).forEach(rules::delete);
+
+        // Insert the new windows as active rules for this weekday.
+        LocalDate effectiveFrom = LocalDate.now(clock);
+        for (IntervalMath.Span span : spans) {
+            GuideAvailabilityRuleEntity r = new GuideAvailabilityRuleEntity();
+            r.setId(UUID.randomUUID());
+            r.setGuideId(guideId);
+            r.setDayOfWeek(dayOfWeek);
+            r.setStartLocal(LocalTime.ofSecondOfDay(span.startMin() * 60L));
+            r.setWindowMin(span.endMin() - span.startMin());
+            // timezone is server-set = the guide's settings timezone (read-only-tz invariant).
+            r.setTimezone(settings.getTimezone());
+            r.setEffectiveFrom(effectiveFrom);
+            r.setEffectiveTo(null);
+            r.setActive(true);
+            rules.save(r);
+        }
+
+        availabilityService.rematerialize(guideId);
+        return rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, dayOfWeek).stream()
+                .map(AvailabilityWriteService::toRuleResponse)
+                .toList();
+    }
+
+    /**
+     * The weekly same-day-of-week overlap invariant for an atomic {@link #replaceRules} — no two of
+     * the request's windows may overlap. Reuses the SAME {@link IntervalMath#overlaps} primitive
+     * and the SAME "overlaps another range" message {@link #validateNoOverlap} uses between rules;
+     * touching bounds do not overlap and are allowed.
+     */
+    private static void validateRuleWindowsNoOverlap(
+            List<IntervalMath.Span> spans, short dayOfWeek) {
+        for (int i = 0; i < spans.size(); i++) {
+            for (int j = i + 1; j < spans.size(); j++) {
+                if (IntervalMath.overlaps(spans.get(i), spans.get(j))) {
+                    throw new ValidationException(
+                            "This time range overlaps another range on "
+                                    + dayLabel(dayOfWeek)
+                                    + ".");
+                }
+            }
+        }
     }
 
     /**

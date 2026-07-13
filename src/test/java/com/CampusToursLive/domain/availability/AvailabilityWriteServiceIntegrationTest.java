@@ -30,6 +30,7 @@ import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
 import com.CampusToursLive.web.dto.OverrideReplaceRequest;
+import com.CampusToursLive.web.dto.RulesReplaceRequest;
 import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.time.Instant;
@@ -1145,6 +1146,122 @@ class AvailabilityWriteServiceIntegrationTest {
         assertThat(stored).hasSize(1);
         assertThat(stored.get(0).getKind()).isEqualTo(AvailabilityExceptionKind.UNAVAILABLE);
         assertThat(stored.get(0).getStartLocal().toString()).isEqualTo("09:00");
+    }
+
+    // ---------------------------------------------------------------------
+    // CTL-54 v2.1 remediation B2 — atomic weekly-rule replace (Task 5).
+    // ---------------------------------------------------------------------
+
+    @Test
+    void replaceRules_replacesThatWeekday_leavesOtherWeekdaysUntouched() {
+        short otherDow = (short) ((TODAY_DOW + 1) % 7);
+        // A rule on TODAY_DOW that must be REPLACED, and one on a DIFFERENT weekday that must stay.
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null));
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest((int) otherDow, "08:00", 60, null, null, null));
+
+        RulesReplaceRequest req =
+                new RulesReplaceRequest(
+                        TODAY_DOW, List.of(new RulesReplaceRequest.Window("14:00", 60)));
+
+        List<AvailabilityRuleResponse> result = writeService.replaceRules(guideAId, req);
+
+        // TODAY_DOW now has exactly the new 14:00 window; the prior 09:00 is gone.
+        assertThat(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) TODAY_DOW))
+                .extracting(
+                        r -> r.getStartLocal().toString(),
+                        GuideAvailabilityRuleEntity::getWindowMin)
+                .containsExactly(tuple("14:00", 60));
+        // The OTHER weekday's rule is physically untouched.
+        assertThat(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, otherDow))
+                .extracting(
+                        r -> r.getStartLocal().toString(),
+                        GuideAvailabilityRuleEntity::getWindowMin)
+                .containsExactly(tuple("08:00", 60));
+
+        // The returned payload mirrors the weekday's resulting rules.
+        assertThat(result)
+                .extracting(
+                        AvailabilityRuleResponse::dayOfWeek, AvailabilityRuleResponse::startLocal)
+                .containsExactly(tuple((int) TODAY_DOW, "14:00"));
+
+        // rematerialize ran in the same transaction -> the guide has occurrences again.
+        assertThat(occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId)).isNotEmpty();
+    }
+
+    @Test
+    void replaceRules_emptyWindows_clearsThatWeekday_keepsOtherWeekdays() {
+        short otherDow = (short) ((TODAY_DOW + 1) % 7);
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null));
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest((int) otherDow, "08:00", 60, null, null, null));
+
+        // Empty windows == clear this weekday's rules (allowed).
+        RulesReplaceRequest req = new RulesReplaceRequest(TODAY_DOW, List.of());
+
+        List<AvailabilityRuleResponse> result = writeService.replaceRules(guideAId, req);
+
+        assertThat(result).isEmpty();
+        assertThat(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) TODAY_DOW))
+                .isEmpty();
+        // The other weekday survives.
+        assertThat(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, otherDow))
+                .extracting(r -> r.getStartLocal().toString())
+                .containsExactly("08:00");
+    }
+
+    @Test
+    void replaceRules_invalidWindow_rejectedBeforeAnyMutation() {
+        // (c1) An invalid (cross-midnight) window must 422 at the entry guard, BEFORE any delete —
+        // so the prior rule for that weekday is still fully intact because nothing was deleted.
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null));
+
+        RulesReplaceRequest bad =
+                new RulesReplaceRequest(
+                        TODAY_DOW,
+                        List.of(new RulesReplaceRequest.Window("23:59", 120))); // crosses midnight
+
+        assertThatThrownBy(() -> writeService.replaceRules(guideAId, bad))
+                .isInstanceOf(ValidationException.class);
+
+        // Untouched — nothing was deleted because validation ran first.
+        assertThat(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) TODAY_DOW))
+                .extracting(r -> r.getStartLocal().toString())
+                .containsExactly("09:00");
+    }
+
+    @Test
+    void replaceRules_overlappingWindows_rejectedBeforeAnyMutation() {
+        // (c1) Two windows in the request that overlap each other must 422 at the entry guard,
+        // BEFORE any delete — reusing the weekly same-day-of-week overlap invariant. The prior rule
+        // survives because nothing was deleted.
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null));
+
+        RulesReplaceRequest overlapping =
+                new RulesReplaceRequest(
+                        TODAY_DOW,
+                        List.of(
+                                new RulesReplaceRequest.Window("10:00", 120), // 10:00-12:00
+                                new RulesReplaceRequest.Window(
+                                        "11:00", 60))); // 11:00-12:00 overlaps
+
+        assertThatThrownBy(() -> writeService.replaceRules(guideAId, overlapping))
+                .isInstanceOf(ValidationException.class);
+
+        // Untouched — nothing was deleted because validation ran first.
+        assertThat(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) TODAY_DOW))
+                .extracting(r -> r.getStartLocal().toString())
+                .containsExactly("09:00");
     }
 
     // ---------------------------------------------------------------------

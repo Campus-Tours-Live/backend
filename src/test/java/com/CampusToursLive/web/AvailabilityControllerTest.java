@@ -696,6 +696,69 @@ class AvailabilityControllerTest {
     }
 
     // ---------------------------------------------------------------------
+    // Rules replace (CTL-54 v2.1 remediation B2, Task 5).
+    // ---------------------------------------------------------------------
+
+    @Test
+    void replaceRules_returnsEnvelope_whenValid() throws Exception {
+        UserEntity u = user();
+        UUID guideId = UUID.randomUUID();
+        UUID id = UUID.randomUUID();
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(guideId);
+        guide.setUserId(u.getId());
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(guides.findByUserId(u.getId())).thenReturn(Optional.of(guide));
+        when(availability.replaceRules(eq(guideId), any())).thenReturn(List.of(rule(id)));
+
+        mvc.perform(
+                        post("/availability/rules/replace")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        "{\"dayOfWeek\":1,"
+                                                + "\"windows\":[{\"startLocal\":\"09:00\",\"windowMin\":60}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").value(id.toString()))
+                .andExpect(jsonPath("$.affectedBookings").isArray())
+                .andExpect(jsonPath("$.affectedBookings").isEmpty())
+                .andExpect(jsonPath("$.meta.requestId").exists());
+    }
+
+    @Test
+    void replaceRules_422_whenServiceRejectsCrossMidnightWindow() throws Exception {
+        UserEntity u = user();
+        UUID guideId = UUID.randomUUID();
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(guideId);
+        guide.setUserId(u.getId());
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(guides.findByUserId(u.getId())).thenReturn(Optional.of(guide));
+        when(availability.replaceRules(eq(guideId), any()))
+                .thenThrow(new ValidationException("This time range cannot cross midnight."));
+
+        mvc.perform(
+                        post("/availability/rules/replace")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        "{\"dayOfWeek\":1,"
+                                                + "\"windows\":[{\"startLocal\":\"23:59\",\"windowMin\":120}]}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422));
+    }
+
+    @Test
+    void replaceRules_403_whenNonGuideCaller() throws Exception {
+        when(currentUser.requireRole(UserRole.GUIDE))
+                .thenThrow(new ForbiddenException("Missing required role: GUIDE"));
+
+        mvc.perform(
+                        post("/availability/rules/replace")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"dayOfWeek\":1,\"windows\":[]}"))
+                .andExpect(status().isForbidden());
+    }
+
+    // ---------------------------------------------------------------------
     // Settings.
     // ---------------------------------------------------------------------
 

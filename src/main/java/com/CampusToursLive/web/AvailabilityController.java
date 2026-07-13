@@ -25,6 +25,7 @@ import com.CampusToursLive.web.dto.OverridePreviewResponse;
 import com.CampusToursLive.web.dto.OverrideReplaceRequest;
 import com.CampusToursLive.web.dto.Problem;
 import com.CampusToursLive.web.dto.ResolvedAvailabilityResponse;
+import com.CampusToursLive.web.dto.RulesReplaceRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -821,6 +822,77 @@ public class AvailabilityController {
         var user = currentUser.requireRole(UserRole.GUIDE);
         UUID guideId = requireGuideId(user);
         List<AvailabilityExceptionResponse> data = availability.replaceOverrides(guideId, req);
+        return AvailabilityWriteResponse.of(data, affectedBookings(user));
+    }
+
+    /**
+     * Atomic weekly-rule replace (CTL-54 v2.1 remediation B2, Task 5): replaces the guide's ACTIVE
+     * recurring rules for one day of week with exactly the supplied windows, in one transaction
+     * under the per-guide advisory lock. An empty windows list clears that weekday's rules; every
+     * other weekday is left untouched. Owner-scoped like every other route here: the guide id is
+     * resolved from the caller's own guide profile, never from the request.
+     */
+    @Operation(
+            summary = "Atomically replace one weekday's availability rules",
+            description =
+                    "Replaces the guide's ACTIVE recurring rules for the given day of week with"
+                            + " exactly the supplied windows, in ONE transaction under a per-guide"
+                            + " advisory lock. An empty windows list clears that weekday's rules;"
+                            + " every other weekday — and any inactive rule on this weekday — is left"
+                            + " untouched. Each inserted rule takes the guide's settings timezone, an"
+                            + " open-ended effective range starting today, and is active. Validation"
+                            + " (same-day + no self-overlapping windows) runs BEFORE any mutation, and"
+                            + " any mid-transaction failure rolls the whole replace back, so prior"
+                            + " rules are never partially lost. The write re-materializes the guide's"
+                            + " occurrences in the same transaction and the response surfaces (CTL-54"
+                            + " Task 7) any newly uncovered future CONFIRMED bookings; the edit still"
+                            + " succeeds and no booking is mutated.")
+    @ApiResponse(
+            responseCode = "200",
+            description =
+                    "The weekday's resulting active rules after the replace, plus any"
+                            + " newly-uncovered bookings (advisory).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples =
+                                    @ExampleObject(
+                                            value = ApiExamples.AVAILABILITY_RULE_LIST_WRITE)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "dayOfWeek missing or out of range (0-6), or a window's startLocal/windowMin"
+                            + " missing or invalid, including a window crossing midnight (startLocal"
+                            + " + windowMin > 1440) or two windows overlapping each other. Rejected"
+                            + " BEFORE any mutation, so prior rules are left intact."
+                            + NO_GUIDE_PROFILE_422,
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @PostMapping("/rules/replace")
+    public AvailabilityWriteResponse<List<AvailabilityRuleResponse>> replaceRules(
+            @RequestBody RulesReplaceRequest req) {
+        var user = currentUser.requireRole(UserRole.GUIDE);
+        UUID guideId = requireGuideId(user);
+        List<AvailabilityRuleResponse> data = availability.replaceRules(guideId, req);
         return AvailabilityWriteResponse.of(data, affectedBookings(user));
     }
 
