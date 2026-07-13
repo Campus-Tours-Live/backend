@@ -1239,29 +1239,67 @@ class AvailabilityWriteServiceIntegrationTest {
     }
 
     @Test
-    void replaceRules_overlappingWindows_rejectedBeforeAnyMutation() {
-        // (c1) Two windows in the request that overlap each other must 422 at the entry guard,
-        // BEFORE any delete — reusing the weekly same-day-of-week overlap invariant. The prior rule
-        // survives because nothing was deleted.
+    void replaceRules_overlappingWindows_coalescedIntoOneRule() {
+        // CTL-54 accept-and-resolve: two self-overlapping request windows no longer 422 — they
+        // MERGE into one stored rule, exactly like createRule coalesces a same-group overlap. The
+        // occurrence layer collapses [09:00-11:00, 10:00-12:00] and [09:00-12:00] to identical net
+        // availability anyway, so rejecting bought no correctness — only friction with a FE modal
+        // that has no cross-row overlap guard.
         writeService.createRule(
                 actingUser(guideAUserId),
-                new AvailabilityRuleRequest(TODAY_DOW, "09:00", 60, null, null, null));
+                new AvailabilityRuleRequest(TODAY_DOW, "07:00", 60, null, null, null));
 
         RulesReplaceRequest overlapping =
                 new RulesReplaceRequest(
                         TODAY_DOW,
                         List.of(
-                                new RulesReplaceRequest.Window("10:00", 120), // 10:00-12:00
+                                new RulesReplaceRequest.Window("09:00", 120), // 09:00-11:00
                                 new RulesReplaceRequest.Window(
-                                        "11:00", 60))); // 11:00-12:00 overlaps
+                                        "10:00", 120))); // 10:00-12:00 overlaps
 
-        assertThatThrownBy(() -> writeService.replaceRules(guideAId, overlapping))
-                .isInstanceOf(ValidationException.class);
+        List<AvailabilityRuleResponse> result = writeService.replaceRules(guideAId, overlapping);
 
-        // Untouched — nothing was deleted because validation ran first.
+        // The prior 07:00 rule is gone (replaced); the two overlapping windows merged into a single
+        // 09:00-12:00 (180 min) rule.
         assertThat(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) TODAY_DOW))
-                .extracting(r -> r.getStartLocal().toString())
-                .containsExactly("09:00");
+                .extracting(
+                        r -> r.getStartLocal().toString(),
+                        GuideAvailabilityRuleEntity::getWindowMin)
+                .containsExactly(tuple("09:00", 180));
+        assertThat(result)
+                .extracting(
+                        AvailabilityRuleResponse::startLocal, AvailabilityRuleResponse::windowMin)
+                .containsExactly(tuple("09:00", 180));
+    }
+
+    @Test
+    void replaceRules_touchingWindows_coalescedIntoOneRule() {
+        // CTL-54 accept-and-resolve: touching windows (09:00-10:00 + 10:00-11:00) merge into one
+        // 09:00-11:00 rule instead of being stored as two abutting rows — matching createRule's
+        // coalesce, which merges overlap AND touch, and the occurrence projection layer.
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(TODAY_DOW, "07:00", 60, null, null, null));
+
+        RulesReplaceRequest touching =
+                new RulesReplaceRequest(
+                        TODAY_DOW,
+                        List.of(
+                                new RulesReplaceRequest.Window("09:00", 60), // 09:00-10:00
+                                new RulesReplaceRequest.Window(
+                                        "10:00", 60))); // 10:00-11:00 touches
+
+        List<AvailabilityRuleResponse> result = writeService.replaceRules(guideAId, touching);
+
+        assertThat(rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideAId, (short) TODAY_DOW))
+                .extracting(
+                        r -> r.getStartLocal().toString(),
+                        GuideAvailabilityRuleEntity::getWindowMin)
+                .containsExactly(tuple("09:00", 120));
+        assertThat(result)
+                .extracting(
+                        AvailabilityRuleResponse::startLocal, AvailabilityRuleResponse::windowMin)
+                .containsExactly(tuple("09:00", 120));
     }
 
     // ---------------------------------------------------------------------

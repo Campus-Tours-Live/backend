@@ -495,20 +495,29 @@ public class AvailabilityWriteService {
      * weekday's resulting ACTIVE rules.
      *
      * <p><b>Entry guard BEFORE any mutation (B2 data-loss guard).</b> Every present window's same-
-     * day guard ({@link #validateSameDay}) AND the weekly same-day-of-week overlap invariant
-     * ({@link #validateRuleWindowsNoOverlap}) run FIRST, before a single row is deleted — so an
-     * invalid window (crossing midnight) or a self-overlapping pair of windows throws a {@link
-     * ValidationException} while the prior rules are still fully intact, never after a partial
-     * delete.
+     * day guard ({@link #validateSameDay}) runs FIRST, before a single row is deleted — so an
+     * invalid window (one crossing midnight) throws a {@link ValidationException} while the prior
+     * rules are still fully intact, never after a partial delete. A cross-midnight window is a
+     * genuinely invalid span, NOT a self-overlap — coalescing cannot rescue it, so it still
+     * rejects.
      *
-     * <p><b>Reused overlap invariant, not re-invented.</b> The overlap check reuses the same {@link
-     * IntervalMath#overlaps} primitive (and the identical "overlaps another range on &lt;day&gt;"
-     * message) that {@link #validateNoOverlap} enforces between rules. {@code validateNoOverlap}
-     * itself cannot be called for these windows: it reads the DB and SKIPS same-coalesce-group
-     * siblings (it would MERGE, not reject, same-group overlaps), whereas an atomic "replace this
-     * weekday with exactly these windows" contract must reject self-contradictory input up front so
-     * the stored set is exactly what was asked for. Touching bounds (e.g. 09:00-10:00 +
-     * 10:00-11:00) do not overlap and are kept as separate rules.
+     * <p><b>Self-overlap COALESCES, it is not rejected (CTL-54 accept-and-resolve).</b> Two request
+     * windows that overlap OR touch (e.g. {@code 09:00-11:00} + {@code 10:00-12:00}, or {@code
+     * 09:00-10:00} + {@code 10:00-11:00}) are accepted and MERGED into one stored rule, via the
+     * SAME {@link #coalesceActiveGroup} sweep {@code createRule}/{@code updateRule} run — not the
+     * old strict 422 reject. This makes every availability write path "accept-and-resolve" and
+     * consistent: {@code createRule} already merges same-group overlap AND touch, {@code
+     * replaceOverrides} (exceptions) accepts self-overlap and trims it (newest-wins), and the
+     * occurrence projection layer coalesces to disjoint intervals regardless — so {@code
+     * [09:00-11:00, 10:00-12:00]} and a single {@code [09:00-12:00]} yield IDENTICAL net
+     * availability, and rejecting bought zero correctness, only friction. The "stored == exact
+     * input" rationale the earlier reject claimed held nowhere else in this layer (create merges,
+     * exceptions trim), so it was a local choice, not a system invariant. Concretely, the FE
+     * DayHoursModal has only per-row {@code from < to} validation and NO cross-row overlap guard,
+     * so it WILL send overlapping windows; the exceptions modal already accepts them silently,
+     * while this weekly path used to 422 for the same harmless action — coalescing removes that
+     * two-outcome inconsistency, and also fixes the older overlap-vs-touch split (overlap→422 but
+     * touch→two rows).
      *
      * <p><b>One transaction under the advisory lock.</b> {@link #lockGuide} is taken before the
      * delete/insert, and {@link AvailabilityService#rematerialize} runs at Spring {@code REQUIRED}
@@ -531,9 +540,9 @@ public class AvailabilityWriteService {
 
         // ENTRY GUARD, BEFORE ANY MUTATION: per-window same-day guard (validateSameDay runs before
         // IntervalMath.spanOf, which would otherwise throw a raw IllegalArgumentException on a
-        // cross-midnight window), then the weekly overlap invariant across the request windows.
-        // Building the spans here (before the lock/delete) guarantees a bad or self-overlapping
-        // window throws while the prior rules are still fully intact.
+        // cross-midnight window). Building the spans here (before the lock/delete) guarantees a
+        // genuinely invalid (cross-midnight) window throws while the prior rules are still fully
+        // intact. Self-overlap is NOT validated here — it is accepted and coalesced after insert.
         List<IntervalMath.Span> spans = new ArrayList<>();
         for (RulesReplaceRequest.Window w : windows) {
             LocalTime startLocal = parseLocalTime(w.startLocal());
@@ -543,7 +552,6 @@ public class AvailabilityWriteService {
             validateSameDay(startLocal, w.windowMin());
             spans.add(IntervalMath.spanOf(startLocal, w.windowMin()));
         }
-        validateRuleWindowsNoOverlap(spans, dayOfWeek);
 
         // Per-guide advisory lock (CTL-54 B5) — held across delete + insert + rematerialize, all in
         // this one transaction. rematerialize re-acquires the same xact-scoped key (re-entrant).
@@ -574,30 +582,16 @@ public class AvailabilityWriteService {
             rules.save(r);
         }
 
+        // Accept-and-resolve: merge any overlapping/touching windows the request sent into disjoint
+        // maximal rules, reusing the SAME sweep createRule/updateRule run. All inserted rows share
+        // one coalesce group (this weekday, effectiveFrom=today, effectiveTo=null, active), so a
+        // single call collapses the whole request.
+        coalesceActiveGroup(guideId, dayOfWeek, effectiveFrom, null);
+
         availabilityService.rematerialize(guideId);
         return rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, dayOfWeek).stream()
                 .map(AvailabilityWriteService::toRuleResponse)
                 .toList();
-    }
-
-    /**
-     * The weekly same-day-of-week overlap invariant for an atomic {@link #replaceRules} — no two of
-     * the request's windows may overlap. Reuses the SAME {@link IntervalMath#overlaps} primitive
-     * and the SAME "overlaps another range" message {@link #validateNoOverlap} uses between rules;
-     * touching bounds do not overlap and are allowed.
-     */
-    private static void validateRuleWindowsNoOverlap(
-            List<IntervalMath.Span> spans, short dayOfWeek) {
-        for (int i = 0; i < spans.size(); i++) {
-            for (int j = i + 1; j < spans.size(); j++) {
-                if (IntervalMath.overlaps(spans.get(i), spans.get(j))) {
-                    throw new ValidationException(
-                            "This time range overlaps another range on "
-                                    + dayLabel(dayOfWeek)
-                                    + ".");
-                }
-            }
-        }
     }
 
     /**
