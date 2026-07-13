@@ -190,11 +190,7 @@ public class AvailabilityService {
      * harmless no-op (PostgreSQL advisory locks are re-entrant within a session/transaction).
      */
     private void lockGuide(UUID guideId) {
-        entityManager
-                .createNativeQuery(
-                        "SELECT pg_advisory_xact_lock(hashtextextended(CAST(:guideId AS text), 0))")
-                .setParameter("guideId", guideId.toString())
-                .getSingleResult();
+        GuideAdvisoryLock.acquire(entityManager, guideId);
     }
 
     /**

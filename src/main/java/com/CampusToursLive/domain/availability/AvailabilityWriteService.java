@@ -603,11 +603,7 @@ public class AvailabilityWriteService {
      * same transaction is a harmless re-entrant no-op.
      */
     private void lockGuide(UUID guideId) {
-        entityManager
-                .createNativeQuery(
-                        "SELECT pg_advisory_xact_lock(hashtextextended(CAST(:guideId AS text), 0))")
-                .setParameter("guideId", guideId.toString())
-                .getSingleResult();
+        GuideAdvisoryLock.acquire(entityManager, guideId);
     }
 
     // ---------------------------------------------------------------------
