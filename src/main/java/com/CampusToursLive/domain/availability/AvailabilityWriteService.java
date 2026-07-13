@@ -1346,11 +1346,22 @@ public class AvailabilityWriteService {
     // ---------------------------------------------------------------------
 
     private static LocalTime parseLocalTime(String raw) {
+        LocalTime parsed;
         try {
-            return LocalTime.parse(raw);
+            parsed = LocalTime.parse(raw);
         } catch (DateTimeParseException ex) {
             throw new ValidationException("Invalid startLocal (expected e.g. \"09:00\"): " + raw);
         }
+        // Reject sub-minute (seconds/nanos) precision (CTL-54 #7): validation truncates to the
+        // minute (toSecondOfDay()/60) but AvailabilityProjection.resolveWindow materializes the
+        // FULL-precision LocalTime, so a value like "23:30:40" + windowMin=30 would pass the
+        // same-day check (23:30 + 30 = 24:00) yet materialize to 00:00:40 the NEXT day. Rejecting
+        // seconds up front keeps validation and materialization in agreement.
+        if (parsed.getSecond() != 0 || parsed.getNano() != 0) {
+            throw new ValidationException(
+                    "startLocal must be whole-minute precision (no seconds): " + raw);
+        }
+        return parsed;
     }
 
     private static LocalDate parseLocalDate(String raw) {

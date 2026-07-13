@@ -970,6 +970,21 @@ class AvailabilityWriteServiceIntegrationTest {
     }
 
     @Test
+    void createException_rejectsSubMinuteStartLocal() {
+        // "23:30:40" + windowMin=30: the same-day guard truncates to the minute (23:30 + 30 =
+        // 24:00, OK), but materialization keeps full precision and would roll to 00:00:40 the NEXT
+        // day (CTL-54 #7). Sub-minute precision must be rejected so validation and materialization
+        // agree.
+        AvailabilityExceptionRequest req =
+                new AvailabilityExceptionRequest(
+                        FIXED_TODAY.toString(), "UNAVAILABLE", "23:30:40", 30, null);
+
+        assertThatThrownBy(() -> writeService.createException(actingUser(guideAUserId), req))
+                .isInstanceOf(ValidationException.class);
+        assertThat(exceptions.findByGuideId(guideAId)).isEmpty();
+    }
+
+    @Test
     void createException_allowsOverrideEndingExactlyAtMidnight() {
         AvailabilityExceptionRequest req =
                 new AvailabilityExceptionRequest(

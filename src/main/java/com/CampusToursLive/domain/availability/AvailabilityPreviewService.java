@@ -378,11 +378,19 @@ public class AvailabilityPreviewService {
         if (raw == null || raw.isBlank()) {
             throw new ValidationException("startLocal is required");
         }
+        LocalTime parsed;
         try {
-            return LocalTime.parse(raw);
+            parsed = LocalTime.parse(raw);
         } catch (DateTimeParseException ex) {
             throw new ValidationException("Invalid startLocal (expected e.g. \"09:00\"): " + raw);
         }
+        // Reject sub-minute (seconds/nanos) precision (CTL-54 #7) so preview validation matches the
+        // write path's whole-minute contract -- see AvailabilityWriteService.parseLocalTime.
+        if (parsed.getSecond() != 0 || parsed.getNano() != 0) {
+            throw new ValidationException(
+                    "startLocal must be whole-minute precision (no seconds): " + raw);
+        }
+        return parsed;
     }
 
     private static int requireWindowMin(Integer windowMin) {
