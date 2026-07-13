@@ -271,15 +271,18 @@ public class AvailabilityPreviewService {
                         .map(iv -> new ResolvedOccurrence(iv.startAt(), iv.endAt()))
                         .toList();
 
-        // Which of the date's existing exceptions this override would drop/clip on save (CTL-54
-        // #trimmedSegments). An existing exception is reported when it OVERLAPS one of the new
-        // windows (it gets trimmed newest-wins) OR -- in replace mode only -- when it is a
-        // SAME-KIND
-        // sibling being wholesale replaced, EVEN IF it does not overlap any new window (replace
-        // mode
-        // drops every same-kind existing, not just the overlapping ones). Without the same-kind
-        // clause a non-overlapping dropped sibling (e.g. an ADDITIONAL 14:00-15:00 dropped by a
-        // replace that keeps only 09:00-10:00) would silently vanish from the preview.
+        // Which of the date's existing exceptions this override would GENUINELY drop/clip on save
+        // (CTL-54 #trimmedSegments, M4). An existing exception is reported when it OVERLAPS one of
+        // the new windows (it gets trimmed newest-wins) OR -- in replace mode only -- when it is a
+        // SAME-KIND sibling being wholesale replaced, EVEN IF it does not overlap any new window
+        // (replace mode drops every same-kind existing, not just the overlapping ones). Without the
+        // same-kind clause a non-overlapping dropped sibling (e.g. an ADDITIONAL 14:00-15:00
+        // dropped by a replace that keeps only 09:00-10:00) would silently vanish from the preview.
+        //
+        // BUT a same-kind window that the request re-supplies IDENTICALLY survives the replace
+        // unchanged (it is dropped then re-inserted as one of `spans`), so it must NOT be reported
+        // as trimmed -- reporting it over-states what the save changes. It is genuinely dropped
+        // only when its span is NOT among the resulting same-kind set (`spans`).
         List<TrimmedSegment> trimmed =
                 fullExisting.stream()
                         .filter(
@@ -287,8 +290,13 @@ public class AvailabilityPreviewService {
                                     IntervalMath.Span existingSpan =
                                             IntervalMath.spanOf(
                                                     e.getStartLocal(), e.getWindowMin());
-                                    boolean sameKindDropped =
-                                            replaceExisting && e.getKind() == newKind;
+                                    boolean sameKind = replaceExisting && e.getKind() == newKind;
+                                    // Re-supplied same-kind window survives unchanged -> not
+                                    // dropped.
+                                    if (sameKind && spans.contains(existingSpan)) {
+                                        return false;
+                                    }
+                                    boolean sameKindDropped = sameKind;
                                     boolean overlapsWindow =
                                             spans.stream()
                                                     .anyMatch(

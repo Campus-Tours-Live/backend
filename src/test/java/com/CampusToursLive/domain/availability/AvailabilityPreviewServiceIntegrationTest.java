@@ -521,10 +521,13 @@ class AvailabilityPreviewServiceIntegrationTest {
                         true);
 
         DatePreview dp = previewService.previewMulti(guideAId, req).days().get(0);
+        // The genuinely-dropped 14:00-15:00 sibling IS reported; the re-supplied 09:00-10:00 window
+        // survives the replace unchanged and must NOT be over-reported as trimmed (CTL-54 M4).
         assertThat(dp.trimmed())
                 .extracting(
                         TrimmedSegment::kind, TrimmedSegment::startLocal, TrimmedSegment::windowMin)
-                .contains(tuple("ADDITIONAL", "14:00", 60));
+                .contains(tuple("ADDITIONAL", "14:00", 60))
+                .doesNotContain(tuple("ADDITIONAL", "09:00", 60));
     }
 
     @Test
