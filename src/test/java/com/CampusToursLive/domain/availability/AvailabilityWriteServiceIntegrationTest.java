@@ -29,6 +29,7 @@ import com.CampusToursLive.web.dto.AvailabilityRuleRequest;
 import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
+import com.CampusToursLive.web.dto.OverrideReplaceRequest;
 import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.time.Instant;
@@ -1039,6 +1040,111 @@ class AvailabilityWriteServiceIntegrationTest {
                 .containsExactlyInAnyOrder(
                         tuple(AvailabilityExceptionKind.ADDITIONAL, "14:00", 60),
                         tuple(AvailabilityExceptionKind.UNAVAILABLE, "09:30", 60));
+    }
+
+    // ---------------------------------------------------------------------
+    // CTL-54 v2.1 remediation B2 — atomic single-day override replace.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void replaceOverrides_replacesSameKind_insertsWindows_leavesOtherKindUntouched() {
+        LocalDate d = FIXED_TODAY;
+        // A same-kind (UNAVAILABLE) row that must be REPLACED, and a non-overlapping other-kind
+        // (ADDITIONAL) row that must be left PHYSICALLY untouched (same id + reason).
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(d.toString(), "UNAVAILABLE", "09:00", 60, null));
+        var otherKind =
+                writeService.createException(
+                        actingUser(guideAUserId),
+                        new AvailabilityExceptionRequest(
+                                d.toString(), "ADDITIONAL", "14:00", 60, "afternoon"));
+
+        OverrideReplaceRequest req =
+                new OverrideReplaceRequest(
+                        d.toString(),
+                        "UNAVAILABLE",
+                        List.of(new OverrideReplaceRequest.Window("10:00", 60)));
+
+        List<com.CampusToursLive.web.dto.AvailabilityExceptionResponse> result =
+                writeService.replaceOverrides(guideAId, req);
+
+        // The prior UNAVAILABLE 09:00 is gone; the new UNAVAILABLE 10:00 is in; ADDITIONAL kept.
+        List<AvailabilityExceptionEntity> stored =
+                exceptions.findByGuideIdAndExceptionDate(guideAId, d);
+        assertThat(stored)
+                .extracting(
+                        AvailabilityExceptionEntity::getKind,
+                        e -> e.getStartLocal().toString(),
+                        AvailabilityExceptionEntity::getWindowMin)
+                .containsExactlyInAnyOrder(
+                        tuple(AvailabilityExceptionKind.ADDITIONAL, "14:00", 60),
+                        tuple(AvailabilityExceptionKind.UNAVAILABLE, "10:00", 60));
+
+        // The returned payload mirrors the stored date set.
+        assertThat(result)
+                .extracting(
+                        com.CampusToursLive.web.dto.AvailabilityExceptionResponse::kind,
+                        com.CampusToursLive.web.dto.AvailabilityExceptionResponse::startLocal)
+                .containsExactlyInAnyOrder(
+                        tuple("ADDITIONAL", "14:00"), tuple("UNAVAILABLE", "10:00"));
+
+        // The other-kind row was left physically untouched: same id + reason preserved.
+        AvailabilityExceptionEntity untouched =
+                exceptions.findById(UUID.fromString(otherKind.id())).orElseThrow();
+        assertThat(untouched.getReason()).isEqualTo("afternoon");
+        assertThat(untouched.getStartLocal().toString()).isEqualTo("14:00");
+    }
+
+    @Test
+    void replaceOverrides_emptyWindows_clearsThatKindForTheDay_keepsOtherKind() {
+        LocalDate d = FIXED_TODAY;
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(d.toString(), "UNAVAILABLE", "09:00", 60, null));
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(d.toString(), "ADDITIONAL", "14:00", 60, null));
+
+        // Empty windows == clear this kind for the day (allowed).
+        OverrideReplaceRequest req =
+                new OverrideReplaceRequest(d.toString(), "UNAVAILABLE", List.of());
+
+        writeService.replaceOverrides(guideAId, req);
+
+        List<AvailabilityExceptionEntity> stored =
+                exceptions.findByGuideIdAndExceptionDate(guideAId, d);
+        assertThat(stored)
+                .extracting(AvailabilityExceptionEntity::getKind, e -> e.getStartLocal().toString())
+                .containsExactly(tuple(AvailabilityExceptionKind.ADDITIONAL, "14:00"));
+    }
+
+    @Test
+    void replaceOverrides_invalidWindow_rejectedBeforeAnyMutation() {
+        // (c1) An invalid (cross-midnight) window must 422 at the entry guard, BEFORE any delete —
+        // so the prior same-kind override is still fully intact because nothing was deleted yet.
+        LocalDate d = FIXED_TODAY;
+        writeService.createException(
+                actingUser(guideAUserId),
+                new AvailabilityExceptionRequest(d.toString(), "UNAVAILABLE", "09:00", 60, null));
+
+        OverrideReplaceRequest bad =
+                new OverrideReplaceRequest(
+                        d.toString(),
+                        "UNAVAILABLE",
+                        List.of(
+                                new OverrideReplaceRequest.Window(
+                                        "23:59", 120))); // crosses midnight
+
+        assertThatThrownBy(() -> writeService.replaceOverrides(guideAId, bad))
+                .isInstanceOf(ValidationException.class);
+
+        // Untouched — nothing was deleted because validation ran first.
+        List<AvailabilityExceptionEntity> stored =
+                exceptions.findByGuideIdAndExceptionDate(guideAId, d);
+        assertThat(stored).hasSize(1);
+        assertThat(stored.get(0).getKind()).isEqualTo(AvailabilityExceptionKind.UNAVAILABLE);
+        assertThat(stored.get(0).getStartLocal().toString()).isEqualTo("09:00");
     }
 
     // ---------------------------------------------------------------------

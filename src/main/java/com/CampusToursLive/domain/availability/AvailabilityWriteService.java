@@ -16,6 +16,7 @@ import com.CampusToursLive.web.dto.AvailabilityRuleRequest;
 import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
+import com.CampusToursLive.web.dto.OverrideReplaceRequest;
 import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.time.DateTimeException;
@@ -366,6 +367,136 @@ public class AvailabilityWriteService {
         return exceptions.findByGuideId(guideId).stream()
                 .map(AvailabilityWriteService::toExceptionResponse)
                 .toList();
+    }
+
+    /**
+     * ATOMIC single-day override replace (CTL-54 v2.1 remediation B2): replaces the guide's
+     * same-{@code kind} exceptions on {@code date} with exactly {@code windows}, in ONE transaction
+     * under the per-guide advisory lock. An EMPTY {@code windows} list is allowed and CLEARS that
+     * kind for the day; other-kind exceptions on the date are preserved (trimmed only where a new
+     * window overlaps them, newest-wins). Returns the date's resulting stored exceptions.
+     *
+     * <p><b>Entry guard BEFORE any mutation (B2 data-loss guard).</b> The date range guard ({@link
+     * #requireOverrideRange}) and every present window's same-day guard ({@link
+     * #requireOverrideValid}) run FIRST, before a single row is deleted — so an invalid window
+     * (e.g. one crossing midnight) throws a {@link ValidationException} while the prior override is
+     * still fully intact, never after a partial delete.
+     *
+     * <p><b>One transaction under the advisory lock.</b> {@link #lockGuide} is taken before the
+     * delete/insert, and {@link AvailabilityService#rematerialize} runs at Spring {@code REQUIRED}
+     * propagation so it JOINS this transaction (it re-acquires the SAME per-guide xact-advisory
+     * key, which is a harmless re-entrant no-op). Because delete + insert + rematerialize share one
+     * transaction, ANY mid-transaction failure (a rematerialize error, a constraint trip) rolls the
+     * WHOLE thing back — the prior override is never lost.
+     *
+     * <p><b>DRY.</b> The replaced set is computed by the SAME {@link #computeReplacedSet}
+     * projection the {@code replaceExisting} dry-run preview uses, so preview and save can never
+     * diverge.
+     */
+    @Transactional
+    public List<AvailabilityExceptionResponse> replaceOverrides(
+            UUID guideId, OverrideReplaceRequest req) {
+        if (req == null) {
+            throw new ValidationException("Request body is required");
+        }
+        if (req.kind() == null || req.kind().isBlank()) {
+            throw new ValidationException("kind is required");
+        }
+        AvailabilityExceptionKind kind = parseKind(req.kind());
+        if (req.date() == null || req.date().isBlank()) {
+            throw new ValidationException("date is required");
+        }
+        LocalDate date = parseLocalDate(req.date());
+        List<OverrideReplaceRequest.Window> windows =
+                req.windows() == null ? List.of() : req.windows();
+
+        // ENTRY GUARD, BEFORE ANY MUTATION: window-independent range guard + per-window same-day
+        // guard. Building the spans here (before the lock/delete) guarantees a bad window throws
+        // while the prior override is still fully intact.
+        requireOverrideRange(date, date);
+        List<IntervalMath.Span> spans = new ArrayList<>();
+        for (OverrideReplaceRequest.Window w : windows) {
+            LocalTime startLocal = parseLocalTime(w.startLocal());
+            if (w.windowMin() == null || w.windowMin() <= 0) {
+                throw new ValidationException("windowMin must be greater than 0");
+            }
+            requireOverrideValid(startLocal, w.windowMin(), date, date);
+            spans.add(IntervalMath.spanOf(startLocal, w.windowMin()));
+        }
+
+        // Per-guide advisory lock (CTL-54 B5) — held across delete + insert + rematerialize, all in
+        // this one transaction. rematerialize re-acquires the same xact-scoped key (re-entrant).
+        lockGuide(guideId);
+
+        // Ensure a settings row exists so rematerialize always has a settings tz to resolve.
+        getOrCreateSettings(guideId);
+
+        List<AvailabilityExceptionEntity> existingEntities =
+                exceptions.findByGuideIdAndExceptionDate(guideId, date);
+        List<ExistingException> existingPure =
+                existingEntities.stream()
+                        .map(
+                                e ->
+                                        new ExistingException(
+                                                e.getId(),
+                                                e.getKind(),
+                                                IntervalMath.spanOf(
+                                                        e.getStartLocal(), e.getWindowMin())))
+                        .toList();
+
+        // The desired final set for the date (shared projection with the preview).
+        List<TrimmedException> desired = computeReplacedSet(existingPure, kind, spans);
+
+        // Rows to delete: every same-kind row (being replaced) + every other-kind row a new window
+        // overlaps (it gets trimmed). Non-overlapping other-kind rows are left PHYSICALLY untouched
+        // (same id/reason), so `desired` still contains them unchanged — subtract those from the
+        // insert set so they are neither deleted nor re-inserted.
+        List<AvailabilityExceptionEntity> toDelete = new ArrayList<>();
+        List<TrimmedException> keptUntouched = new ArrayList<>();
+        for (AvailabilityExceptionEntity e : existingEntities) {
+            IntervalMath.Span existingSpan =
+                    IntervalMath.spanOf(e.getStartLocal(), e.getWindowMin());
+            boolean sameKind = e.getKind() == kind;
+            boolean overlapsWindow =
+                    spans.stream().anyMatch(s -> IntervalMath.overlaps(existingSpan, s));
+            if (sameKind || overlapsWindow) {
+                toDelete.add(e);
+            } else {
+                keptUntouched.add(new TrimmedException(e.getKind(), existingSpan));
+            }
+        }
+
+        List<TrimmedException> toInsert = new ArrayList<>(desired);
+        for (TrimmedException kept : keptUntouched) {
+            toInsert.remove(kept); // record equality on (kind, span); removes one match.
+        }
+
+        // Apply: delete replaced/trimmed rows, then insert the new windows + any trimmed remnants.
+        toDelete.forEach(exceptions::delete);
+        for (TrimmedException t : toInsert) {
+            insertException(guideId, date, t.kind(), t.span(), null);
+        }
+
+        availabilityService.rematerialize(guideId);
+        return exceptions.findByGuideIdAndExceptionDate(guideId, date).stream()
+                .map(AvailabilityWriteService::toExceptionResponse)
+                .toList();
+    }
+
+    /**
+     * Acquires the per-guide, TRANSACTION-scoped PostgreSQL advisory lock (CTL-54 B5) — the SAME
+     * key derivation {@link AvailabilityService#rematerialize} and the horizon job use ({@code
+     * hashtextextended(guideId::text, 0)}) — so the atomic replace's delete/insert are serialized
+     * against a concurrent rematerialize for the same guide. Transaction-scoped: auto-releases on
+     * commit/rollback, and re-acquiring the same key inside {@code rematerialize} later in this
+     * same transaction is a harmless re-entrant no-op.
+     */
+    private void lockGuide(UUID guideId) {
+        entityManager
+                .createNativeQuery(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(CAST(:guideId AS text), 0))")
+                .setParameter("guideId", guideId.toString())
+                .getSingleResult();
     }
 
     // ---------------------------------------------------------------------
@@ -894,6 +1025,48 @@ public class AvailabilityWriteService {
         }
         result.add(new TrimmedException(newKind, newSpan));
         return result;
+    }
+
+    /**
+     * Folds {@code spans} (in order, newest-wins) on top of {@code seed} via the shared pure {@link
+     * #computeTrimmedSet} — each window's trim/replace result becomes the input for the next, so a
+     * later window trims an earlier one. Returns the net non-overlapping hypothetical set. Seeds
+     * the result from {@code seed} so that with ZERO spans the seed passes straight through (the
+     * "cleared kind, other-kind kept" case). Pure — no DB, no Spring.
+     */
+    static List<TrimmedException> foldWindowsOverSeed(
+            List<ExistingException> seed,
+            AvailabilityExceptionKind newKind,
+            List<IntervalMath.Span> spans) {
+        List<TrimmedException> result =
+                seed.stream().map(e -> new TrimmedException(e.kind(), e.span())).toList();
+        List<ExistingException> currentSet = seed;
+        for (IntervalMath.Span span : spans) {
+            result = computeTrimmedSet(currentSet, newKind, span);
+            currentSet =
+                    result.stream()
+                            .map(t -> new ExistingException(UUID.randomUUID(), t.kind(), t.span()))
+                            .toList();
+        }
+        return result;
+    }
+
+    /**
+     * The SHARED "compute replaced set" projection (CTL-54 v2.1 remediation B2) used by BOTH the
+     * {@code replaceExisting} dry-run preview ({@link AvailabilityPreviewService#previewMulti}) and
+     * the atomic single-day save ({@link #replaceOverrides}) — so preview and save can never drift.
+     * Replace semantics: DROP every same-kind ({@code newKind}) existing exception (they are being
+     * replaced by exactly {@code spans}), KEEP the other-kind ones, then fold {@code spans} on top
+     * newest-wins via {@link #foldWindowsOverSeed} (later windows trim earlier ones; new windows
+     * trim overlapping other-kind siblings). With EMPTY {@code spans} the result is just the kept
+     * other-kind exceptions — i.e. "clear this kind for the day". Pure — no DB, no Spring.
+     */
+    static List<TrimmedException> computeReplacedSet(
+            List<ExistingException> existing,
+            AvailabilityExceptionKind newKind,
+            List<IntervalMath.Span> spans) {
+        List<ExistingException> seed = existing.stream().filter(e -> e.kind() != newKind).toList();
+        return foldWindowsOverSeed(seed, newKind, spans);
     }
 
     /**

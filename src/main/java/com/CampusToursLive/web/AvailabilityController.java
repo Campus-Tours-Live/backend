@@ -22,6 +22,7 @@ import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
 import com.CampusToursLive.web.dto.OverrideMultiPreviewRequest;
 import com.CampusToursLive.web.dto.OverridePreviewRequest;
 import com.CampusToursLive.web.dto.OverridePreviewResponse;
+import com.CampusToursLive.web.dto.OverrideReplaceRequest;
 import com.CampusToursLive.web.dto.Problem;
 import com.CampusToursLive.web.dto.ResolvedAvailabilityResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -751,6 +752,76 @@ public class AvailabilityController {
         var user = currentUser.requireRole(UserRole.GUIDE);
         List<AvailabilityExceptionResponse> remaining = availability.deleteException(user, id);
         return AvailabilityWriteResponse.of(remaining, affectedBookings(user));
+    }
+
+    /**
+     * Atomic single-day override replace (CTL-54 v2.1 remediation B2): replaces the guide's
+     * same-kind exceptions on one date with exactly the supplied windows, in one transaction under
+     * the per-guide advisory lock. An empty windows list clears that kind for the day; other-kind
+     * exceptions on the date are preserved. Owner-scoped like every other route here: the guide id
+     * is resolved from the caller's own guide profile, never from the request.
+     */
+    @Operation(
+            summary = "Atomically replace a date's overrides for one kind",
+            description =
+                    "Replaces the guide's same-kind (UNAVAILABLE or ADDITIONAL) date-specific"
+                            + " exceptions on the given date with exactly the supplied windows, in"
+                            + " ONE transaction under a per-guide advisory lock. An empty windows"
+                            + " list clears that kind for the day; other-kind exceptions on the date"
+                            + " are preserved (trimmed only where a new window overlaps them,"
+                            + " newest-wins). Validation runs BEFORE any mutation, and any"
+                            + " mid-transaction failure rolls the whole replace back, so a prior"
+                            + " override is never partially lost. The write re-materializes the"
+                            + " guide's occurrences in the same transaction and the response"
+                            + " surfaces (CTL-54 Task 7) any newly uncovered future CONFIRMED"
+                            + " bookings; the edit still succeeds and no booking is mutated.")
+    @ApiResponse(
+            responseCode = "200",
+            description =
+                    "The date's resulting stored exceptions after the replace, plus any"
+                            + " newly-uncovered bookings (advisory).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples =
+                                    @ExampleObject(
+                                            value = ApiExamples.AVAILABILITY_EXCEPTION_LIST_WRITE)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "date/kind missing or invalid, or a window's startLocal/windowMin missing or"
+                            + " invalid, including a window crossing midnight (startLocal +"
+                            + " windowMin > 1440). Rejected BEFORE any mutation, so a prior override"
+                            + " is left intact."
+                            + NO_GUIDE_PROFILE_422,
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @PostMapping("/overrides/replace")
+    public AvailabilityWriteResponse<List<AvailabilityExceptionResponse>> replaceOverrides(
+            @RequestBody OverrideReplaceRequest req) {
+        var user = currentUser.requireRole(UserRole.GUIDE);
+        UUID guideId = requireGuideId(user);
+        List<AvailabilityExceptionResponse> data = availability.replaceOverrides(guideId, req);
+        return AvailabilityWriteResponse.of(data, affectedBookings(user));
     }
 
     /** The guide's booking settings; auto-provisions a default row the first time it is asked. */

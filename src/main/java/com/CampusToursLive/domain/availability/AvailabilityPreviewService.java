@@ -196,18 +196,8 @@ public class AvailabilityPreviewService {
         List<AvailabilityExceptionEntity> fullExisting =
                 exceptions.findByGuideIdAndExceptionDate(guideId, date);
 
-        // Seed the hypothetical set. Default (on-top) mode seeds ALL existing exceptions. Replace
-        // mode DROPS the same-kind existing (they are being replaced by exactly `spans`) and KEEPS
-        // the other-kind existing, which the new windows then trim via the normal newest-wins model
-        // -- so removals/edits render correctly and empty `spans` clears just this kind for the
-        // day.
-        List<AvailabilityExceptionEntity> seedExisting =
-                replaceExisting
-                        ? fullExisting.stream().filter(e -> e.getKind() != newKind).toList()
-                        : fullExisting;
-
-        List<AvailabilityWriteService.ExistingException> currentSet =
-                seedExisting.stream()
+        List<AvailabilityWriteService.ExistingException> fullExistingPure =
+                fullExisting.stream()
                         .map(
                                 e ->
                                         new AvailabilityWriteService.ExistingException(
@@ -217,25 +207,18 @@ public class AvailabilityPreviewService {
                                                         e.getStartLocal(), e.getWindowMin())))
                         .toList();
 
-        // Fold every window into the hypothetical set in order: each window's trim/replace result
-        // becomes the input for the next, so a later window trims an earlier one (newest-wins
-        // across the windows too). computeTrimmedSet never inspects the id, so a fresh id is fine
-        // here. Seed the result from `currentSet` so that with NO windows (replace-mode "clear this
-        // kind" case) the kept other-kind exceptions still project.
+        // Compute the hypothetical set via the SAME shared projection the real write uses (DRY).
+        // Replace mode DROPS the same-kind existing (being replaced by exactly `spans`) and KEEPS
+        // the other-kind existing, which the new windows then trim newest-wins -- identical to
+        // AvailabilityWriteService.replaceOverrides, so preview and save can never diverge. Empty
+        // `spans` in replace mode clears just this kind for the day. Default (on-top) mode folds
+        // every window on top of ALL existing exceptions.
         List<AvailabilityWriteService.TrimmedException> hypotheticalSet =
-                currentSet.stream()
-                        .map(e -> new AvailabilityWriteService.TrimmedException(e.kind(), e.span()))
-                        .toList();
-        for (IntervalMath.Span span : spans) {
-            hypotheticalSet = AvailabilityWriteService.computeTrimmedSet(currentSet, newKind, span);
-            currentSet =
-                    hypotheticalSet.stream()
-                            .map(
-                                    t ->
-                                            new AvailabilityWriteService.ExistingException(
-                                                    UUID.randomUUID(), t.kind(), t.span()))
-                            .toList();
-        }
+                replaceExisting
+                        ? AvailabilityWriteService.computeReplacedSet(
+                                fullExistingPure, newKind, spans)
+                        : AvailabilityWriteService.foldWindowsOverSeed(
+                                fullExistingPure, newKind, spans);
 
         List<AvailabilityExceptionEntity> hypotheticalEntities =
                 hypotheticalSet.stream().map(t -> transientException(guideId, date, t)).toList();
