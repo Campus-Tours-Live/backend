@@ -7,6 +7,7 @@ import com.CampusToursLive.web.dto.OverridePreviewResponse;
 import com.CampusToursLive.web.dto.OverridePreviewResponse.DatePreview;
 import com.CampusToursLive.web.dto.OverridePreviewResponse.TrimmedSegment;
 import com.CampusToursLive.web.dto.ResolvedOccurrence;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
@@ -49,15 +50,44 @@ public class AvailabilityPreviewService {
     private final GuideAvailabilityRuleRepository rules;
     private final AvailabilityExceptionRepository exceptions;
     private final GuideBookingSettingsRepository settingsRepo;
+    private final Clock clock;
 
     @Autowired
     public AvailabilityPreviewService(
             GuideAvailabilityRuleRepository rules,
             AvailabilityExceptionRepository exceptions,
             GuideBookingSettingsRepository settingsRepo) {
+        this(rules, exceptions, settingsRepo, Clock.systemUTC());
+    }
+
+    /**
+     * Test seam: inject a fixed {@link Clock} to pin "today" (and thus the materialization
+     * horizon).
+     */
+    AvailabilityPreviewService(
+            GuideAvailabilityRuleRepository rules,
+            AvailabilityExceptionRepository exceptions,
+            GuideBookingSettingsRepository settingsRepo,
+            Clock clock) {
         this.rules = rules;
         this.exceptions = exceptions;
         this.settingsRepo = settingsRepo;
+        this.clock = clock;
+    }
+
+    /**
+     * Whether {@code date} falls OUTSIDE the materialization horizon {@code [today, today+375)}
+     * that {@link AvailabilityService#rematerialize} projects (CTL-54 #6) -- i.e. a past date or
+     * one at or beyond {@code today + HORIZON_DAYS}. Such a date is "inert / not-yet-effective": an
+     * actual save persists the override rows but no occurrence materializes for it yet, so the
+     * preview must NOT claim net-available windows a save would not produce -- it reports empty
+     * windows and flags the date inert instead, matching what {@code GET /availability} would show
+     * post-save.
+     */
+    private boolean isInertDate(LocalDate date) {
+        LocalDate today = LocalDate.now(clock);
+        return date.isBefore(today)
+                || !date.isBefore(today.plusDays(AvailabilityService.HORIZON_DAYS));
     }
 
     /**
@@ -91,6 +121,10 @@ public class AvailabilityPreviewService {
         long spanDays = ChronoUnit.DAYS.between(dateFrom, dateTo);
         for (long i = 0; i <= spanDays; i++) {
             LocalDate date = dateFrom.plusDays(i);
+            if (isInertDate(date)) {
+                days.add(inertPreview(date));
+                continue;
+            }
             days.add(previewForDate(guideId, date, guideRules, guideTimezone, kind, newSpan));
         }
 
@@ -164,6 +198,10 @@ public class AvailabilityPreviewService {
         long spanDays = ChronoUnit.DAYS.between(dateFrom, dateTo);
         for (long i = 0; i <= spanDays; i++) {
             LocalDate date = dateFrom.plusDays(i);
+            if (isInertDate(date)) {
+                days.add(inertPreview(date));
+                continue;
+            }
             days.add(
                     previewMultiForDate(
                             guideId,
@@ -251,7 +289,16 @@ public class AvailabilityPreviewService {
                                                 e.getWindowMin()))
                         .toList();
 
-        return new DatePreview(date.toString(), resultingWindows, trimmed);
+        return new DatePreview(date.toString(), resultingWindows, trimmed, false);
+    }
+
+    /**
+     * The preview entry for an out-of-horizon (inert) date (CTL-54 #6): empty net-available windows
+     * and no trimmed segments, flagged {@code inert=true}. The date is not-yet-effective -- a save
+     * persists its override rows but nothing materializes until the horizon reaches it.
+     */
+    private static DatePreview inertPreview(LocalDate date) {
+        return new DatePreview(date.toString(), List.of(), List.of(), true);
     }
 
     /**
@@ -315,7 +362,7 @@ public class AvailabilityPreviewService {
                                                 e.getWindowMin()))
                         .toList();
 
-        return new DatePreview(date.toString(), resultingWindows, trimmed);
+        return new DatePreview(date.toString(), resultingWindows, trimmed, false);
     }
 
     /**

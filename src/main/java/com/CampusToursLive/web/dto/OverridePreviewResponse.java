@@ -70,7 +70,20 @@ public record OverridePreviewResponse(
                                                             + " override would trim/clip on an actual"
                                                             + " save.",
                                             requiredMode = Schema.RequiredMode.REQUIRED))
-                    List<TrimmedSegment> trimmed) {}
+                    List<TrimmedSegment> trimmed,
+            @Schema(
+                            description =
+                                    "True when this date is OUTSIDE the materialization horizon"
+                                            + " [today, today+375) -- a past date or one beyond the"
+                                            + " rolling horizon. A save would still persist the"
+                                            + " override rows, but no occurrence materializes yet, so"
+                                            + " resultingWindows is empty and the date is"
+                                            + " not-yet-effective (it activates once the horizon"
+                                            + " rolls forward). False for effective, in-horizon"
+                                            + " dates.",
+                            example = "false",
+                            requiredMode = Schema.RequiredMode.REQUIRED)
+                    boolean inert) {}
 
     /**
      * One existing exception on the date whose span overlaps the proposed override (and would

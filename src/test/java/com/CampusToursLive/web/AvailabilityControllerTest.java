@@ -221,7 +221,8 @@ class AvailabilityControllerTest {
                                                         Instant.parse("2026-07-12T16:30:00Z"))),
                                         List.of(
                                                 new OverridePreviewResponse.TrimmedSegment(
-                                                        "ADDITIONAL", "09:00", 60)))),
+                                                        "ADDITIONAL", "09:00", 60)),
+                                        false)),
                         true,
                         null);
         when(availabilityPreview.preview(eq(guideId), any())).thenReturn(preview);

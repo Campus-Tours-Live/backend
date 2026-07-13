@@ -92,7 +92,8 @@ class AvailabilityPreviewServiceIntegrationTest {
         guideAId = guideA.getId();
         guideBId = seedGuide("Guide B", universityId).getId();
 
-        previewService = new AvailabilityPreviewService(rules, exceptions, settingsRepo);
+        previewService =
+                new AvailabilityPreviewService(rules, exceptions, settingsRepo, FIXED_CLOCK);
 
         AvailabilityService availabilityService =
                 new AvailabilityService(
@@ -554,6 +555,83 @@ class AvailabilityPreviewServiceIntegrationTest {
         assertThatThrownBy(() -> previewService.previewMulti(guideAId, req))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("366");
+    }
+
+    // ---------------------------------------------------------------------
+    // Out-of-horizon (inert) dates (CTL-54 #6): a preview must not claim net-available windows a
+    // save won't materialize -- a past date or one beyond [today, today+375) is flagged inert with
+    // empty windows, matching what GET /availability shows post-save.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void previewMulti_pastDate_flaggedInert_withEmptyWindows() {
+        LocalDate past = FIXED_TODAY.minusDays(1);
+        // A rule that WOULD make the day available -- proving the inert flag suppresses claimed
+        // windows rather than there simply being no availability.
+        seedRule(
+                guideAId,
+                past.getDayOfWeek().getValue() % 7,
+                "09:00",
+                180,
+                LA_ZONE.getId(),
+                past.minusDays(30),
+                null);
+
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        past.toString(),
+                        past.toString(),
+                        "UNAVAILABLE",
+                        List.of(new Window("10:00", 60)),
+                        true);
+
+        DatePreview dp = previewService.previewMulti(guideAId, req).days().get(0);
+        assertThat(dp.inert()).isTrue();
+        assertThat(dp.resultingWindows()).isEmpty();
+        assertThat(dp.trimmed()).isEmpty();
+    }
+
+    @Test
+    void previewMulti_beyondHorizon_flaggedInert_withEmptyWindows() {
+        LocalDate far = FIXED_TODAY.plusDays(400); // horizon is HORIZON_DAYS = 375.
+        seedRule(
+                guideAId,
+                far.getDayOfWeek().getValue() % 7,
+                "09:00",
+                180,
+                LA_ZONE.getId(),
+                FIXED_TODAY,
+                null);
+
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        far.toString(),
+                        far.toString(),
+                        "UNAVAILABLE",
+                        List.of(new Window("10:00", 60)),
+                        true);
+
+        DatePreview dp = previewService.previewMulti(guideAId, req).days().get(0);
+        assertThat(dp.inert()).isTrue();
+        assertThat(dp.resultingWindows()).isEmpty();
+    }
+
+    @Test
+    void previewMulti_inHorizonDate_notInert_hasWindows() {
+        LocalDate d = FIXED_TODAY; // Saturday, inside [today, today+375).
+        seedRule(guideAId, 6, "09:00", 180, LA_ZONE.getId(), d.minusDays(30), null);
+
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        d.toString(),
+                        d.toString(),
+                        "UNAVAILABLE",
+                        List.of(new Window("10:00", 60)),
+                        true);
+
+        DatePreview dp = previewService.previewMulti(guideAId, req).days().get(0);
+        assertThat(dp.inert()).isFalse();
+        assertThat(dp.resultingWindows()).isNotEmpty();
     }
 
     // ---------------------------------------------------------------------
