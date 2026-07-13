@@ -76,7 +76,15 @@ CREATE INDEX ix_avail_exc_guide ON availability_exceptions(guide_id, exception_d
 -- dependency for Task 1 while giving the identical GIST invariant; the pure
 -- projection (Task 2) still works in terms of intervals, and containment
 -- queries (Task 6) use tstzrange(during_start_at, during_end_at) @> ... .
+--
+-- DROP-before-CREATE for the same reason the two tables above have it: this
+-- branch is unmerged, so V4 may still be re-edited/re-applied against a scratch
+-- database while it is developed. Making every CREATE idempotent (IF EXISTS)
+-- keeps a re-run from failing on an already-present table. Forward-only is still
+-- respected -- V4 is not yet deployed anywhere.
 -- ---------------------------------------------------------------------
+DROP TABLE IF EXISTS guide_availability_occurrences;
+
 CREATE TABLE guide_availability_occurrences (
   id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   guide_id             UUID NOT NULL REFERENCES guide_profiles(id) ON DELETE CASCADE,
