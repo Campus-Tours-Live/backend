@@ -824,6 +824,23 @@ public class AvailabilityWriteService {
         if (startLocal.toSecondOfDay() / 60 + windowMin > 1440) {
             throw new ValidationException("This time off cannot cross midnight.");
         }
+        requireOverrideRange(dateFrom, dateTo);
+    }
+
+    /**
+     * The WINDOW-INDEPENDENT half of {@link #requireOverrideValid} (CTL-54 v2.1 remediation B7/A3):
+     * the operation-size cap only — {@code dateTo >= dateFrom} and the 366 INCLUSIVE-date range
+     * ({@code dateTo - dateFrom + 1 <= 366}). Because it needs no window, it is callable at handler
+     * ENTRY — before the empty-windows branch and before any per-window loop — so a huge range is
+     * rejected up front even when there are ZERO windows to iterate (the case that let {@link
+     * AvailabilityPreviewService#previewMulti} skip the per-window {@link #requireOverrideValid}
+     * and fall through to a full-range day-iteration query storm). Present windows are still
+     * validated for same-day via {@link #requireOverrideValid}.
+     */
+    static void requireOverrideRange(LocalDate dateFrom, LocalDate dateTo) {
+        if (dateTo.isBefore(dateFrom)) {
+            throw new ValidationException("dateTo must not be before dateFrom.");
+        }
         if (ChronoUnit.DAYS.between(dateFrom, dateTo) + 1 > 366) {
             throw new ValidationException("Date range too large (max 366 days).");
         }

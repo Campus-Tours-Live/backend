@@ -132,9 +132,12 @@ public class AvailabilityPreviewService {
         AvailabilityExceptionKind kind = parseKind(req.kind());
         LocalDate dateFrom = parseLocalDate(req.dateFrom(), "dateFrom");
         LocalDate dateTo = parseLocalDate(req.dateTo(), "dateTo");
-        if (dateTo.isBefore(dateFrom)) {
-            throw new ValidationException("dateTo must not be before dateFrom.");
-        }
+        // Window-INDEPENDENT range guard at entry (B7): the 366-day cap + dateTo >= dateFrom must
+        // be
+        // enforced BEFORE the empty-windows branch and the per-window loop -- otherwise a
+        // replaceExisting=true request with empty windows skips the per-window requireOverrideValid
+        // and the day-iteration loop below walks the full (unbounded) range, one DB read per date.
+        AvailabilityWriteService.requireOverrideRange(dateFrom, dateTo);
         boolean replaceExisting = Boolean.TRUE.equals(req.replaceExisting());
         List<OverrideMultiPreviewRequest.Window> windows =
                 req.windows() == null ? List.of() : req.windows();

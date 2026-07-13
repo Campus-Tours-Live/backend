@@ -535,6 +535,21 @@ class AvailabilityPreviewServiceIntegrationTest {
                 .isInstanceOf(ValidationException.class);
     }
 
+    @Test
+    void previewMulti_replaceExisting_emptyWindows_hugeRange_isRejected_notQueryStorm() {
+        // replaceExisting=true + empty windows previously skipped the per-window loop entirely, so
+        // the 366-day range guard (which lived INSIDE that loop) never ran -- the day-iteration
+        // loop then walked the full ~36k-day range, one DB read per date (B7 query storm). The
+        // window-independent entry guard must reject the over-366 range up front, before any loop.
+        OverrideMultiPreviewRequest req =
+                new OverrideMultiPreviewRequest(
+                        "2000-01-01", "2100-01-01", "UNAVAILABLE", List.of(), true);
+
+        assertThatThrownBy(() -> previewService.previewMulti(guideAId, req))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("366");
+    }
+
     // ---------------------------------------------------------------------
     // Fixtures.
     // ---------------------------------------------------------------------
