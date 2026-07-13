@@ -38,6 +38,8 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -1798,6 +1800,40 @@ class AvailabilityWriteServiceIntegrationTest {
         writeService.deleteRule(actingUser(guideAUserId), UUID.fromString(rule.id()));
 
         assertThat(writeService.findFutureBookingsOutsideAvailability(guideAId)).isEmpty();
+    }
+
+    @Test
+    void findFutureBookingsOutsideAvailability_batchesOccurrenceLookup_notOnePerBooking() {
+        // A rule covering 10:00-11:00 next Monday; THREE future CONFIRMED bookings all OUTSIDE it
+        // (evening, non-overlapping reserved intervals) -- so all three are affected. The old
+        // implementation ran one existsContaining query PER booking (N+1); the batched version
+        // loads the guide's occurrences once and tests containment in memory.
+        writeService.createRule(
+                actingUser(guideAUserId),
+                new AvailabilityRuleRequest(MONDAY_DOW, "10:00", 60, null, null, null));
+
+        Instant s1 = NEXT_MONDAY.atTime(20, 0).atZone(LA_ZONE).toInstant();
+        Instant s2 = NEXT_MONDAY.atTime(21, 30).atZone(LA_ZONE).toInstant();
+        Instant s3 = NEXT_MONDAY.atTime(23, 0).atZone(LA_ZONE).toInstant();
+        bookings.saveAndFlush(confirmedBooking(guideAId, offeringId, s1, s1.plusSeconds(3600)));
+        bookings.saveAndFlush(confirmedBooking(guideAId, offeringId, s2, s2.plusSeconds(3600)));
+        bookings.saveAndFlush(confirmedBooking(guideAId, offeringId, s3, s3.plusSeconds(3600)));
+
+        Statistics stats =
+                entityManager
+                        .getEntityManagerFactory()
+                        .unwrap(SessionFactory.class)
+                        .getStatistics();
+        stats.setStatisticsEnabled(true);
+        stats.clear();
+
+        List<AffectedBookingResponse> affected =
+                writeService.findFutureBookingsOutsideAvailability(guideAId);
+
+        assertThat(affected).hasSize(3);
+        // One query for the bookings + ONE for the occurrences = 2 prepared statements, regardless
+        // of booking count. The N+1 version issued 1 + 3 = 4 (an existsContaining per booking).
+        assertThat(stats.getPrepareStatementCount()).isLessThanOrEqualTo(2);
     }
 
     // ---------------------------------------------------------------------

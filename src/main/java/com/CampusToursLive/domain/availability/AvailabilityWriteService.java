@@ -669,16 +669,32 @@ public class AvailabilityWriteService {
     @Transactional(readOnly = true)
     public List<AffectedBookingResponse> findFutureBookingsOutsideAvailability(UUID guideId) {
         Instant now = clock.instant();
+        // Load the guide's materialized occurrences ONCE (a single query) and test containment in
+        // memory, instead of one existsContaining round-trip PER future booking (CTL-54 #N+1). The
+        // occurrences are already coalesced + disjoint and per-guide row counts are small, so the
+        // in-memory scan is trivial. Containment mirrors existsContaining's SQL exactly: the
+        // booking's SCHEDULED interval [schedStart, schedEnd) must sit fully inside some occurrence
+        // [duringStart, duringEnd) -- half-open @> containment.
+        List<GuideAvailabilityOccurrenceEntity> guideOccurrences =
+                occurrences.findByGuideIdOrderByDuringStartAtAsc(guideId);
         return bookings
                 .findByGuideIdAndStatusAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc(
                         guideId, BookingStatus.CONFIRMED, now)
                 .stream()
-                .filter(
-                        b ->
-                                !occurrences.existsContaining(
-                                        guideId, b.getScheduledStartAt(), b.getScheduledEndAt()))
+                .filter(b -> guideOccurrences.stream().noneMatch(o -> contains(o, b)))
                 .map(AvailabilityWriteService::toAffectedBookingResponse)
                 .toList();
+    }
+
+    /**
+     * Whether {@code occurrence}'s half-open interval {@code [duringStart, duringEnd)} fully
+     * contains the booking's scheduled half-open interval {@code [scheduledStart, scheduledEnd)} --
+     * the in-memory equivalent of {@link GuideAvailabilityOccurrenceRepository#existsContaining}'s
+     * {@code tstzrange @>} SQL: {@code duringStart <= scheduledStart && scheduledEnd <= duringEnd}.
+     */
+    private static boolean contains(GuideAvailabilityOccurrenceEntity occurrence, BookingEntity b) {
+        return !occurrence.getDuringStartAt().isAfter(b.getScheduledStartAt())
+                && !occurrence.getDuringEndAt().isBefore(b.getScheduledEndAt());
     }
 
     /**
