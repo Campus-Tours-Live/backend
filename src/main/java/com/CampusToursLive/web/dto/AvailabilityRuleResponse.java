@@ -51,6 +51,5 @@ public record AvailabilityRuleResponse(
                 String effectiveTo,
         @Schema(
                         description = "Whether the rule is currently active.",
-                        example = "true",
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 boolean active) {}

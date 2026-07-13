@@ -45,7 +45,6 @@ public record ResolvedAvailabilityResponse(
                                 "Derived readiness signal: true iff the guide has at least one"
                                         + " materialized occurrence that has not yet ended, i.e. a"
                                         + " participant could book right now.",
-                        example = "true",
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 boolean bookable,
         @Schema(
@@ -53,6 +52,5 @@ public record ResolvedAvailabilityResponse(
                                 "Derived readiness signal: true iff the guide has at least one"
                                         + " active weekly rule (an expired-but-active rule still"
                                         + " counts; a soft-deleted/inactive rule does not).",
-                        example = "true",
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 boolean hasWeeklyHours) {}

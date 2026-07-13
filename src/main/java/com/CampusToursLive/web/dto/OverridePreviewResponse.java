@@ -27,7 +27,6 @@ public record OverridePreviewResponse(
                         description =
                                 "Always true under the newest-wins trim/replace model; kept for a"
                                         + " future rule that might reject rather than trim.",
-                        example = "true",
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 boolean valid,
         @Schema(
@@ -81,7 +80,6 @@ public record OverridePreviewResponse(
                                             + " not-yet-effective (it activates once the horizon"
                                             + " rolls forward). False for effective, in-horizon"
                                             + " dates.",
-                            example = "false",
                             requiredMode = Schema.RequiredMode.REQUIRED)
                     boolean inert) {}
 

@@ -52,6 +52,5 @@ public record AvailabilityRuleRequest(
                 String effectiveTo,
         @Schema(
                         description = "Whether the rule is active; defaults to true when omitted.",
-                        example = "true",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 Boolean active) {}
