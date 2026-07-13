@@ -103,6 +103,12 @@ public class SlotGenerationService {
         GuideBookingSettingsEntity guideSettings =
                 settings.findByGuideId(guideId).orElseGet(GuideBookingSettingsEntity::new);
 
+        // Zone resolution here is settings-or-default, deliberately WITHOUT the rules-mode
+        // heuristic fallback AvailabilityReadService.resolveGuideZone carries (CTL-54 M3). That
+        // divergence is unreachable: occurrences are only materialized after getOrCreateSettings
+        // has persisted a settings row, so any guide reaching slot generation already has a real
+        // settings row; a guide with no settings row has no occurrences and returns empty before
+        // the zone matters. The orElseGet default is a pure safety net for that empty case.
         // Parse the calendar-date from/to filter in the GUIDE's own timezone, not UTC (CTL-54 #6):
         // an occurrence late in the guide's local evening can carry a UTC instant on the NEXT
         // calendar day, so a UTC start-of-day boundary would wrongly exclude/include it.

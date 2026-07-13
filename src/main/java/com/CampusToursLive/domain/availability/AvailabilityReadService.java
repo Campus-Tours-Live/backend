@@ -159,6 +159,12 @@ public class AvailabilityReadService {
      * AvailabilityService#DEFAULT_TIMEZONE}.
      */
     private ZoneId resolveGuideZone(UUID guideId, List<GuideAvailabilityRuleEntity> guideRules) {
+        // This carries the rules-mode heuristic fallback (settings row -> rules-mode -> default);
+        // SlotGenerationService intentionally uses only settings-or-default (CTL-54 M3). The extra
+        // branch here (no settings row but rules present) is currently unreachable in practice --
+        // getOrCreateSettings guarantees a settings row before any occurrence is materialized --
+        // but it is kept so this read path degrades gracefully to the materialization zone rather
+        // than throwing if that invariant ever changes.
         Optional<GuideBookingSettingsEntity> guideSettings = settings.findByGuideId(guideId);
         if (guideSettings.isPresent()) {
             return ZoneId.of(guideSettings.get().getTimezone());
