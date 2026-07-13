@@ -26,6 +26,8 @@ import com.CampusToursLive.web.dto.SlotResponse;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
@@ -355,6 +357,26 @@ class SlotGenerationServiceIntegrationTest {
         List<SlotResponse> slots = service.getBookableSlots(offering.getId(), from, to);
 
         assertThat(slots).extracting(SlotResponse::startAt).containsExactly(near);
+    }
+
+    @Test
+    void getBookableSlots_windowFilter_parsesBoundInGuideLocalTimezone() {
+        // Guide defaults to LA (UTC-7 in July; no settings row -> DEFAULT_TIMEZONE). A 1-hour
+        // occurrence at 22:00 on 2026-07-15 LOCAL is 2026-07-16 05:00 UTC -- its LOCAL date is the
+        // 15th. Filtering to = "2026-07-16" (exclusive) must INCLUDE it: a UTC-midnight boundary
+        // (2026-07-16T00:00Z) sits before the 05:00Z start and would wrongly drop it, while the
+        // guide-local boundary (2026-07-16T07:00Z) keeps it.
+        TourOfferingEntity offering = offering(60);
+        Instant start =
+                LocalDate.of(2026, 7, 15)
+                        .atTime(22, 0)
+                        .atZone(ZoneId.of("America/Los_Angeles"))
+                        .toInstant();
+        occurrence(start, start.plus(1, java.time.temporal.ChronoUnit.HOURS));
+
+        List<SlotResponse> slots = service.getBookableSlots(offering.getId(), null, "2026-07-16");
+
+        assertThat(slots).extracting(SlotResponse::startAt).containsExactly(start);
     }
 
     @Test

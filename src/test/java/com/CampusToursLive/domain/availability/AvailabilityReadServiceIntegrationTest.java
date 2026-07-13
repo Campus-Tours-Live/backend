@@ -23,6 +23,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
@@ -95,7 +96,8 @@ class AvailabilityReadServiceIntegrationTest {
         GuideProfileEntity guideB = seedGuide("Guide B");
         guideBUserId = guideB.getUserId();
 
-        readService = new AvailabilityReadService(rules, occurrences, dstNotices, guides);
+        readService =
+                new AvailabilityReadService(rules, occurrences, dstNotices, guides, settingsRepo);
     }
 
     private AvailabilityWriteService writeServiceWithClock(Clock clock) {
@@ -281,6 +283,27 @@ class AvailabilityReadServiceIntegrationTest {
                 .isEmpty();
     }
 
+    @Test
+    void getResolvedAvailability_windowFilter_parsesBoundInGuideLocalTimezone() {
+        // Guide in LA (UTC-7 in July). An occurrence at 22:00-23:00 on 2026-07-15 LOCAL is
+        // 2026-07-16 05:00-06:00 UTC -- its LOCAL calendar date is the 15th. Filtering
+        // to = "2026-07-16" (exclusive) must INCLUDE it. Parsing `to` as UTC midnight puts the
+        // boundary at 2026-07-16T00:00Z, BEFORE the occurrence's 05:00Z start, wrongly excluding
+        // it;
+        // parsing in the guide's LA zone puts it at 2026-07-16T07:00Z, correctly including it.
+        settingsRepo.save(laSettings(guideAId));
+        Instant start = LocalDate.of(2026, 7, 15).atTime(22, 0).atZone(ZoneId.of(LA)).toInstant();
+        Instant end = LocalDate.of(2026, 7, 15).atTime(23, 0).atZone(ZoneId.of(LA)).toInstant();
+        seedOccurrence(guideAId, start, end);
+
+        ResolvedAvailabilityResponse resolved =
+                readService.getResolvedAvailability(actingUser(guideAUserId), null, "2026-07-16");
+
+        assertThat(resolved.occurrences())
+                .extracting(ResolvedOccurrence::startAt)
+                .containsExactly(start);
+    }
+
     // ---------------------------------------------------------------------
     // Validation.
     // ---------------------------------------------------------------------
@@ -449,6 +472,13 @@ class AvailabilityReadServiceIntegrationTest {
         o.setDuringEndAt(end);
         o.setGeneratedAt(Instant.now());
         return occurrences.save(o);
+    }
+
+    private static GuideBookingSettingsEntity laSettings(UUID guideId) {
+        GuideBookingSettingsEntity s = new GuideBookingSettingsEntity();
+        s.setGuideId(guideId);
+        s.setTimezone(LA);
+        return s;
     }
 
     private GuideAvailabilityRuleEntity seedRule(

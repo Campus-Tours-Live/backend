@@ -9,9 +9,10 @@ import com.CampusToursLive.web.dto.ResolvedAvailabilityResponse;
 import com.CampusToursLive.web.dto.ResolvedOccurrence;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -44,17 +45,20 @@ public class AvailabilityReadService {
     private final GuideAvailabilityOccurrenceRepository occurrences;
     private final GuideAvailabilityDstNoticeRepository dstNotices;
     private final GuideProfileRepository guides;
+    private final GuideBookingSettingsRepository settings;
 
     @Autowired
     public AvailabilityReadService(
             GuideAvailabilityRuleRepository rules,
             GuideAvailabilityOccurrenceRepository occurrences,
             GuideAvailabilityDstNoticeRepository dstNotices,
-            GuideProfileRepository guides) {
+            GuideProfileRepository guides,
+            GuideBookingSettingsRepository settings) {
         this.rules = rules;
         this.occurrences = occurrences;
         this.dstNotices = dstNotices;
         this.guides = guides;
+        this.settings = settings;
     }
 
     /**
@@ -69,16 +73,22 @@ public class AvailabilityReadService {
             UserEntity user, String from, String to) {
         UUID guideId = requireGuideId(user);
 
-        Instant windowStart = parseWindowBound(from, "from");
-        Instant windowEnd = parseWindowBound(to, "to");
+        List<GuideAvailabilityRuleEntity> guideRules = rules.findByGuideId(guideId);
+
+        // Parse the calendar-date from/to filter in the GUIDE's own timezone, not UTC (CTL-54 #6):
+        // an occurrence late in the guide's local evening can carry a UTC instant on the NEXT
+        // calendar day, so a UTC start-of-day boundary would wrongly exclude/include it. Resolving
+        // the guide's zone the same way materialization did keeps this filter aligned with the
+        // occurrences it filters.
+        ZoneId guideZone = resolveGuideZone(guideId, guideRules);
+        Instant windowStart = parseWindowBound(from, "from", guideZone);
+        Instant windowEnd = parseWindowBound(to, "to", guideZone);
         if (windowStart != null && windowEnd != null && !windowEnd.isAfter(windowStart)) {
             throw new ValidationException("to must be after from");
         }
 
         List<AvailabilityRuleResponse> ruleResponses =
-                rules.findByGuideId(guideId).stream()
-                        .map(AvailabilityReadService::toRuleResponse)
-                        .toList();
+                guideRules.stream().map(AvailabilityReadService::toRuleResponse).toList();
 
         // findByGuideIdOrderByDuringStartAtAsc already returns a coalesced, disjoint, ascending
         // set (Task 2/3) -- filter in Java (trivial per-guide row count) and never re-coalesce.
@@ -129,16 +139,34 @@ public class AvailabilityReadService {
         return guide.getId();
     }
 
-    private static Instant parseWindowBound(String raw, String paramName) {
+    private static Instant parseWindowBound(String raw, String paramName, ZoneId zone) {
         if (raw == null || raw.isBlank()) {
             return null;
         }
         try {
-            return LocalDate.parse(raw).atStartOfDay(ZoneOffset.UTC).toInstant();
+            return LocalDate.parse(raw).atStartOfDay(zone).toInstant();
         } catch (DateTimeParseException ex) {
             throw new ValidationException(
                     "Invalid " + paramName + " (expected e.g. \"2026-07-11\"): " + raw);
         }
+    }
+
+    /**
+     * Resolves the guide's canonical availability zone, mirroring {@link
+     * AvailabilityService#rematerialize}'s own precedence so this read filter agrees with the zone
+     * the occurrences were materialized in: settings row -&gt; its timezone; else rules present
+     * -&gt; the pure engine's MODE-of-rules heuristic; else -&gt; {@link
+     * AvailabilityService#DEFAULT_TIMEZONE}.
+     */
+    private ZoneId resolveGuideZone(UUID guideId, List<GuideAvailabilityRuleEntity> guideRules) {
+        Optional<GuideBookingSettingsEntity> guideSettings = settings.findByGuideId(guideId);
+        if (guideSettings.isPresent()) {
+            return ZoneId.of(guideSettings.get().getTimezone());
+        }
+        if (!guideRules.isEmpty()) {
+            return ZoneId.of(AvailabilityProjection.resolveExceptionTimezone(guideRules));
+        }
+        return ZoneId.of(AvailabilityService.DEFAULT_TIMEZONE);
     }
 
     private static AvailabilityRuleResponse toRuleResponse(GuideAvailabilityRuleEntity r) {

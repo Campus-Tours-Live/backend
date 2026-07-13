@@ -13,7 +13,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
@@ -96,8 +96,19 @@ public class SlotGenerationService {
         UUID guideId = offering.getGuideId();
         Duration slotLength = Duration.ofMinutes(offering.getDurationMin());
 
-        Instant windowStart = parseWindowBound(from, "from");
-        Instant windowEnd = parseWindowBound(to, "to");
+        // Loaded ONCE up front and threaded through every step below: it drives the guide's zone
+        // (for the from/to filter), the buffer math (subtractHeldBookings) and the notice/advance
+        // window (applyNoticeAndAdvanceWindow), so there is exactly one settings read per request
+        // and no risk of the steps seeing a guide's settings change mid-computation.
+        GuideBookingSettingsEntity guideSettings =
+                settings.findByGuideId(guideId).orElseGet(GuideBookingSettingsEntity::new);
+
+        // Parse the calendar-date from/to filter in the GUIDE's own timezone, not UTC (CTL-54 #6):
+        // an occurrence late in the guide's local evening can carry a UTC instant on the NEXT
+        // calendar day, so a UTC start-of-day boundary would wrongly exclude/include it.
+        ZoneId guideZone = ZoneId.of(guideSettings.getTimezone());
+        Instant windowStart = parseWindowBound(from, "from", guideZone);
+        Instant windowEnd = parseWindowBound(to, "to", guideZone);
         if (windowStart != null && windowEnd != null && !windowEnd.isAfter(windowStart)) {
             throw new ValidationException("to must be after from");
         }
@@ -114,13 +125,6 @@ public class SlotGenerationService {
         if (candidates.isEmpty()) {
             return List.of();
         }
-
-        // Loaded ONCE and threaded through both steps below: the same row drives the buffer math
-        // (subtractHeldBookings) and the notice/advance window (applyNoticeAndAdvanceWindow), so
-        // there is exactly one settings read per request and no risk of the two steps seeing a
-        // guide's settings change mid-computation.
-        GuideBookingSettingsEntity guideSettings =
-                settings.findByGuideId(guideId).orElseGet(GuideBookingSettingsEntity::new);
 
         candidates = subtractHeldBookings(guideId, candidates, guideSettings);
         candidates = applyNoticeAndAdvanceWindow(candidates, guideSettings);
@@ -246,12 +250,12 @@ public class SlotGenerationService {
         return startsBeforeWindowEnd && endsAfterWindowStart;
     }
 
-    private static Instant parseWindowBound(String raw, String paramName) {
+    private static Instant parseWindowBound(String raw, String paramName, ZoneId zone) {
         if (raw == null || raw.isBlank()) {
             return null;
         }
         try {
-            return LocalDate.parse(raw).atStartOfDay(ZoneOffset.UTC).toInstant();
+            return LocalDate.parse(raw).atStartOfDay(zone).toInstant();
         } catch (DateTimeParseException ex) {
             throw new ValidationException(
                     "Invalid " + paramName + " (expected e.g. \"2026-07-11\"): " + raw);
