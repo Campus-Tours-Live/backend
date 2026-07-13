@@ -736,17 +736,24 @@ public class AvailabilityWriteService {
         if (existing.isPresent()) {
             return existing.get();
         }
-        GuideBookingSettingsEntity created = new GuideBookingSettingsEntity();
-        created.setGuideId(guideId);
-        // save()/saveAndFlush() may return a DIFFERENT (merged) managed instance than the one
-        // passed in (the guide_id PK is client-assigned, so Spring Data JPA's isNew() check may
-        // route this through merge() rather than persist()) -- reassign so refresh() below targets
-        // the actually-managed object, not the detached one we constructed.
-        created = settingsRepo.saveAndFlush(created);
-        // Refresh so updated_at (DB DEFAULT now(), insertable=false in the entity) is populated --
-        // a repository re-query would return the same identity-mapped instance unchanged.
-        entityManager.refresh(created);
-        return created;
+        // First write: provision the defaults via an idempotent UPSERT (CTL-54 #settings-race).
+        // A plain insert-after-empty-find is not safe under concurrency -- two first-writes for the
+        // same guide (e.g. a rule create racing a settings read) both see the empty find and both
+        // INSERT, so the loser trips the guide_id PK and 500s. `ON CONFLICT (guide_id) DO NOTHING`
+        // makes the loser a no-op: whichever row committed first wins and both callers succeed.
+        // Every non-PK column is a schema DEFAULT (V1__schema.sql), so INSERT (guide_id) is enough
+        // and yields exactly the entity's own Java defaults.
+        entityManager
+                .createNativeQuery(
+                        "INSERT INTO guide_booking_settings (guide_id) VALUES (:guideId)"
+                                + " ON CONFLICT (guide_id) DO NOTHING")
+                .setParameter("guideId", guideId)
+                .executeUpdate();
+        // Re-read the now-guaranteed row (ours or the concurrent winner's). A fresh query pulls the
+        // DB-owned updated_at (DEFAULT now(), insertable=false in the entity) that the native
+        // insert
+        // never routed through the persistence context.
+        return settingsRepo.findByGuideId(guideId).orElseThrow();
     }
 
     // ---------------------------------------------------------------------
