@@ -63,7 +63,6 @@ public record OverrideMultiPreviewRequest(
                                         + " list clears this kind for the day. When false or absent"
                                         + " (default), the windows are applied ON TOP of ALL"
                                         + " existing exceptions (windows must then be non-empty).",
-                        example = "true",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 Boolean replaceExisting) {
 
