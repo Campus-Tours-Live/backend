@@ -1,0 +1,11 @@
+{
+  // Java formatting is owned by Spotless (google-java-format, AOSP) and enforced in CI.
+  // VS Code's built-in Java formatter is Eclipse-based and does NOT match it, so do not
+  // format Java on save here — run `./mvnw spotless:apply` before committing instead.
+  "[java]": {
+    "editor.formatOnSave": false
+  },
+  "editor.rulers": [100],
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true
+}
