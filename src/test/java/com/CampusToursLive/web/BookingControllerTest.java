@@ -125,15 +125,16 @@ class BookingControllerTest {
         verify(bookingService).createBooking(u, req);
     }
 
-    // ── cancel ───────────────────────────────────────────────────────────────
+    // ── cancel (either party) ─────────────────────────────────────────────────
 
     @Test
-    void cancel_requiresParticipantRole_andWrapsResultInEnvelope() {
+    void cancel_authenticatesCaller_andWrapsResultInEnvelope() {
         UserEntity u = participantUser();
         UUID bookingId = UUID.randomUUID();
         CancelBookingRequest req = new CancelBookingRequest("plans changed");
         BookingDetailResponse detail = mockDetail();
-        when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
+        // No role gate — the service dispatches by the caller's relationship to the booking.
+        when(currentUser.require()).thenReturn(u);
         when(bookingService.cancelBooking(u, bookingId, req)).thenReturn(detail);
 
         assertSame(detail, controller().cancel(bookingId, req).data());
@@ -144,9 +145,46 @@ class BookingControllerTest {
         UserEntity u = participantUser();
         UUID bookingId = UUID.randomUUID();
         BookingDetailResponse detail = mockDetail();
-        when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
+        when(currentUser.require()).thenReturn(u);
         when(bookingService.cancelBooking(u, bookingId, null)).thenReturn(detail);
 
         assertSame(detail, controller().cancel(bookingId, null).data());
+    }
+
+    // ── accept / decline (guide) ──────────────────────────────────────────────
+
+    @Test
+    void accept_requiresGuideRole_andWrapsResultInEnvelope() {
+        UserEntity u = participantUser();
+        UUID bookingId = UUID.randomUUID();
+        BookingDetailResponse detail = mockDetail();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(bookingService.acceptBooking(u, bookingId)).thenReturn(detail);
+
+        assertSame(detail, controller().accept(bookingId).data());
+        verify(bookingService).acceptBooking(u, bookingId);
+    }
+
+    @Test
+    void decline_requiresGuideRole_andWrapsResultInEnvelope() {
+        UserEntity u = participantUser();
+        UUID bookingId = UUID.randomUUID();
+        CancelBookingRequest req = new CancelBookingRequest("fully booked");
+        BookingDetailResponse detail = mockDetail();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(bookingService.declineBooking(u, bookingId, req)).thenReturn(detail);
+
+        assertSame(detail, controller().decline(bookingId, req).data());
+    }
+
+    @Test
+    void decline_acceptsMissingBody() {
+        UserEntity u = participantUser();
+        UUID bookingId = UUID.randomUUID();
+        BookingDetailResponse detail = mockDetail();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(bookingService.declineBooking(u, bookingId, null)).thenReturn(detail);
+
+        assertSame(detail, controller().decline(bookingId, null).data());
     }
 }
