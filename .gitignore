@@ -10,9 +10,13 @@ target/
 .env.*
 
 # --- IDEs / editors ---
-.idea/
+# Ignore user-specific IDE files, but keep the shared, committed config.
+.idea/*
+!.idea/externalDependencies.xml
 *.iml
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 *.code-workspace
 
 # --- OS ---
