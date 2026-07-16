@@ -79,9 +79,9 @@ public interface ApiExamples {
                     + "\"status\":\"DRAFT\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
                     + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
                     + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
-                    + "\"guideResponseDeadline\":null,"
                     + "\"universityName\":\"North Coast University\",\"durationMin\":60,"
-                    + "\"priceCents\":4200,\"currency\":\"USD\"}],"
+                    + "\"priceCents\":4200,\"currentPriceCents\":4200,\"currency\":\"USD\","
+                    + "\"cartStatus\":\"AVAILABLE\"}],"
                     + META
                     + "}";
 
@@ -92,9 +92,9 @@ public interface ApiExamples {
                     + "\"status\":\"DRAFT\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
                     + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
                     + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
-                    + "\"guideResponseDeadline\":null,"
                     + "\"universityName\":\"North Coast University\",\"durationMin\":60,"
-                    + "\"priceCents\":4200,\"currency\":\"USD\"},"
+                    + "\"priceCents\":4200,\"currentPriceCents\":4200,\"currency\":\"USD\","
+                    + "\"cartStatus\":\"AVAILABLE\"},"
                     + META
                     + "}";
 
