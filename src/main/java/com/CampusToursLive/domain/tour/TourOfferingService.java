@@ -11,6 +11,7 @@ import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateOfferingRequest;
 import com.CampusToursLive.web.dto.TourOfferingResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -93,6 +94,9 @@ public class TourOfferingService {
                     req.languages().stream().filter(s -> s != null && !s.isBlank()).toList();
             if (!langs.isEmpty()) o.setLanguages(writeJson(langs));
         }
+        if (req.features() != null) {
+            o.setFeatures(writeJson(validateFeatures(req.features(), topic)));
+        }
         // status defaults to DRAFT — creating unpublished content is allowed while pending.
         offerings.save(o);
         return toResponse(o);
@@ -168,6 +172,34 @@ public class TourOfferingService {
         } catch (Exception ex) {
             return "[]";
         }
+    }
+
+    /**
+     * Validate a client-supplied feature selection: each must be a known {@link TourFeature} that
+     * is allowed for the offering's topic; duplicates are dropped; at most {@link
+     * TourFeature#MAX_PER_OFFERING} may be kept. Returns the enum names to persist.
+     */
+    private List<String> validateFeatures(List<String> raw, TourTopic topic) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (String s : raw) {
+            if (s == null || s.isBlank()) continue;
+            TourFeature feature;
+            try {
+                feature = TourFeature.valueOf(s.trim());
+            } catch (IllegalArgumentException ex) {
+                throw new ValidationException("Unknown feature: " + s);
+            }
+            if (!TourFeatureCatalog.isAllowed(topic, feature)) {
+                throw new ValidationException(
+                        "Feature " + feature.name() + " is not available for topic " + topic);
+            }
+            out.add(feature.name());
+        }
+        if (out.size() > TourFeature.MAX_PER_OFFERING) {
+            throw new ValidationException(
+                    "At most " + TourFeature.MAX_PER_OFFERING + " features may be selected");
+        }
+        return List.copyOf(out);
     }
 
     private TourOfferingResponse toResponse(TourOfferingEntity o) {

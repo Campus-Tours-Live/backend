@@ -110,7 +110,9 @@ class TourOfferingRepositoryTest {
     @Test
     void findDiscoverable_excludesNonVisibleOfferings() {
         List<TourOfferingEntity> results =
-                offerings.findDiscoverable(null, null, searchMarker, PageRequest.of(0, 20));
+                offerings
+                        .findDiscoverable(null, null, searchMarker, PageRequest.of(0, 20))
+                        .getContent();
 
         assertThat(results).extracting(TourOfferingEntity::getId).containsExactly(discoverableId);
     }
@@ -144,7 +146,10 @@ class TourOfferingRepositoryTest {
         entityManager.flush();
         entityManager.clear();
 
-        assertThat(offerings.findDiscoverable(null, null, token, PageRequest.of(0, 20)))
+        assertThat(
+                        offerings
+                                .findDiscoverable(null, null, token, PageRequest.of(0, 20))
+                                .getContent())
                 .extracting(TourOfferingEntity::getId)
                 .containsExactly(id);
     }
@@ -166,7 +171,10 @@ class TourOfferingRepositoryTest {
         entityManager.flush();
         entityManager.clear();
 
-        assertThat(offerings.findDiscoverable(null, null, token, PageRequest.of(0, 20)))
+        assertThat(
+                        offerings
+                                .findDiscoverable(null, null, token, PageRequest.of(0, 20))
+                                .getContent())
                 .extracting(TourOfferingEntity::getId)
                 .containsExactly(id);
     }
@@ -218,7 +226,11 @@ class TourOfferingRepositoryTest {
     @Test
     void findDiscoverable_excludesRowsNotMatchingQuery() {
         String absent = "absent-" + UUID.randomUUID().toString().substring(0, 8);
-        assertThat(offerings.findDiscoverable(null, null, absent, PageRequest.of(0, 20))).isEmpty();
+        assertThat(
+                        offerings
+                                .findDiscoverable(null, null, absent, PageRequest.of(0, 20))
+                                .getContent())
+                .isEmpty();
     }
 
     @Test
@@ -237,7 +249,10 @@ class TourOfferingRepositoryTest {
         entityManager.clear();
 
         // Escaped "%" ("!%") matches a literal "%" via `escape '!'`; the title contains "50%".
-        assertThat(offerings.findDiscoverable(null, null, "50!%", PageRequest.of(0, 20)))
+        assertThat(
+                        offerings
+                                .findDiscoverable(null, null, "50!%", PageRequest.of(0, 20))
+                                .getContent())
                 .extracting(TourOfferingEntity::getId)
                 .contains(id);
     }

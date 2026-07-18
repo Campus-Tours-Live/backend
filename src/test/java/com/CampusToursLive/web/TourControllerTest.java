@@ -17,6 +17,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.security.oauth2.resource.servlet.OAuth2ResourceServerAutoConfiguration;
 import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -44,18 +46,33 @@ class TourControllerTest {
                         "North Coast University",
                         "g1",
                         "Maya Chen",
+                        "Computer Science",
+                        "BS",
+                        2023,
                         60,
                         4200L,
                         "USD",
                         4.5,
-                        12);
-        when(discovery.list(null, null, "", TourDiscoverySort.RECOMMENDED, 20))
-                .thenReturn(List.of(row));
+                        12,
+                        List.of("en-US"),
+                        List.of("Q_AND_A"),
+                        true);
+        when(discovery.list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 20))
+                .thenReturn(new PageImpl<>(List.of(row)));
 
         mvc.perform(get("/tours"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].id").value("t1"))
-                .andExpect(jsonPath("$.data[0].guideDisplayName").value("Maya Chen"))
+                .andExpect(jsonPath("$.data.items[0].id").value("t1"))
+                .andExpect(jsonPath("$.data.items[0].guideDisplayName").value("Maya Chen"))
+                .andExpect(jsonPath("$.data.items[0].guideMajor").value("Computer Science"))
+                .andExpect(jsonPath("$.data.items[0].guideDegree").value("BS"))
+                .andExpect(jsonPath("$.data.items[0].guideEntryYear").value(2023))
+                .andExpect(jsonPath("$.data.items[0].languages[0]").value("en-US"))
+                .andExpect(jsonPath("$.data.items[0].features[0]").value("Q_AND_A"))
+                .andExpect(jsonPath("$.data.items[0].isNew").value(true))
+                .andExpect(jsonPath("$.data.page").value(0))
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.totalPages").value(1))
                 .andExpect(jsonPath("$.meta.requestId").exists());
     }
 
@@ -63,8 +80,13 @@ class TourControllerTest {
     void list_passesQueryParams() throws Exception {
         UUID univId = UUID.randomUUID();
         when(discovery.list(
-                        univId.toString(), "DORM_HOUSING", "dorm", TourDiscoverySort.PRICE_ASC, 10))
-                .thenReturn(List.of());
+                        univId.toString(),
+                        "DORM_HOUSING",
+                        "dorm",
+                        TourDiscoverySort.PRICE_ASC,
+                        2,
+                        10))
+                .thenReturn(Page.empty());
 
         mvc.perform(
                         get("/tours")
@@ -72,6 +94,7 @@ class TourControllerTest {
                                 .param("topic", "DORM_HOUSING")
                                 .param("q", "dorm")
                                 .param("sort", "PRICE_ASC")
+                                .param("page", "2")
                                 .param("limit", "10"))
                 .andExpect(status().isOk());
     }

@@ -115,6 +115,96 @@ class TourOfferingServiceTest {
         assertEquals("DRAFT", res.status());
     }
 
+    // ---------- create: feature validation ----------
+
+    private void stubCreateReady(UUID uid, UUID gid) {
+        stubPendingGuide(uid, gid);
+        when(universities.existsById(any())).thenReturn(true);
+        when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
+    }
+
+    @Test
+    void create_storesValidTopicFeatures_inOrder() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubCreateReady(uid, gid);
+        java.util.concurrent.atomic.AtomicReference<TourOfferingEntity> saved =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        when(offerings.save(any()))
+                .thenAnswer(
+                        inv -> {
+                            saved.set(inv.getArgument(0));
+                            return inv.getArgument(0);
+                        });
+
+        CreateOfferingRequest req =
+                new CreateOfferingRequest(
+                        "Walk",
+                        UNI,
+                        "GENERAL_CAMPUS",
+                        60,
+                        5000L,
+                        null,
+                        List.of("en-US"),
+                        List.of("Q_AND_A", "HIDDEN_SPOTS"));
+        service().create(user(uid), req);
+        assertEquals("[\"Q_AND_A\",\"HIDDEN_SPOTS\"]", saved.get().getFeatures());
+    }
+
+    @Test
+    void create_throws422_whenFeatureNotAllowedForTopic() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubCreateReady(uid, gid);
+        CreateOfferingRequest req =
+                new CreateOfferingRequest(
+                        "Walk",
+                        UNI,
+                        "GENERAL_CAMPUS",
+                        60,
+                        5000L,
+                        null,
+                        List.of("en-US"),
+                        List.of("DORM_INTERIOR")); // a DORM_HOUSING feature
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
+    }
+
+    @Test
+    void create_throws422_whenUnknownFeature() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubCreateReady(uid, gid);
+        CreateOfferingRequest req =
+                new CreateOfferingRequest(
+                        "Walk",
+                        UNI,
+                        "GENERAL_CAMPUS",
+                        60,
+                        5000L,
+                        null,
+                        List.of("en-US"),
+                        List.of("NOT_A_FEATURE"));
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
+    }
+
+    @Test
+    void create_throws422_whenMoreThanThreeFeatures() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubCreateReady(uid, gid);
+        CreateOfferingRequest req =
+                new CreateOfferingRequest(
+                        "Walk",
+                        UNI,
+                        "GENERAL_CAMPUS",
+                        60,
+                        5000L,
+                        null,
+                        List.of("en-US"),
+                        List.of("Q_AND_A", "HIDDEN_SPOTS", "PHOTOS_OK", "LANDMARKS"));
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
+    }
+
     // ---------- helpers for the validation/branch cases ----------
 
     private static final String UNI = UUID.randomUUID().toString();

@@ -3,6 +3,7 @@ package com.CampusToursLive.domain.tour;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -23,24 +24,43 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
      * {@code q} are escaped and matched literally).
      */
     @Query(
-            """
-            select o from TourOfferingEntity o
-            inner join GuideProfileEntity g on g.id = o.guideId
-            inner join UniversityEntity u on u.id = o.universityId
-            where o.status = com.CampusToursLive.domain.tour.TourStatus.ACTIVE
-              and g.applicationStatus = com.CampusToursLive.domain.guide.GuideApplicationStatus.APPROVED
-              and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
-              and o.universityId = coalesce(:universityId, o.universityId)
-              and o.topic = coalesce(:topic, o.topic)
-              and (
-                :q = ''
-                or lower(o.title) like lower(concat('%', :q, '%')) escape '!'
-                or lower(o.description) like lower(concat('%', :q, '%')) escape '!'
-                or lower(u.name) like lower(concat('%', :q, '%')) escape '!'
-                or lower(coalesce(u.shortName, '')) like lower(concat('%', :q, '%')) escape '!'
-              )
-            """)
-    List<TourOfferingEntity> findDiscoverable(
+            value =
+                    """
+                    select o from TourOfferingEntity o
+                    inner join GuideProfileEntity g on g.id = o.guideId
+                    inner join UniversityEntity u on u.id = o.universityId
+                    where o.status = com.CampusToursLive.domain.tour.TourStatus.ACTIVE
+                      and g.applicationStatus = com.CampusToursLive.domain.guide.GuideApplicationStatus.APPROVED
+                      and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
+                      and o.universityId = coalesce(:universityId, o.universityId)
+                      and o.topic = coalesce(:topic, o.topic)
+                      and (
+                        :q = ''
+                        or lower(o.title) like lower(concat('%', :q, '%')) escape '!'
+                        or lower(o.description) like lower(concat('%', :q, '%')) escape '!'
+                        or lower(u.name) like lower(concat('%', :q, '%')) escape '!'
+                        or lower(coalesce(u.shortName, '')) like lower(concat('%', :q, '%')) escape '!'
+                      )
+                    """,
+            countQuery =
+                    """
+                    select count(o) from TourOfferingEntity o
+                    inner join GuideProfileEntity g on g.id = o.guideId
+                    inner join UniversityEntity u on u.id = o.universityId
+                    where o.status = com.CampusToursLive.domain.tour.TourStatus.ACTIVE
+                      and g.applicationStatus = com.CampusToursLive.domain.guide.GuideApplicationStatus.APPROVED
+                      and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
+                      and o.universityId = coalesce(:universityId, o.universityId)
+                      and o.topic = coalesce(:topic, o.topic)
+                      and (
+                        :q = ''
+                        or lower(o.title) like lower(concat('%', :q, '%')) escape '!'
+                        or lower(o.description) like lower(concat('%', :q, '%')) escape '!'
+                        or lower(u.name) like lower(concat('%', :q, '%')) escape '!'
+                        or lower(coalesce(u.shortName, '')) like lower(concat('%', :q, '%')) escape '!'
+                      )
+                    """)
+    Page<TourOfferingEntity> findDiscoverable(
             @Param("universityId") UUID universityId,
             @Param("topic") TourTopic topic,
             @Param("q") String q,
