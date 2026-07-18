@@ -20,6 +20,7 @@ import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -29,6 +30,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -47,6 +49,7 @@ class GuideServiceTest {
     @Mock ParticipantProfileRepository participants;
     @Mock UserRepository users;
     @Mock RoleGrantService roleGrant;
+    @Mock SchoolDirectory schools;
 
     private GuideService service() {
         return new GuideService(
@@ -56,6 +59,7 @@ class GuideServiceTest {
                 participants,
                 users,
                 roleGrant,
+                schools,
                 new ObjectMapper());
     }
 
@@ -115,6 +119,31 @@ class GuideServiceTest {
                                                 user(UUID.randomUUID()),
                                                 req("not-a-uuid", "CS", null, null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
+    }
+
+    @Test
+    void update_upsertsLiveDirectorySchool_whenUniversityIdIsNotLocalUuid() {
+        UUID uid = UUID.randomUUID();
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(universities.findBySlug("sc-243744")).thenReturn(Optional.empty());
+        when(schools.getSchool("243744"))
+                .thenReturn(
+                        new SchoolDirectory.SchoolRef(
+                                "243744", "Stanford University", "Stanford", "CA"));
+        when(universities.save(org.mockito.ArgumentMatchers.any(UniversityEntity.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+                () ->
+                        service()
+                                .updateProfile(
+                                        user(uid), req("243744", "CS", null, null, null, false)));
+
+        ArgumentCaptor<UniversityEntity> saved = ArgumentCaptor.forClass(UniversityEntity.class);
+        verify(universities).save(saved.capture());
+        assertEquals("sc-243744", saved.getValue().getSlug());
+        assertEquals("Stanford University", saved.getValue().getName());
+        assertEquals("America/Los_Angeles", saved.getValue().getTimezone()); // CA → Pacific
     }
 
     @Test
@@ -728,6 +757,7 @@ class GuideServiceTest {
                         participants,
                         users,
                         roleGrant,
+                        schools,
                         badMapper);
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
@@ -767,6 +797,7 @@ class GuideServiceTest {
                         participants,
                         users,
                         roleGrant,
+                        schools,
                         badMapper);
         GuideProfileEntity profile = new GuideProfileEntity();
         profile.setLanguages("[\"en-US\"]"); // non-blank → readValue invoked → throws → []
