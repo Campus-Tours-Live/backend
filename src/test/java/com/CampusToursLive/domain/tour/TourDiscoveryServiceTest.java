@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -81,7 +84,8 @@ class TourDiscoveryServiceTest {
         UUID univId = UUID.randomUUID();
 
         TourOfferingEntity row = offering(oid, gid, univId);
-        when(offerings.findDiscoverable(eq(null), eq(null), eq(""), any(Pageable.class)))
+        when(offerings.findDiscoverable(
+                        eq(null), eq(false), anyList(), eq(""), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(row)));
 
         GuideProfileEntity guide = new GuideProfileEntity();
@@ -128,25 +132,25 @@ class TourDiscoveryServiceTest {
 
     @Test
     void list_clampsLimitToFifty() {
-        when(offerings.findDiscoverable(any(), any(), any(), any(Pageable.class)))
+        when(offerings.findDiscoverable(any(), anyBoolean(), anyList(), any(), any(Pageable.class)))
                 .thenReturn(Page.empty());
 
         service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 100);
 
         ArgumentCaptor<Pageable> page = ArgumentCaptor.forClass(Pageable.class);
-        verify(offerings).findDiscoverable(eq(null), eq(null), eq(""), page.capture());
+        verify(offerings).findDiscoverable(eq(null), eq(false), anyList(), eq(""), page.capture());
         assertEquals(50, page.getValue().getPageSize());
     }
 
     @Test
     void list_clampsLimitToOne_whenBelowMinimum() {
-        when(offerings.findDiscoverable(any(), any(), any(), any(Pageable.class)))
+        when(offerings.findDiscoverable(any(), anyBoolean(), anyList(), any(), any(Pageable.class)))
                 .thenReturn(Page.empty());
 
         service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 0);
 
         ArgumentCaptor<Pageable> page = ArgumentCaptor.forClass(Pageable.class);
-        verify(offerings).findDiscoverable(eq(null), eq(null), eq(""), page.capture());
+        verify(offerings).findDiscoverable(eq(null), eq(false), anyList(), eq(""), page.capture());
         assertEquals(1, page.getValue().getPageSize());
     }
 
@@ -165,7 +169,7 @@ class TourDiscoveryServiceTest {
                         service()
                                 .list(
                                         null,
-                                        "NOT_A_TOPIC",
+                                        List.of("NOT_A_TOPIC"),
                                         "",
                                         TourDiscoverySort.RECOMMENDED,
                                         0,
@@ -173,16 +177,24 @@ class TourDiscoveryServiceTest {
     }
 
     @Test
-    void list_acceptsLowercaseTopic() {
+    void list_singleTopic_filtersByThatTopic() {
         when(offerings.findDiscoverable(
-                        eq(null), eq(TourTopic.DORM_HOUSING), eq(""), any(Pageable.class)))
+                        eq(null),
+                        eq(true),
+                        eq(List.of(TourTopic.DORM_HOUSING)),
+                        eq(""),
+                        any(Pageable.class)))
                 .thenReturn(Page.empty());
 
-        service().list(null, "dorm_housing", "", TourDiscoverySort.RECOMMENDED, 0, 20);
+        service().list(null, List.of("DORM_HOUSING"), "", TourDiscoverySort.RECOMMENDED, 0, 20);
 
         verify(offerings)
                 .findDiscoverable(
-                        eq(null), eq(TourTopic.DORM_HOUSING), eq(""), any(Pageable.class));
+                        eq(null),
+                        eq(true),
+                        eq(List.of(TourTopic.DORM_HOUSING)),
+                        eq(""),
+                        any(Pageable.class));
     }
 
     @Test
@@ -208,13 +220,13 @@ class TourDiscoveryServiceTest {
 
     private void assertFirstSortOrder(
             TourDiscoverySort sort, String property, Sort.Direction direction) {
-        when(offerings.findDiscoverable(any(), any(), any(), any(Pageable.class)))
+        when(offerings.findDiscoverable(any(), anyBoolean(), anyList(), any(), any(Pageable.class)))
                 .thenReturn(Page.empty());
 
         service().list(null, null, "", sort, 0, 20);
 
         ArgumentCaptor<Pageable> page = ArgumentCaptor.forClass(Pageable.class);
-        verify(offerings).findDiscoverable(eq(null), eq(null), eq(""), page.capture());
+        verify(offerings).findDiscoverable(eq(null), eq(false), anyList(), eq(""), page.capture());
         Sort.Order first = page.getValue().getSort().iterator().next();
         assertEquals(property, first.getProperty());
         assertEquals(direction, first.getDirection());
@@ -293,22 +305,26 @@ class TourDiscoveryServiceTest {
     @Test
     void list_parsesValidUniversityId_andTreatsNullQueryAsEmpty() {
         UUID univId = UUID.randomUUID();
-        when(offerings.findDiscoverable(eq(univId), eq(null), eq(""), any(Pageable.class)))
+        when(offerings.findDiscoverable(
+                        eq(univId), eq(false), anyList(), eq(""), any(Pageable.class)))
                 .thenReturn(Page.empty());
 
         service().list(univId.toString(), null, null, TourDiscoverySort.RECOMMENDED, 0, 20);
 
-        verify(offerings).findDiscoverable(eq(univId), eq(null), eq(""), any(Pageable.class));
+        verify(offerings)
+                .findDiscoverable(eq(univId), eq(false), anyList(), eq(""), any(Pageable.class));
     }
 
     @Test
     void list_treatsBlankUniversityIdAndTopicAsAbsent() {
-        when(offerings.findDiscoverable(eq(null), eq(null), eq(""), any(Pageable.class)))
+        when(offerings.findDiscoverable(
+                        eq(null), eq(false), anyList(), eq(""), any(Pageable.class)))
                 .thenReturn(Page.empty());
 
-        service().list("   ", "   ", "", TourDiscoverySort.RECOMMENDED, 0, 20);
+        service().list("   ", List.of("   "), "", TourDiscoverySort.RECOMMENDED, 0, 20);
 
-        verify(offerings).findDiscoverable(eq(null), eq(null), eq(""), any(Pageable.class));
+        verify(offerings)
+                .findDiscoverable(eq(null), eq(false), anyList(), eq(""), any(Pageable.class));
     }
 
     @Test
@@ -393,6 +409,44 @@ class TourDiscoveryServiceTest {
                 .hasSize(TourTopic.values().length - 1);
     }
 
+    // ---- list(...) multi-topic wiring ----
+
+    @Test
+    void list_noTopicParam_doesNotFilterByTopic() {
+        when(offerings.findDiscoverable(
+                        isNull(), eq(false), anyList(), eq(""), any(Pageable.class)))
+                .thenReturn(Page.empty());
+        service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 20);
+        verify(offerings)
+                .findDiscoverable(isNull(), eq(false), anyList(), eq(""), any(Pageable.class));
+    }
+
+    @Test
+    void list_topicSubset_filtersByThoseTopics() {
+        when(offerings.findDiscoverable(
+                        isNull(),
+                        eq(true),
+                        eq(List.of(TourTopic.GENERAL_CAMPUS, TourTopic.DORM_HOUSING)),
+                        eq(""),
+                        any(Pageable.class)))
+                .thenReturn(Page.empty());
+        service()
+                .list(
+                        null,
+                        List.of("GENERAL_CAMPUS", "DORM_HOUSING"),
+                        "",
+                        TourDiscoverySort.RECOMMENDED,
+                        0,
+                        20);
+        verify(offerings)
+                .findDiscoverable(
+                        isNull(),
+                        eq(true),
+                        eq(List.of(TourTopic.GENERAL_CAMPUS, TourTopic.DORM_HOUSING)),
+                        eq(""),
+                        any(Pageable.class));
+    }
+
     // ---- toSummary / toDetail fallbacks (null topic, missing guide user) ----
 
     @Test
@@ -403,7 +457,8 @@ class TourDiscoveryServiceTest {
         UUID univId = UUID.randomUUID();
         TourOfferingEntity row = offering(oid, gid, univId);
         row.setTopic(null);
-        when(offerings.findDiscoverable(eq(null), eq(null), eq(""), any(Pageable.class)))
+        when(offerings.findDiscoverable(
+                        eq(null), eq(false), anyList(), eq(""), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(row)));
         stubGuideUserUniversity(gid, uid, univId, false);
 

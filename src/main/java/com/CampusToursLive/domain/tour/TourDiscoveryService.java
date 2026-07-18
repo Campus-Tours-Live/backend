@@ -65,20 +65,28 @@ public class TourDiscoveryService {
     @Transactional(readOnly = true)
     public Page<TourSummaryResponse> list(
             String universityIdRaw,
-            String topicRaw,
+            List<String> topicRaw,
             String q,
             TourDiscoverySort sort,
             int page,
             int limit) {
         UUID universityId = parseOptionalUniversityId(universityIdRaw);
-        TourTopic topic = parseOptionalTopic(topicRaw);
+        List<TourTopic> topics = parseTopics(topicRaw);
+        boolean filterByTopic = !topics.isEmpty();
+        // Placeholder keeps the JPQL `in :topics` non-empty when not filtering (guard makes it
+        // unused).
+        List<TourTopic> topicArg = filterByTopic ? topics : List.of(TourTopic.values()[0]);
         String query = escapeLike(q == null ? "" : q.trim());
         int capped = Math.min(Math.max(limit, 1), MAX_LIMIT);
         int safePage = Math.max(page, 0);
 
         Page<TourOfferingEntity> rows =
                 offerings.findDiscoverable(
-                        universityId, topic, query, PageRequest.of(safePage, capped, toSort(sort)));
+                        universityId,
+                        filterByTopic,
+                        topicArg,
+                        query,
+                        PageRequest.of(safePage, capped, toSort(sort)));
 
         Lookup lookup = loadLookup(rows.getContent());
         return rows.map(o -> toSummary(o, lookup));
@@ -135,15 +143,6 @@ public class TourDiscoveryService {
         }
         if (out.isEmpty() || out.size() == TourTopic.values().length) return List.of();
         return List.copyOf(out);
-    }
-
-    private TourTopic parseOptionalTopic(String raw) {
-        if (raw == null || raw.isBlank()) return null;
-        try {
-            return TourTopic.valueOf(raw.trim().toUpperCase());
-        } catch (IllegalArgumentException ex) {
-            throw new ValidationException("Invalid topic: " + raw);
-        }
     }
 
     /**

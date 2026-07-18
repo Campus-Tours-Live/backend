@@ -81,7 +81,7 @@ class TourControllerTest {
         UUID univId = UUID.randomUUID();
         when(discovery.list(
                         univId.toString(),
-                        "DORM_HOUSING",
+                        List.of("DORM_HOUSING"),
                         "dorm",
                         TourDiscoverySort.PRICE_ASC,
                         2,

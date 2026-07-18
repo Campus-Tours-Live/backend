@@ -33,7 +33,7 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
                       and g.applicationStatus = com.CampusToursLive.domain.guide.GuideApplicationStatus.APPROVED
                       and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
                       and o.universityId = coalesce(:universityId, o.universityId)
-                      and o.topic = coalesce(:topic, o.topic)
+                      and (:filterByTopic = false or o.topic in :topics)
                       and (
                         :q = ''
                         or lower(o.title) like lower(concat('%', :q, '%')) escape '!'
@@ -51,7 +51,7 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
                       and g.applicationStatus = com.CampusToursLive.domain.guide.GuideApplicationStatus.APPROVED
                       and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
                       and o.universityId = coalesce(:universityId, o.universityId)
-                      and o.topic = coalesce(:topic, o.topic)
+                      and (:filterByTopic = false or o.topic in :topics)
                       and (
                         :q = ''
                         or lower(o.title) like lower(concat('%', :q, '%')) escape '!'
@@ -62,7 +62,8 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
                     """)
     Page<TourOfferingEntity> findDiscoverable(
             @Param("universityId") UUID universityId,
-            @Param("topic") TourTopic topic,
+            @Param("filterByTopic") boolean filterByTopic,
+            @Param("topics") List<TourTopic> topics,
             @Param("q") String q,
             Pageable pageable);
 

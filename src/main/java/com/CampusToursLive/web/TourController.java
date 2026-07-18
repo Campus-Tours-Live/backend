@@ -100,8 +100,16 @@ public class TourController {
                     @RequestParam(name = "limit", required = false, defaultValue = "20")
                     int limit) {
         TourDiscoverySort parsedSort = TourDiscoveryService.parseSort(sort);
+        // TODO(CTL-16 B3): replace with a proper List<String> topic param — this wraps the single
+        // legacy `topic` query param so the service's new multi-topic signature still compiles.
         Page<TourSummaryResponse> result =
-                discovery.list(universityId, topic, q, parsedSort, page, limit);
+                discovery.list(
+                        universityId,
+                        topic == null ? null : java.util.List.of(topic),
+                        q,
+                        parsedSort,
+                        page,
+                        limit);
         return ApiEnvelope.of(PagedResponse.of(result));
     }
 

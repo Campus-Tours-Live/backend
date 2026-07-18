@@ -104,14 +104,26 @@ class TourOfferingRepositoryTest {
 
     @Test
     void findDiscoverable_succeedsWithNullOptionalFilters() {
-        assertThat(offerings.findDiscoverable(null, null, "", PageRequest.of(0, 20))).isNotNull();
+        assertThat(
+                        offerings.findDiscoverable(
+                                null,
+                                false,
+                                List.of(TourTopic.values()[0]),
+                                "",
+                                PageRequest.of(0, 20)))
+                .isNotNull();
     }
 
     @Test
     void findDiscoverable_excludesNonVisibleOfferings() {
         List<TourOfferingEntity> results =
                 offerings
-                        .findDiscoverable(null, null, searchMarker, PageRequest.of(0, 20))
+                        .findDiscoverable(
+                                null,
+                                false,
+                                List.of(TourTopic.values()[0]),
+                                searchMarker,
+                                PageRequest.of(0, 20))
                         .getContent();
 
         assertThat(results).extracting(TourOfferingEntity::getId).containsExactly(discoverableId);
@@ -148,7 +160,12 @@ class TourOfferingRepositoryTest {
 
         assertThat(
                         offerings
-                                .findDiscoverable(null, null, token, PageRequest.of(0, 20))
+                                .findDiscoverable(
+                                        null,
+                                        false,
+                                        List.of(TourTopic.values()[0]),
+                                        token,
+                                        PageRequest.of(0, 20))
                                 .getContent())
                 .extracting(TourOfferingEntity::getId)
                 .containsExactly(id);
@@ -173,7 +190,12 @@ class TourOfferingRepositoryTest {
 
         assertThat(
                         offerings
-                                .findDiscoverable(null, null, token, PageRequest.of(0, 20))
+                                .findDiscoverable(
+                                        null,
+                                        false,
+                                        List.of(TourTopic.values()[0]),
+                                        token,
+                                        PageRequest.of(0, 20))
                                 .getContent())
                 .extracting(TourOfferingEntity::getId)
                 .containsExactly(id);
@@ -218,7 +240,11 @@ class TourOfferingRepositoryTest {
 
         assertThat(
                         offerings.findDiscoverable(
-                                targetUni, TourTopic.DORM_HOUSING, token, PageRequest.of(0, 20)))
+                                targetUni,
+                                true,
+                                List.of(TourTopic.DORM_HOUSING),
+                                token,
+                                PageRequest.of(0, 20)))
                 .extracting(TourOfferingEntity::getId)
                 .containsExactly(match);
     }
@@ -228,7 +254,12 @@ class TourOfferingRepositoryTest {
         String absent = "absent-" + UUID.randomUUID().toString().substring(0, 8);
         assertThat(
                         offerings
-                                .findDiscoverable(null, null, absent, PageRequest.of(0, 20))
+                                .findDiscoverable(
+                                        null,
+                                        false,
+                                        List.of(TourTopic.values()[0]),
+                                        absent,
+                                        PageRequest.of(0, 20))
                                 .getContent())
                 .isEmpty();
     }
@@ -251,7 +282,12 @@ class TourOfferingRepositoryTest {
         // Escaped "%" ("!%") matches a literal "%" via `escape '!'`; the title contains "50%".
         assertThat(
                         offerings
-                                .findDiscoverable(null, null, "50!%", PageRequest.of(0, 20))
+                                .findDiscoverable(
+                                        null,
+                                        false,
+                                        List.of(TourTopic.values()[0]),
+                                        "50!%",
+                                        PageRequest.of(0, 20))
                                 .getContent())
                 .extracting(TourOfferingEntity::getId)
                 .contains(id);
