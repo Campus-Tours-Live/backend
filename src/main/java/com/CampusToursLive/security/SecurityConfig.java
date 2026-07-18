@@ -3,6 +3,7 @@ package com.CampusToursLive.security;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -16,9 +17,10 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * Stateless security. Every request is authenticated by a Google OIDC id_token (JWT), validated
- * against Google's JWKS (signature + issuer + expiry) and, when configured, the audience (our
- * Google Client ID). There is no local stub.
+ * Stateless security. All protected requests are authenticated by a Google OIDC id_token (JWT),
+ * validated against Google's JWKS (signature + issuer + expiry) and, when configured, the audience
+ * (our Google Client ID). Marketplace discovery GETs are explicitly public; there is no local
+ * authentication stub.
  */
 @Configuration
 public class SecurityConfig {
@@ -36,6 +38,11 @@ public class SecurityConfig {
                                                 "/v3/api-docs/**",
                                                 "/swagger-ui/**",
                                                 "/swagger-ui.html")
+                                        .permitAll()
+                                        // Public GET-only discovery allowlist; availability and
+                                        // booking
+                                        // endpoints remain authenticated.
+                                        .requestMatchers(HttpMethod.GET, "/tours", "/tours/*")
                                         .permitAll()
                                         .anyRequest()
                                         .authenticated())

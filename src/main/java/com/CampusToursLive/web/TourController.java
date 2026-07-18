@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
 import java.util.UUID;
@@ -24,15 +25,16 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Public marketplace catalog (BFF maps /v1/tours → here). Returns only ACTIVE offerings from
- * APPROVED guides at active universities — no auth role required beyond the platform JWT.
+ * APPROVED guides at active universities. Catalog and detail reads are anonymous.
  */
 @RestController
 @RequestMapping("/tours")
+@SecurityRequirements
 @Tag(
         name = "Tours",
         description =
                 "Public marketplace catalog. Returns only ACTIVE offerings from APPROVED guides at"
-                        + " active universities; no role required beyond a valid platform JWT.")
+                        + " active universities; no authentication required.")
 public class TourController {
 
     private final TourDiscoveryService discovery;
@@ -53,14 +55,6 @@ public class TourController {
                     @Content(
                             mediaType = "application/json",
                             examples = @ExampleObject(value = ApiExamples.TOUR_SUMMARY_LIST)))
-    @ApiResponse(
-            responseCode = "401",
-            description = "Missing or invalid platform JWT.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(implementation = Problem.class),
-                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
     @ApiResponse(
             responseCode = "422",
             description = "Unknown sort value.",
@@ -109,14 +103,6 @@ public class TourController {
                     @Content(
                             mediaType = "application/json",
                             examples = @ExampleObject(value = ApiExamples.TOUR_DETAIL)))
-    @ApiResponse(
-            responseCode = "401",
-            description = "Missing or invalid platform JWT.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(implementation = Problem.class),
-                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
     @ApiResponse(
             responseCode = "404",
             description = "No bookable tour with that id.",
