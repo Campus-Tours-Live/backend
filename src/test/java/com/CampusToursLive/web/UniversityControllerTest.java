@@ -19,9 +19,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
 
 /**
- * Plain unit test of the only logic in UniversityController: the limit clamp
- * (Math.min(Math.max(limit,1),50)), the query trim, and the entity→response mapping. No Spring
- * context needed — the controller is a thin holder over the repository.
+ * Plain unit test of the only logic in UniversityController: limit/page clamping, query trim, and
+ * entity→response mapping. No Spring context needed — the controller is a thin holder over the
+ * repository.
  */
 @ExtendWith(MockitoExtension.class)
 class UniversityControllerTest {
@@ -42,41 +42,47 @@ class UniversityControllerTest {
         return u;
     }
 
-    private int capturedPageSize(int requestedLimit) {
+    private Pageable capturedPage(int requestedLimit, int requestedPage) {
         ArgumentCaptor<Pageable> page = ArgumentCaptor.forClass(Pageable.class);
         when(universities.search(eq(""), page.capture())).thenReturn(List.of());
-        controller().list("", requestedLimit);
-        return page.getValue().getPageSize();
+        controller().list("", requestedLimit, requestedPage);
+        return page.getValue();
     }
 
     @Test
     void list_clampsLimitToOne_whenBelowMinimum() {
-        assertEquals(1, capturedPageSize(0));
-        assertEquals(1, capturedPageSize(-5));
+        assertEquals(1, capturedPage(0, 0).getPageSize());
+        assertEquals(1, capturedPage(-5, 0).getPageSize());
     }
 
     @Test
     void list_clampsLimitToFifty_whenAboveMaximum() {
-        assertEquals(50, capturedPageSize(100));
+        assertEquals(50, capturedPage(100, 0).getPageSize());
     }
 
     @Test
     void list_usesLimitAsIs_whenInRange() {
-        assertEquals(20, capturedPageSize(20));
+        assertEquals(20, capturedPage(20, 0).getPageSize());
+    }
+
+    @Test
+    void list_usesRequestedPage_andClampsNegativePageToZero() {
+        assertEquals(3, capturedPage(8, 3).getPageNumber());
+        assertEquals(0, capturedPage(8, -1).getPageNumber());
     }
 
     @Test
     void list_trimsQuery() {
         ArgumentCaptor<String> q = ArgumentCaptor.forClass(String.class);
         when(universities.search(q.capture(), any())).thenReturn(List.of());
-        controller().list("  mit  ", 20);
+        controller().list("  mit  ", 20, 0);
         assertEquals("mit", q.getValue());
     }
 
     @Test
     void list_mapsEntitiesToResponses() {
         when(universities.search(any(), any())).thenReturn(List.of(uni("MIT")));
-        List<UniversityResponse> items = controller().list("", 20).data();
+        List<UniversityResponse> items = controller().list("", 20, 0).data();
         assertEquals(1, items.size());
         assertEquals("MIT", items.get(0).name());
     }

@@ -21,7 +21,7 @@ public interface UniversityRepository extends JpaRepository<UniversityEntity, UU
                 or lower(u.name) like lower(concat('%', :q, '%'))
                 or lower(coalesce(u.shortName, '')) like lower(concat('%', :q, '%'))
               )
-            order by u.name asc
+            order by u.name asc, u.id asc
             """)
     List<UniversityEntity> search(@Param("q") String q, Pageable pageable);
 }

@@ -21,7 +21,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * University catalog (BFF maps /v1/universities → here). Backs the onboarding typeahead. `q`
- * filters by name/short name; `limit` caps results (max 50).
+ * filters by name/short name; `limit` caps results (max 50); and `page` selects a zero-based page.
+ * The stable order makes the typeahead's incremental loading deterministic.
  */
 @RestController
 @RequestMapping("/universities")
@@ -43,7 +44,7 @@ public class UniversityController {
                             + " Public — no role required beyond a valid platform JWT.")
     @ApiResponse(
             responseCode = "200",
-            description = "Matching universities (capped by limit).",
+            description = "Matching universities for the requested page (capped by limit).",
             content =
                     @Content(
                             mediaType = "application/json",
@@ -65,10 +66,14 @@ public class UniversityController {
                     String q,
             @Parameter(description = "Maximum rows to return; clamped to the range 1–50.")
                     @RequestParam(name = "limit", required = false, defaultValue = "20")
-                    int limit) {
+                    int limit,
+            @Parameter(description = "Zero-based result page; negative values are treated as 0.")
+                    @RequestParam(name = "page", required = false, defaultValue = "0")
+                    int page) {
         int capped = Math.min(Math.max(limit, 1), 50);
+        int safePage = Math.max(page, 0);
         List<UniversityResponse> items =
-                universities.search(q.trim(), PageRequest.of(0, capped)).stream()
+                universities.search(q.trim(), PageRequest.of(safePage, capped)).stream()
                         .map(UniversityResponse::from)
                         .toList();
         return ApiEnvelope.of(items);
