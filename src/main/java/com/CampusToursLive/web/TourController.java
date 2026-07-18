@@ -75,9 +75,13 @@ public class TourController {
             @Parameter(description = "Filter to a single university id (UUID).")
                     @RequestParam(name = "universityId", required = false)
                     String universityId,
-            @Parameter(description = "Filter by tour topic code (see GET /meta/tour-topics).")
+            @Parameter(
+                            description =
+                                    "Filter by one or more tour topic codes (repeatable, or comma"
+                                            + " list). Empty/all = no filter. See GET"
+                                            + " /meta/tour-topics.")
                     @RequestParam(name = "topic", required = false)
-                    String topic,
+                    java.util.List<String> topic,
             @Parameter(description = "Free-text search over title / description.")
                     @RequestParam(name = "q", required = false, defaultValue = "")
                     String q,
@@ -100,16 +104,8 @@ public class TourController {
                     @RequestParam(name = "limit", required = false, defaultValue = "20")
                     int limit) {
         TourDiscoverySort parsedSort = TourDiscoveryService.parseSort(sort);
-        // TODO(CTL-16 B3): replace with a proper List<String> topic param — this wraps the single
-        // legacy `topic` query param so the service's new multi-topic signature still compiles.
         Page<TourSummaryResponse> result =
-                discovery.list(
-                        universityId,
-                        topic == null ? null : java.util.List.of(topic),
-                        q,
-                        parsedSort,
-                        page,
-                        limit);
+                discovery.list(universityId, topic, q, parsedSort, page, limit);
         return ApiEnvelope.of(PagedResponse.of(result));
     }
 

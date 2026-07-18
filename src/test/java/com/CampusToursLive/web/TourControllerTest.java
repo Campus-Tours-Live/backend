@@ -1,13 +1,21 @@
 package com.CampusToursLive.web;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.CampusToursLive.domain.tour.TourDiscoveryService;
 import com.CampusToursLive.domain.tour.TourDiscoverySort;
 import com.CampusToursLive.error.NotFoundException;
+import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.TourDetailResponse;
 import com.CampusToursLive.web.dto.TourSummaryResponse;
 import java.util.List;
@@ -104,6 +112,93 @@ class TourControllerTest {
         mvc.perform(get("/tours").param("sort", "NEWEST"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.status").value(422));
+    }
+
+    // NOTE: this @WebMvcTest slice excludes SecurityAutoConfiguration /
+    // OAuth2ResourceServerAutoConfiguration (see class annotation above), so no security filter
+    // chain — and therefore no JWT post-processor — is active anywhere in this test class. All
+    // requests below are already unauthenticated by construction. GET /tours is `permitAll` in
+    // SecurityConfig (verified separately); `list_isPublic_repeatedTopicWithoutJwt_returns200`
+    // documents that public contract even though, in this slice, every other test is equally
+    // unauthenticated.
+    @Test
+    void list_repeatedTopicParams_passedAsList() throws Exception {
+        when(discovery.list(
+                        any(),
+                        eq(List.of("GENERAL_CAMPUS", "DORM_HOUSING")),
+                        any(),
+                        any(),
+                        anyInt(),
+                        anyInt()))
+                .thenReturn(Page.empty());
+
+        mvc.perform(get("/tours").param("topic", "GENERAL_CAMPUS").param("topic", "DORM_HOUSING"))
+                .andExpect(status().isOk());
+
+        verify(discovery)
+                .list(
+                        any(),
+                        eq(List.of("GENERAL_CAMPUS", "DORM_HOUSING")),
+                        any(),
+                        any(),
+                        anyInt(),
+                        anyInt());
+    }
+
+    @Test
+    void list_commaTopic_passedThrough() throws Exception {
+        // Spring's default @RequestParam List<String> binder already splits a single
+        // comma-delimited query value into separate elements before the controller body runs, so
+        // the service sees the same merged list as the repeated-param form (verified empirically:
+        // topic=A,B binds to ["A", "B"], not a single "A,B" element).
+        when(discovery.list(
+                        any(),
+                        eq(List.of("GENERAL_CAMPUS", "DORM_HOUSING")),
+                        any(),
+                        any(),
+                        anyInt(),
+                        anyInt()))
+                .thenReturn(Page.empty());
+
+        mvc.perform(get("/tours").param("topic", "GENERAL_CAMPUS,DORM_HOUSING"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void list_unknownTopic_returns422() throws Exception {
+        when(discovery.list(any(), anyList(), any(), any(), anyInt(), anyInt()))
+                .thenThrow(new ValidationException("Invalid topic: NOPE"));
+
+        mvc.perform(get("/tours").param("topic", "NOPE"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"));
+    }
+
+    @Test
+    void list_noTopicParam_stillWorks() throws Exception {
+        when(discovery.list(any(), isNull(), any(), any(), anyInt(), anyInt()))
+                .thenReturn(Page.empty());
+
+        mvc.perform(get("/tours")).andExpect(status().isOk());
+    }
+
+    @Test
+    void list_isPublic_repeatedTopicWithoutJwt_returns200() throws Exception {
+        // GET /tours is permitAll in SecurityConfig — the multi-topic contract must hold
+        // anonymously. This slice has no security filter chain at all, so this test is
+        // equivalent in form to list_repeatedTopicParams_passedAsList above; it is kept as a
+        // named, explicit assertion of the public contract.
+        when(discovery.list(
+                        any(),
+                        eq(List.of("GENERAL_CAMPUS", "DORM_HOUSING")),
+                        any(),
+                        any(),
+                        anyInt(),
+                        anyInt()))
+                .thenReturn(Page.empty());
+
+        mvc.perform(get("/tours").param("topic", "GENERAL_CAMPUS").param("topic", "DORM_HOUSING"))
+                .andExpect(status().isOk());
     }
 
     @Test
