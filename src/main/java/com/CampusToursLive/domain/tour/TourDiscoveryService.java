@@ -112,6 +112,31 @@ public class TourDiscoveryService {
         }
     }
 
+    /**
+     * Parse repeated/comma topic params into a distinct, ordered list of {@link TourTopic}. Splits
+     * on comma, trims, drops empty tokens, dedupes. Returns an EMPTY list meaning "no topic filter"
+     * when the set is empty or equals the full enum. A non-empty token that is not a TourTopic →
+     * 422.
+     */
+    public static List<TourTopic> parseTopics(List<String> raw) {
+        if (raw == null || raw.isEmpty()) return List.of();
+        java.util.LinkedHashSet<TourTopic> out = new java.util.LinkedHashSet<>();
+        for (String param : raw) {
+            if (param == null) continue;
+            for (String token : param.split(",")) {
+                String t = token.trim();
+                if (t.isEmpty()) continue;
+                try {
+                    out.add(TourTopic.valueOf(t)); // exact, case-sensitive
+                } catch (IllegalArgumentException ex) {
+                    throw new ValidationException("Invalid topic: " + t);
+                }
+            }
+        }
+        if (out.isEmpty() || out.size() == TourTopic.values().length) return List.of();
+        return List.copyOf(out);
+    }
+
     private TourTopic parseOptionalTopic(String raw) {
         if (raw == null || raw.isBlank()) return null;
         try {

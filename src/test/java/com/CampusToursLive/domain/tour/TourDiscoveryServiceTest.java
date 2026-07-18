@@ -1,5 +1,7 @@
 package com.CampusToursLive.domain.tour;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -23,6 +25,8 @@ import com.CampusToursLive.web.dto.TourSummaryResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -315,6 +319,78 @@ class TourDiscoveryServiceTest {
     @Test
     void parseSort_parsesValidValueCaseInsensitively() {
         assertEquals(TourDiscoverySort.PRICE_ASC, TourDiscoveryService.parseSort("price_asc"));
+    }
+
+    // ---- parseTopics ----
+
+    @Test
+    void parseTopics_mergesRepeatedAndCommaTokensDedupedInOrder() {
+        // Repeated params, each possibly comma-joined, merge into one deduped set.
+        assertThat(
+                        TourDiscoveryService.parseTopics(
+                                List.of("GENERAL_CAMPUS,DORM_HOUSING", "DORM_HOUSING")))
+                .containsExactly(TourTopic.GENERAL_CAMPUS, TourTopic.DORM_HOUSING);
+    }
+
+    @Test
+    void parseTopics_trimsAndDropsEmptyTokensWithoutError() {
+        assertThat(TourDiscoveryService.parseTopics(List.of(" GENERAL_CAMPUS , ", "", "  ")))
+                .containsExactly(TourTopic.GENERAL_CAMPUS);
+    }
+
+    @Test
+    void parseTopics_nullOrAllEmptyMeansNoFilter() {
+        assertThat(TourDiscoveryService.parseTopics(null)).isEmpty();
+        assertThat(TourDiscoveryService.parseTopics(List.of("", " "))).isEmpty();
+    }
+
+    @Test
+    void parseTopics_fullSetMeansNoFilter() {
+        List<String> all = Arrays.stream(TourTopic.values()).map(Enum::name).toList();
+        assertThat(TourDiscoveryService.parseTopics(all)).isEmpty();
+    }
+
+    @Test
+    void parseTopics_isCaseSensitiveExactMatch() {
+        // Lowercase is NOT accepted (exact enum-name match).
+        assertThatThrownBy(() -> TourDiscoveryService.parseTopics(List.of("general_campus")))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void parseTopics_unknownNonEmptyTokenThrows() {
+        assertThatThrownBy(() -> TourDiscoveryService.parseTopics(List.of("NOT_A_TOPIC")))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void parseTopics_nullElementInListIsSkipped() {
+        // Repeated params can arrive with a null element; it must be skipped, not NPE.
+        assertThat(TourDiscoveryService.parseTopics(Arrays.asList(null, "GENERAL_CAMPUS")))
+                .containsExactly(TourTopic.GENERAL_CAMPUS);
+    }
+
+    @Test
+    void parseTopics_fullSetWithDuplicatesStillMeansNoFilter() {
+        List<String> all =
+                new ArrayList<>(Arrays.stream(TourTopic.values()).map(Enum::name).toList());
+        all.add("GENERAL_CAMPUS"); // duplicate — deduped set still equals the full enum
+        assertThat(TourDiscoveryService.parseTopics(all)).isEmpty();
+    }
+
+    @Test
+    void parseTopics_unknownAfterValidStillThrows() {
+        assertThatThrownBy(
+                        () -> TourDiscoveryService.parseTopics(List.of("GENERAL_CAMPUS", "NOPE")))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void parseTopics_fullSetMissingOneStillFilters() {
+        List<String> sevenOfEight =
+                Arrays.stream(TourTopic.values()).map(Enum::name).skip(1).toList();
+        assertThat(TourDiscoveryService.parseTopics(sevenOfEight))
+                .hasSize(TourTopic.values().length - 1);
     }
 
     // ---- toSummary / toDetail fallbacks (null topic, missing guide user) ----
