@@ -37,6 +37,14 @@ public class SecurityConfig {
                                                 "/swagger-ui/**",
                                                 "/swagger-ui.html")
                                         .permitAll()
+                                        // Public marketplace: the tour catalog + reference-data
+                                        // lookups are readable without a session (GET only).
+                                        .requestMatchers(
+                                                org.springframework.http.HttpMethod.GET,
+                                                "/tours",
+                                                "/tours/**",
+                                                "/meta/**")
+                                        .permitAll()
                                         .anyRequest()
                                         .authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()));
