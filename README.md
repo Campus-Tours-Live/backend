@@ -228,7 +228,10 @@ nothing** and it just runs. To override a value, choose one of:
 
 - pass it inline for a single run — `GOOGLE_CLIENT_ID=... ./mvnw spring-boot:run`;
 - export it in your shell, or set it in your IDE's run configuration;
-- keep a git-ignored `.env` and load it before running — `set -a; source .env; set +a` (macOS/Linux).
+- keep a git-ignored `.env` and load it before running — `set -a; source .env; set +a` (macOS/Linux);
+- or just use the dev launcher (`npm run start:backend` / `start:all` from `campus-tours-live`): it
+  seeds `backend/.env` from `.env.example` on first run and injects it into the Spring Boot process
+  for you (an explicitly-exported shell variable still wins over the `.env` value).
 
 The full set of variables (all optional for local dev; some required in prod):
 
@@ -243,6 +246,8 @@ The full set of variables (all optional for local dev; some required in prod):
 | `DB_PASSWORD`      | DB password                                                                                                        | `ctl`                                          | **yes in prod** |
 | `OIDC_ISSUER_URI`  | OIDC issuer whose JWKS validates the `id_token`                                                                    | `https://accounts.google.com`                  | no              |
 | `GOOGLE_CLIENT_ID` | Google OAuth Client ID; required in the `id_token` `aud` claim. Blank → audience check skipped (**not for prod**). | _(blank)_                                      | no (public)     |
+| `SCORECARD_API_KEY` | College Scorecard key for the live university/major directory (guide onboarding). Each dev uses their **own free** key ([sign up](https://api.data.gov/signup/)). Blank → `/meta/universities` & `/meta/majors` return an empty list. | _(blank)_ | **yes** |
+| `SCORECARD_BASE_URL` | Override the Scorecard API base URL.                                                                             | `https://api.data.gov/ed/collegescorecard/v1`  | no              |
 | `CORE_PORT`        | HTTP port                                                                                                          | `8080`                                         | no              |
 
 ---
