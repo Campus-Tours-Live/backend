@@ -14,6 +14,8 @@ import static org.mockito.Mockito.when;
 import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.university.CampusImageUrls;
+import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.error.ForbiddenException;
@@ -42,8 +44,11 @@ class TourOfferingServiceTest {
     @Mock GuideProfileRepository guides;
     @Mock UniversityRepository universities;
 
+    private final CampusImageUrls campusImages = new CampusImageUrls("https://r2.example/");
+
     private TourOfferingService service() {
-        return new TourOfferingService(offerings, guides, universities, new ObjectMapper());
+        return new TourOfferingService(
+                offerings, guides, universities, campusImages, new ObjectMapper());
     }
 
     private static UserEntity user(UUID id) {
@@ -378,6 +383,52 @@ class TourOfferingServiceTest {
         assertEquals("tour", res.slug());
     }
 
+    // ---------- create: university image_url backfill ----------
+
+    @Test
+    void create_backfillsUniversityImageUrlWhenBlank() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uniId = UUID.fromString(UNI);
+        stubPendingGuide(uid, gid);
+        when(universities.existsById(any())).thenReturn(true);
+        when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
+        when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        UniversityEntity uni = new UniversityEntity();
+        uni.setId(uniId);
+        uni.setName("Harvard University");
+        uni.setImageUrl(null);
+        when(universities.findById(uniId)).thenReturn(Optional.of(uni));
+
+        service().create(user(uid), validReq("Walk"));
+
+        assertEquals("https://r2.example/Harvard%20University.png", uni.getImageUrl());
+        verify(universities).save(uni);
+    }
+
+    @Test
+    void create_doesNotOverwriteUniversityImageUrlWhenAlreadySet() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uniId = UUID.fromString(UNI);
+        stubPendingGuide(uid, gid);
+        when(universities.existsById(any())).thenReturn(true);
+        when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
+        when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        UniversityEntity uni = new UniversityEntity();
+        uni.setId(uniId);
+        uni.setName("Harvard University");
+        uni.setImageUrl("https://r2.example/existing.png");
+        when(universities.findById(uniId)).thenReturn(Optional.of(uni));
+
+        service().create(user(uid), validReq("Walk"));
+
+        assertEquals("https://r2.example/existing.png", uni.getImageUrl());
+        verify(universities, never()).save(uni);
+    }
+
     // ---------- activate: remaining branches ----------
 
     @Test
@@ -577,7 +628,7 @@ class TourOfferingServiceTest {
         UUID gid = UUID.randomUUID();
         var mapper = org.mockito.Mockito.mock(ObjectMapper.class);
         when(mapper.writeValueAsString(any())).thenThrow(new RuntimeException("boom"));
-        var svc = new TourOfferingService(offerings, guides, universities, mapper);
+        var svc = new TourOfferingService(offerings, guides, universities, campusImages, mapper);
         stubPendingGuide(uid, gid);
         when(universities.existsById(any())).thenReturn(true);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);

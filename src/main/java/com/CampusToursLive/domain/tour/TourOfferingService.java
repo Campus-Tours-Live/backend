@@ -3,6 +3,7 @@ package com.CampusToursLive.domain.tour;
 import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.university.CampusImageUrls;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.error.ForbiddenException;
@@ -35,16 +36,19 @@ public class TourOfferingService {
     private final TourOfferingRepository offerings;
     private final GuideProfileRepository guides;
     private final UniversityRepository universities;
+    private final CampusImageUrls campusImages;
     private final ObjectMapper mapper;
 
     public TourOfferingService(
             TourOfferingRepository offerings,
             GuideProfileRepository guides,
             UniversityRepository universities,
+            CampusImageUrls campusImages,
             ObjectMapper mapper) {
         this.offerings = offerings;
         this.guides = guides;
         this.universities = universities;
+        this.campusImages = campusImages;
         this.mapper = mapper;
     }
 
@@ -59,6 +63,16 @@ public class TourOfferingService {
         GuideProfileEntity guide = requireGuideProfile(user);
 
         UUID universityId = parseUniversity(req.universityId());
+        // Backfill the campus image on first use if the university has none yet (idempotent).
+        universities
+                .findById(universityId)
+                .ifPresent(
+                        u -> {
+                            if (u.getImageUrl() == null || u.getImageUrl().isBlank()) {
+                                u.setImageUrl(campusImages.forName(u.getName()));
+                                universities.save(u);
+                            }
+                        });
         String title = req.title() == null ? null : req.title().trim();
         if (title == null || title.isEmpty()) {
             throw new ValidationException("title is required");
