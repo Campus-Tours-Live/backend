@@ -23,21 +23,12 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * CTL-50 propose: create a PENDING_COUNTERPARTY proposal to move a CONFIRMED booking. Owner =
- * participant or guide (else 404). Notice/advance + availability + slot conflicts (exclude self);
- * state conflicts → 409, bad input → 422. fee/priceDiff = 0; reason not persisted in MVP. Resolve
- * is CTL-51.
- */
+/** CTL-50: propose moving a CONFIRMED booking. Resolve is CTL-51. */
 @Service
 public class RescheduleService {
 
-    /** Counterparty response window, capped at the booking's current start. */
     static final Duration COUNTERPARTY_RESPONSE_WINDOW = Duration.ofHours(48);
-
-    /** Same free-text cap the booking flow uses (the columns are TEXT). */
     private static final int MAX_REASON_LENGTH = 1000;
-
     static final String ALREADY_PENDING_MESSAGE =
             "A reschedule proposal is already pending for this booking";
 
@@ -60,11 +51,7 @@ public class RescheduleService {
         this.settings = settings;
     }
 
-    /**
-     * Create a PENDING_COUNTERPARTY proposal to move {@code bookingId} to a new start time.
-     * Idempotent replay: if the SAME party already has a pending proposal for the SAME start, that
-     * proposal is returned instead of a 409 — so a retried request doesn't fail on its own success.
-     */
+    /** Propose; same party + same start replays the active proposal, else active → 409. */
     @Transactional
     public RescheduleProposalResponse propose(
             UserEntity caller, UUID bookingId, CreateRescheduleProposalRequest req) {
@@ -92,7 +79,6 @@ public class RescheduleService {
         GuideBookingSettingsEntity guideSettings = loadSettings(booking.getGuideId());
         requireWithinNoticeAndAdvance(proposedStart, now, guideSettings);
 
-        // The proposed tour keeps the booking's duration; the client never supplies an end.
         Duration tourDuration =
                 Duration.between(booking.getScheduledStartAt(), booking.getScheduledEndAt());
         Instant proposedEnd = proposedStart.plus(tourDuration);
@@ -106,7 +92,7 @@ public class RescheduleService {
                     existing.getRequestedBy() == requestedBy
                             && existing.getProposedStartAt().equals(proposedStart);
             if (sameReplay) {
-                return toResponse(existing); // idempotent
+                return toResponse(existing);
             }
             throw new ConflictException(ALREADY_PENDING_MESSAGE);
         }
@@ -125,8 +111,6 @@ public class RescheduleService {
         p.setPriceDiffCents(0L);
         p.setExpiresAt(computeExpiry(now, booking));
         try {
-            // Flush now so a concurrent proposer racing past the pre-check above hits the
-            // partial unique index uq_reschedule_active here, inside this try.
             proposals.saveAndFlush(p);
         } catch (DataIntegrityViolationException raceLost) {
             throw new ConflictException(ALREADY_PENDING_MESSAGE);
@@ -134,15 +118,6 @@ public class RescheduleService {
         return toResponse(p);
     }
 
-    // ---------------------------------------------------------------------------
-    // Private helpers
-    // ---------------------------------------------------------------------------
-
-    /**
-     * PARTICIPANT if the caller owns the booking, GUIDE if the caller is the booking's guide
-     * (booking.guideId is guide_profiles.id → resolve to the profile's userId), otherwise 404 —
-     * indistinguishable from a nonexistent booking.
-     */
     private BookingActor resolveActor(UserEntity caller, BookingEntity booking) {
         if (booking.getParticipantUserId().equals(caller.getId())) {
             return BookingActor.PARTICIPANT;
@@ -157,14 +132,6 @@ public class RescheduleService {
         throw new NotFoundException("Booking not found");
     }
 
-    /**
-     * The proposed interval must be inside the guide's materialized availability (containment —
-     * same check {@link BookingService} runs at create/checkout) and must not conflict with any
-     * OTHER slot-holding booking of the guide or the caller-side participant. The booking being
-     * moved is excluded from both overlap probes: shifting a tour 30 minutes overlaps its own
-     * current reservation, which is not a conflict. Per the ticket, these are state conflicts →
-     * 409, not 422.
-     */
     private void requireSlotAvailable(
             BookingEntity booking,
             Instant proposedStart,
@@ -199,7 +166,6 @@ public class RescheduleService {
         }
     }
 
-    /** 48h response window, capped at the booking's current start (see the constant's javadoc). */
     private static Instant computeExpiry(Instant now, BookingEntity booking) {
         Instant windowEnd = now.plus(COUNTERPARTY_RESPONSE_WINDOW);
         return windowEnd.isBefore(booking.getScheduledStartAt())
@@ -219,7 +185,6 @@ public class RescheduleService {
         }
     }
 
-    /** Validated for contract stability; not persisted in the MVP (see class javadoc). */
     private static void requireReasonWithinCap(String reason) {
         if (reason != null && reason.trim().length() > MAX_REASON_LENGTH) {
             throw new ValidationException(
@@ -231,12 +196,6 @@ public class RescheduleService {
         return settings.findByGuideId(guideId).orElseGet(GuideBookingSettingsEntity::new);
     }
 
-    /**
-     * Same guide-configurable minimum-notice / maximum-advance window {@link BookingService}
-     * enforces on new bookings, applied to the PROPOSED start (schema defaults: 24h notice, 30-day
-     * advance). Out-of-window is a 422 per the ticket (BOOKING_NOTICE_TOO_SHORT), unlike the
-     * state-conflict 409s.
-     */
     private static void requireWithinNoticeAndAdvance(
             Instant proposedStart, Instant now, GuideBookingSettingsEntity guideSettings) {
         Duration minNotice = Duration.ofMinutes(guideSettings.getMinNoticeMin());
@@ -253,7 +212,6 @@ public class RescheduleService {
         }
     }
 
-    /** Whole hours read as "{n} hour(s)"; anything else as "{n} minutes" (guide-configurable). */
     private static String formatNoticeWindow(Duration minNotice) {
         long minutes = minNotice.toMinutes();
         if (minutes % 60 == 0) {

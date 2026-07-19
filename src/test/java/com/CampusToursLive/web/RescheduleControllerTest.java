@@ -21,7 +21,7 @@ class RescheduleControllerTest {
     @Mock RescheduleService rescheduleService;
 
     @Test
-    void propose_delegatesAndWraps() {
+    void propose_delegates() {
         UserEntity u = new UserEntity();
         u.setId(UUID.randomUUID());
         UUID bookingId = UUID.randomUUID();

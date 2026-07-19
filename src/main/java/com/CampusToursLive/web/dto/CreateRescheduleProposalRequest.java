@@ -2,10 +2,7 @@ package com.CampusToursLive.web.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-/** Propose body. End is derived from booking duration; timezone is display-only. */
-@Schema(
-        name = "CreateRescheduleProposalRequest",
-        description = "Propose a new start time for a CONFIRMED booking.")
+@Schema(name = "CreateRescheduleProposalRequest", description = "Propose a new booking start time.")
 public record CreateRescheduleProposalRequest(
         @Schema(
                         description = "Proposed start (ISO-8601 UTC).",

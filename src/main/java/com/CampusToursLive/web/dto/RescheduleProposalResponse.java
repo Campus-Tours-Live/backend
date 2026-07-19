@@ -2,7 +2,6 @@ package com.CampusToursLive.web.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-/** Reschedule proposal response (CTL-50/51). Times are ISO-8601 UTC; money is cents. */
 @Schema(name = "RescheduleProposalResponse", description = "Proposal to move a CONFIRMED booking.")
 public record RescheduleProposalResponse(
         @Schema(description = "Proposal id.", example = "r1a2c3d4-0000-4000-8000-000000000001")

@@ -91,11 +91,7 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
                     Instant newEnd,
                     Instant newStart);
 
-    /**
-     * Guide overlap probe that EXCLUDES one booking id — used by the reschedule flow (CTL-50),
-     * where the booking being moved may legitimately overlap its own current reserved interval
-     * (e.g. shifting 30 minutes) and must not count as a conflict.
-     */
+    /** Guide overlap probe excluding one booking id (reschedule may overlap its own slot). */
     boolean existsByIdNotAndGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
             UUID excludedBookingId,
             UUID guideId,
@@ -103,7 +99,7 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
             Instant newEnd,
             Instant newStart);
 
-    /** Participant-side twin of the id-excluding guide overlap probe (reschedule, CTL-50). */
+    /** Participant-side twin of the id-excluding guide overlap probe. */
     boolean
             existsByIdNotAndParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
                     UUID excludedBookingId,

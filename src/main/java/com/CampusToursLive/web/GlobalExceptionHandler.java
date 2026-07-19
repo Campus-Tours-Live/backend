@@ -35,11 +35,7 @@ public class GlobalExceptionHandler {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
     }
 
-    /**
-     * Request conflicts with the CURRENT state of the resource (wrong booking status, slot just
-     * taken, a proposal already pending) → 409 — the client may retry after the state changes,
-     * unlike a 422 whose request is wrong in itself.
-     */
+    /** Current-state conflict → 409. */
     @ExceptionHandler(ConflictException.class)
     public ProblemDetail handleConflict(ConflictException ex) {
         return problem(HttpStatus.CONFLICT, ex.getMessage());

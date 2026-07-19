@@ -90,11 +90,9 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void conflictException_mapsTo409() {
-        ProblemDetail pd =
-                handler.handleConflict(
-                        new ConflictException("A reschedule proposal is already pending"));
+        ProblemDetail pd = handler.handleConflict(new ConflictException("already pending"));
         assertEquals(409, pd.getStatus());
-        assertEquals("A reschedule proposal is already pending", pd.getTitle());
+        assertEquals("already pending", pd.getTitle());
     }
 
     @Test

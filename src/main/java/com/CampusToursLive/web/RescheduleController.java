@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** CTL-50 propose endpoint. Ownership enforced in the service (non-owners → 404). */
+/** CTL-50 propose endpoint. Non-owners → 404 in the service. */
 @RestController
 @RequestMapping("/bookings")
 @Tag(name = "Reschedule", description = "Propose moving a CONFIRMED booking to a new time.")
@@ -37,10 +37,8 @@ public class RescheduleController {
     @Operation(
             summary = "Propose a reschedule",
             description =
-                    "Creates a PENDING_COUNTERPARTY proposal for a CONFIRMED booking owned by the"
-                            + " caller (participant or guide). End is derived from booking"
-                            + " duration. Validates notice/advance, availability, and slot"
-                            + " conflicts. One active proposal per booking.")
+                    "PENDING_COUNTERPARTY proposal for a CONFIRMED booking owned by the caller."
+                            + " Validates notice/advance, availability, and slot conflicts.")
     @ApiResponse(
             responseCode = "200",
             description = "Pending proposal.",
@@ -48,22 +46,6 @@ public class RescheduleController {
                     @Content(
                             mediaType = "application/json",
                             examples = @ExampleObject(value = ApiExamples.RESCHEDULE_PROPOSAL)))
-    @ApiResponse(
-            responseCode = "401",
-            description = "Unauthenticated.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(implementation = Problem.class),
-                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
-    @ApiResponse(
-            responseCode = "404",
-            description = "Booking not found / not owned.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(implementation = Problem.class),
-                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
     @ApiResponse(
             responseCode = "409",
             description = "State conflict.",
