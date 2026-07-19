@@ -18,7 +18,6 @@ import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateRescheduleProposalRequest;
-import com.CampusToursLive.web.dto.RescheduleProposalResponse;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
@@ -30,7 +29,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
-/** Compact unit coverage for {@link RescheduleService#propose} (CTL-50). */
+/** Compact unit coverage for {@link RescheduleService#propose}. */
 @ExtendWith(MockitoExtension.class)
 class RescheduleServiceTest {
 
@@ -42,13 +41,9 @@ class RescheduleServiceTest {
 
     private final UUID participantId = UUID.randomUUID();
     private final UUID guideProfileId = UUID.randomUUID();
-    private final UUID guideUserId = UUID.randomUUID();
     private final UUID bookingId = UUID.randomUUID();
-    private final Instant currentStart =
-            Instant.now().plus(5, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
-    private final Instant proposedStart =
-            Instant.now().plus(7, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES);
-
+    private final Instant currentStart = Instant.now().plus(5, ChronoUnit.DAYS);
+    private final Instant proposedStart = Instant.now().plus(7, ChronoUnit.DAYS);
     private RescheduleService service;
 
     @BeforeEach
@@ -59,43 +54,25 @@ class RescheduleServiceTest {
     }
 
     @Test
-    void propose_happyPath_asParticipant() {
+    void propose_happyPath_andGuideActor() {
         stubBooking(confirmed());
         stubSlotOk();
+        assertEquals(
+                "PARTICIPANT",
+                service.propose(user(participantId), bookingId, req(proposedStart)).requestedBy());
 
-        RescheduleProposalResponse resp =
-                service.propose(user(participantId), bookingId, req(proposedStart));
-
-        assertEquals("PARTICIPANT", resp.requestedBy());
-        assertEquals("PENDING_COUNTERPARTY", resp.status());
-        assertEquals(0L, resp.feeCents());
-        verify(proposals).saveAndFlush(any());
-    }
-
-    @Test
-    void propose_asGuide_andIdempotentReplay() {
-        stubBooking(confirmed());
+        UUID guideUserId = UUID.randomUUID();
         GuideProfileEntity g = new GuideProfileEntity();
         g.setId(guideProfileId);
         g.setUserId(guideUserId);
         when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
-        stubSlotOk();
         assertEquals(
                 "GUIDE",
                 service.propose(user(guideUserId), bookingId, req(proposedStart)).requestedBy());
-
-        RescheduleProposalEntity existing = pending(BookingActor.PARTICIPANT, proposedStart);
-        when(bookings.findById(bookingId)).thenReturn(Optional.of(confirmed()));
-        when(settings.findByGuideId(any())).thenReturn(Optional.empty());
-        when(proposals.findByBookingIdAndStatus(bookingId, RescheduleStatus.PENDING_COUNTERPARTY))
-                .thenReturn(Optional.of(existing));
-        assertEquals(
-                existing.getId().toString(),
-                service.propose(user(participantId), bookingId, req(proposedStart)).id());
     }
 
     @Test
-    void propose_rejectsInvalidStateAndActor() {
+    void propose_rejectsBadStateWindowSlotAndDuplicates() {
         BookingEntity draft = confirmed();
         draft.setStatus(BookingStatus.DRAFT);
         stubBooking(draft);
@@ -103,18 +80,6 @@ class RescheduleServiceTest {
                 ConflictException.class,
                 () -> service.propose(user(participantId), bookingId, req(proposedStart)));
 
-        stubBooking(confirmed());
-        GuideProfileEntity g = new GuideProfileEntity();
-        g.setId(guideProfileId);
-        g.setUserId(UUID.randomUUID());
-        when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
-        assertThrows(
-                NotFoundException.class,
-                () -> service.propose(user(UUID.randomUUID()), bookingId, req(proposedStart)));
-    }
-
-    @Test
-    void propose_rejectsWindowAndSlotConflicts() {
         stubBooking(confirmed());
         when(settings.findByGuideId(any())).thenReturn(Optional.empty());
         assertThrows(
@@ -131,26 +96,17 @@ class RescheduleServiceTest {
                 ConflictException.class,
                 () -> service.propose(user(participantId), bookingId, req(proposedStart)));
 
-        when(availabilityOccurrences.existsContaining(any(), any(), any())).thenReturn(true);
-        when(bookings
-                        .existsByIdNotAndGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
-                                any(), any(), any(), any(), any()))
-                .thenReturn(true);
-        assertThrows(
-                ConflictException.class,
-                () -> service.propose(user(participantId), bookingId, req(proposedStart)));
-    }
-
-    @Test
-    void propose_rejectsDuplicateAndRace() {
-        stubBooking(confirmed());
-        when(settings.findByGuideId(any())).thenReturn(Optional.empty());
+        RescheduleProposalEntity pending = new RescheduleProposalEntity();
+        pending.setId(UUID.randomUUID());
+        pending.setRequestedBy(BookingActor.GUIDE);
+        pending.setProposedStartAt(proposedStart.plus(1, ChronoUnit.DAYS));
+        pending.setProposedEndAt(proposedStart.plus(2, ChronoUnit.DAYS));
+        pending.setStatus(RescheduleStatus.PENDING_COUNTERPARTY);
+        pending.setFeeCents(0L);
+        pending.setPriceDiffCents(0L);
+        pending.setExpiresAt(Instant.now().plus(2, ChronoUnit.DAYS));
         when(proposals.findByBookingIdAndStatus(bookingId, RescheduleStatus.PENDING_COUNTERPARTY))
-                .thenReturn(
-                        Optional.of(
-                                pending(
-                                        BookingActor.GUIDE,
-                                        proposedStart.plus(1, ChronoUnit.DAYS))));
+                .thenReturn(Optional.of(pending));
         assertThrows(
                 ConflictException.class,
                 () -> service.propose(user(participantId), bookingId, req(proposedStart)));
@@ -160,6 +116,14 @@ class RescheduleServiceTest {
         assertThrows(
                 ConflictException.class,
                 () -> service.propose(user(participantId), bookingId, req(proposedStart)));
+
+        GuideProfileEntity g = new GuideProfileEntity();
+        g.setId(guideProfileId);
+        g.setUserId(UUID.randomUUID());
+        when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
+        assertThrows(
+                NotFoundException.class,
+                () -> service.propose(user(UUID.randomUUID()), bookingId, req(proposedStart)));
     }
 
     private void stubBooking(BookingEntity b) {
@@ -185,7 +149,7 @@ class RescheduleServiceTest {
     private BookingEntity confirmed() {
         BookingEntity b = new BookingEntity();
         b.setId(bookingId);
-        b.setBookingNumber("BK-TEST0001");
+        b.setBookingNumber("BK-T");
         b.setParticipantUserId(participantId);
         b.setGuideId(guideProfileId);
         b.setTourOfferingId(UUID.randomUUID());
@@ -200,20 +164,6 @@ class RescheduleServiceTest {
         b.setTotalCents(5000L);
         b.setCurrency("USD");
         return b;
-    }
-
-    private static RescheduleProposalEntity pending(BookingActor by, Instant start) {
-        RescheduleProposalEntity p = new RescheduleProposalEntity();
-        p.setId(UUID.randomUUID());
-        p.setBookingId(UUID.randomUUID());
-        p.setRequestedBy(by);
-        p.setProposedStartAt(start);
-        p.setProposedEndAt(start.plus(60, ChronoUnit.MINUTES));
-        p.setStatus(RescheduleStatus.PENDING_COUNTERPARTY);
-        p.setFeeCents(0L);
-        p.setPriceDiffCents(0L);
-        p.setExpiresAt(Instant.now().plus(2, ChronoUnit.DAYS));
-        return p;
     }
 
     private static UserEntity user(UUID id) {

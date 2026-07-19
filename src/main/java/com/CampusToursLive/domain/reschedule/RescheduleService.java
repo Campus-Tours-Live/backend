@@ -24,35 +24,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Reschedule side-flow (CTL-50, design §16.3): moving a CONFIRMED booking to a new time WITHOUT
- * cancelling it. A proposal is persisted in {@code reschedule_proposals} and waits for the
- * counterparty; the booking itself is untouched until acceptance (CTL-51 — accept/decline/cancel
- * are the follow-up ticket, as is expiry).
- *
- * <p><b>Authorization.</b> Either party of the booking — the participant or the booking's guide —
- * may propose; anyone else gets a 404 (never a 403, so foreign booking ids stay unguessable), the
- * same owner-scoping rule the booking endpoints use.
- *
- * <p><b>Validation.</b> The proposed start must satisfy the guide's CURRENT notice/advance window
- * (same guide-configurable settings {@link BookingService} enforces — schema defaults 24h/30d), and
- * the proposed interval must be inside the guide's materialized availability and free of conflicts
- * with other slot-holding bookings (excluding the booking being moved — it may overlap its own
- * current slot, e.g. shifting 30 minutes). Per the ticket's error contract, state conflicts
- * (non-CONFIRMED booking, slot taken, proposal already pending) are 409s; malformed or
- * out-of-window requests are 422s.
- *
- * <p><b>MVP notes.</b> {@code fee_cents} / {@code price_diff_cents} are 0 (no payments yet). The
- * request's optional {@code reason} is validated but NOT persisted — {@code reschedule_proposals}
- * has no reason column in V1; adding one is a forward-only migration deferred until product needs
- * it.
+ * CTL-50 propose: create a PENDING_COUNTERPARTY proposal to move a CONFIRMED booking. Owner =
+ * participant or guide (else 404). Notice/advance + availability + slot conflicts (exclude self);
+ * state conflicts → 409, bad input → 422. fee/priceDiff = 0; reason not persisted in MVP. Resolve
+ * is CTL-51.
  */
 @Service
 public class RescheduleService {
 
-    /**
-     * How long the counterparty has to respond before the proposal expires, capped at the booking's
-     * CURRENT start (once the original time has passed, rescheduling is moot).
-     */
+    /** Counterparty response window, capped at the booking's current start. */
     static final Duration COUNTERPARTY_RESPONSE_WINDOW = Duration.ofHours(48);
 
     /** Same free-text cap the booking flow uses (the columns are TEXT). */
