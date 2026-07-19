@@ -3,6 +3,7 @@ package com.CampusToursLive.web;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.UnauthorizedException;
@@ -85,6 +86,15 @@ class GlobalExceptionHandlerTest {
         ProblemDetail pd = handler.handleValidation(new ValidationException("major is required"));
         assertEquals(422, pd.getStatus());
         assertEquals("major is required", pd.getTitle());
+    }
+
+    @Test
+    void conflictException_mapsTo409() {
+        ProblemDetail pd =
+                handler.handleConflict(
+                        new ConflictException("A reschedule proposal is already pending"));
+        assertEquals(409, pd.getStatus());
+        assertEquals("A reschedule proposal is already pending", pd.getTitle());
     }
 
     @Test

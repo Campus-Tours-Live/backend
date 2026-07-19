@@ -1,5 +1,6 @@
 package com.CampusToursLive.web;
 
+import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.UnauthorizedException;
@@ -32,6 +33,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ValidationException.class)
     public ProblemDetail handleValidation(ValidationException ex) {
         return problem(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+    }
+
+    /**
+     * Request conflicts with the CURRENT state of the resource (wrong booking status, slot just
+     * taken, a proposal already pending) → 409 — the client may retry after the state changes,
+     * unlike a 422 whose request is wrong in itself.
+     */
+    @ExceptionHandler(ConflictException.class)
+    public ProblemDetail handleConflict(ConflictException ex) {
+        return problem(HttpStatus.CONFLICT, ex.getMessage());
     }
 
     /** Domain resource missing → 404. */

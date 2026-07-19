@@ -92,6 +92,27 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
                     Instant newStart);
 
     /**
+     * Guide overlap probe that EXCLUDES one booking id — used by the reschedule flow (CTL-50),
+     * where the booking being moved may legitimately overlap its own current reserved interval
+     * (e.g. shifting 30 minutes) and must not count as a conflict.
+     */
+    boolean existsByIdNotAndGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
+            UUID excludedBookingId,
+            UUID guideId,
+            List<BookingStatus> statuses,
+            Instant newEnd,
+            Instant newStart);
+
+    /** Participant-side twin of the id-excluding guide overlap probe (reschedule, CTL-50). */
+    boolean
+            existsByIdNotAndParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
+                    UUID excludedBookingId,
+                    UUID participantUserId,
+                    List<BookingStatus> statuses,
+                    Instant newEnd,
+                    Instant newStart);
+
+    /**
      * Count COMPLETED bookings for a participant that have no review yet. Uses a native SQL NOT
      * EXISTS subquery because ReviewEntity does not exist in the JPA model yet.
      */
