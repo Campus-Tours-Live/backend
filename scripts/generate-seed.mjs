@@ -31,6 +31,11 @@ const pick = (a) => a[Math.floor(rnd() * a.length)];
 const esc = (s) => String(s).replace(/'/g, "''");
 const uuid = (n) => `10000000-0000-0000-0000-${n.toString(16).padStart(12, "0")}`;
 
+// Cloudflare R2 campus image bucket. Encoding must match the Java CampusImageUrls builder
+// (URLEncoder.encode(...).replace("+", "%20")): spaces -> %20, & -> %26, etc.
+const CAMPUS_IMAGE_BASE = "https://pub-3225b84a9a0b4728b11f261ee52251ba.r2.dev/";
+const campusImageUrl = (name) => `${CAMPUS_IMAGE_BASE}${encodeURIComponent(name)}.png`;
+
 // ---- Universities: 50 well-known US schools, deliberately EXCLUDING the previous demo set
 // (MIT, NYU, Stanford, UChicago, UCLA). [slug, name, short, city, region, tz]
 const PT = "America/Los_Angeles",
@@ -191,7 +196,7 @@ for (let i = 0; i < GUIDES; i++) {
 
 const uniRows = UNIS.map(
   (u) =>
-    `  ('${u[0]}', '${esc(u[1])}', '${esc(u[2])}', '${esc(u[3])}', '${u[4]}', 'US', '${u[5]}', 'ACTIVE')`,
+    `  ('${u[0]}', '${esc(u[1])}', '${esc(u[2])}', '${esc(u[3])}', '${u[4]}', 'US', '${u[5]}', '${esc(campusImageUrl(u[1]))}', 'ACTIVE')`,
 );
 
 const V2 = `-- =====================================================================
@@ -201,7 +206,7 @@ const V2 = `-- =================================================================
 -- upserts the chosen school; this seed only backs the demo tours.
 -- Idempotent: ON CONFLICT (slug) DO NOTHING.
 -- =====================================================================
-INSERT INTO universities (slug, name, short_name, city, region, country_code, timezone, status) VALUES
+INSERT INTO universities (slug, name, short_name, city, region, country_code, timezone, image_url, status) VALUES
 ${uniRows.join(",\n")}
 ON CONFLICT (slug) DO NOTHING;
 `;
