@@ -34,4 +34,10 @@ class CampusImageUrlsTest {
         assertThat(urls.forName("  ")).isNull();
         assertThat(urls.forName(null)).isNull();
     }
+
+    @Test
+    void blankBaseYieldsBareEncodedKey() {
+        assertThat(new CampusImageUrls("").forName("Yale University"))
+                .isEqualTo("Yale%20University.png");
+    }
 }
