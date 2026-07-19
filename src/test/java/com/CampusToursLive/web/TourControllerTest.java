@@ -52,6 +52,7 @@ class TourControllerTest {
                         "GENERAL_CAMPUS",
                         "u1",
                         "North Coast University",
+                        "https://r2.example/Stanford%20University.png",
                         "g1",
                         "Maya Chen",
                         "Computer Science",
@@ -71,6 +72,9 @@ class TourControllerTest {
         mvc.perform(get("/tours"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items[0].id").value("t1"))
+                .andExpect(
+                        jsonPath("$.data.items[0].universityImageUrl")
+                                .value("https://r2.example/Stanford%20University.png"))
                 .andExpect(jsonPath("$.data.items[0].guideDisplayName").value("Maya Chen"))
                 .andExpect(jsonPath("$.data.items[0].guideMajor").value("Computer Science"))
                 .andExpect(jsonPath("$.data.items[0].guideDegree").value("BS"))
@@ -214,6 +218,7 @@ class TourControllerTest {
                         List.of("en-US"),
                         "u1",
                         "North Coast University",
+                        "https://r2.example/Stanford%20University.png",
                         "north-coast",
                         "Arcata",
                         "CA",
@@ -230,7 +235,10 @@ class TourControllerTest {
         mvc.perform(get("/tours/{tourId}", id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(id.toString()))
-                .andExpect(jsonPath("$.data.universitySlug").value("north-coast"));
+                .andExpect(jsonPath("$.data.universitySlug").value("north-coast"))
+                .andExpect(
+                        jsonPath("$.data.universityImageUrl")
+                                .value("https://r2.example/Stanford%20University.png"));
     }
 
     @Test

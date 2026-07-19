@@ -109,6 +109,7 @@ class TourDiscoveryServiceTest {
         university.setCity("Arcata");
         university.setRegion("CA");
         university.setStatus(UniversityStatus.ACTIVE);
+        university.setImageUrl("https://r2.example/Stanford%20University.png");
         when(universities.findAllById(List.of(univId))).thenReturn(List.of(university));
 
         Page<TourSummaryResponse> res =
@@ -118,6 +119,9 @@ class TourDiscoveryServiceTest {
         assertEquals(1, res.getContent().size());
         assertEquals(oid.toString(), res.getContent().get(0).id());
         assertEquals("North Coast University", res.getContent().get(0).universityName());
+        assertEquals(
+                "https://r2.example/Stanford%20University.png",
+                res.getContent().get(0).universityImageUrl());
         assertEquals("Maya Chen", res.getContent().get(0).guideDisplayName());
         assertEquals("Computer Science", res.getContent().get(0).guideMajor());
         assertEquals("BS", res.getContent().get(0).guideDegree());
@@ -270,6 +274,7 @@ class TourDiscoveryServiceTest {
         university.setSlug("north-coast");
         university.setCity("Arcata");
         university.setRegion("CA");
+        university.setImageUrl("https://r2.example/Stanford%20University.png");
         when(universities.findAllById(List.of(univId))).thenReturn(List.of(university));
 
         TourDetailResponse res = service().getById(oid);
@@ -278,6 +283,7 @@ class TourDiscoveryServiceTest {
         assertEquals(List.of("en-US"), res.languages());
         assertEquals("north-coast", res.universitySlug());
         assertEquals("Bio text", res.guideBio());
+        assertEquals("https://r2.example/Stanford%20University.png", res.universityImageUrl());
     }
 
     @Test
