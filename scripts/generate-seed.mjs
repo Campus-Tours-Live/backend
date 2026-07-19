@@ -15,8 +15,9 @@ import { dirname, resolve } from "node:path";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MIG = resolve(HERE, "../src/main/resources/db/migration");
 
-const GUIDES = 200;
-const OFFERINGS_PER_GUIDE = 5; // 200 * 5 = 1000
+const GUIDES = 500;
+const OFFERINGS_PER_GUIDE = 6; // 500 * 6 = 3000 → 60 tours per university (round-robin over 50), so
+// even a single-university filter spans multiple pages of 24.
 
 // Deterministic PRNG (mulberry32, fixed seed) — no Math.random, so output is stable across runs.
 let _s = 80 >>> 0;
