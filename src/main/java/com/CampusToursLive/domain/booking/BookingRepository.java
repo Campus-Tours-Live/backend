@@ -48,6 +48,16 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
     long countByParticipantUserIdAndStatus(UUID participantUserId, BookingStatus status);
 
     /**
+     * A guide's bookings in one status scheduled to start at or after {@code from}, chronological.
+     * CTL-54 Task 7 ("(A) allow + notify") uses this — scoped to {@code CONFIRMED} — to find future
+     * bookings an availability edit may have left uncovered, so the write's response can warn the
+     * guide without ever mutating the booking.
+     */
+    List<BookingEntity>
+            findByGuideIdAndStatusAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                    UUID guideId, BookingStatus status, Instant from);
+
+    /**
      * Does any slot-holding booking already reserve part of [{@code newStart}, {@code newEnd}) for
      * this guide? Two intervals overlap iff existing.start &lt; new.end AND existing.end &gt;
      * new.start — hence the (end, start) argument order. Pre-checks the DB exclusion constraint
@@ -56,6 +66,20 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
      */
     boolean existsByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
             UUID guideId, List<BookingStatus> statuses, Instant newEnd, Instant newStart);
+
+    /**
+     * The guide's slot-holding bookings whose RESERVED interval overlaps {@code [windowStart,
+     * windowEnd)} — same overlap direction/argument order as {@link
+     * #existsByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan} but returns
+     * the rows (not just existence): CTL-54 Task 8 slot generation needs each held booking's own
+     * reserved interval to test against every candidate slot individually.
+     */
+    List<BookingEntity>
+            findByGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
+                    UUID guideId,
+                    List<BookingStatus> statuses,
+                    Instant windowEnd,
+                    Instant windowStart);
 
     /**
      * Participant-side twin of the guide overlap check (constraint: excl_participant_no_overlap).

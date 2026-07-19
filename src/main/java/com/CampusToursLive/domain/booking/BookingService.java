@@ -1,5 +1,8 @@
 package com.CampusToursLive.domain.booking;
 
+import com.CampusToursLive.domain.availability.GuideAvailabilityOccurrenceRepository;
+import com.CampusToursLive.domain.availability.GuideBookingSettingsEntity;
+import com.CampusToursLive.domain.availability.GuideBookingSettingsRepository;
 import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
@@ -36,11 +39,16 @@ import org.springframework.transaction.annotation.Transactional;
  * guide_profiles.id} primary key, not the user id — resolving to a display name requires a two-step
  * lookup through {@code GuideProfileRepository}.
  *
- * <p><b>MVP booking policy.</b> Until {@code guide_booking_settings} gets endpoints, every create
- * uses that table's schema defaults: MANUAL acceptance (new bookings wait for the guide, with a
- * 90-minute response window), 24h minimum notice, 30-day maximum advance, and a 15-minute post-tour
- * buffer on the guide's reserved interval. Payments are not built yet, so the PENDING_PAYMENT_AUTH
- * stage is skipped and the platform fee snapshot is zero.
+ * <p><b>MVP booking policy.</b> Acceptance is always MANUAL (new bookings wait for the guide, with
+ * a 90-minute response window — not yet guide-configurable). Minimum notice, maximum advance, and
+ * the reserved-interval buffers ARE guide-configurable via {@code guide_booking_settings} (CTL-54
+ * Task 5's read/write endpoints) and are read here — {@code createBooking}/{@code addCartItem} (via
+ * {@link #buildDraftBooking}) and {@code checkout} (via {@link #revalidateCartItem}) both load the
+ * guide's row, falling back to the table's schema defaults (24h notice, 30-day advance, 0-minute
+ * pre-tour buffer, 15-minute post-tour buffer) when a guide has none yet — the SAME fallback {@link
+ * SlotGenerationService} uses, so the two paths never disagree about what is bookable. Payments are
+ * not built yet, so the PENDING_PAYMENT_AUTH stage is skipped and the platform fee snapshot is
+ * zero.
  */
 @Service
 public class BookingService {
@@ -56,8 +64,15 @@ public class BookingService {
     private static final List<BookingStatus> PAYMENT_PENDING_STATUSES =
             List.of(BookingStatus.PENDING_PAYMENT_AUTH, BookingStatus.PAYMENT_ACTION_REQUIRED);
 
-    /** Statuses that hold a slot — mirrors the WHERE clause of the DB exclusion constraints. */
-    private static final List<BookingStatus> SLOT_HOLDING_STATUSES =
+    /**
+     * Statuses that hold a slot — mirrors the WHERE clause of the DB exclusion constraints.
+     * Package-private (not {@code private}) so {@link SlotGenerationService} (CTL-54 Task 8, same
+     * package) can subtract the SAME set of held bookings from candidate slots — a CONFIRMED-only
+     * view (like {@link BookingRepository
+     * #findByGuideIdAndStatusAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc}, used
+     * by Task 7) would under-count what actually occupies a guide's calendar.
+     */
+    static final List<BookingStatus> SLOT_HOLDING_STATUSES =
             List.of(
                     BookingStatus.PENDING_PAYMENT_AUTH,
                     BookingStatus.PENDING_GUIDE_ACCEPTANCE,
@@ -73,11 +88,9 @@ public class BookingService {
                     BookingStatus.PAYMENT_ACTION_REQUIRED,
                     BookingStatus.CONFIRMED);
 
-    // MVP policy constants — the guide_booking_settings schema defaults (see class javadoc).
-    private static final Duration MIN_NOTICE = Duration.ofHours(24);
-    private static final Duration MAX_ADVANCE = Duration.ofDays(30);
+    // MVP policy: acceptance mode + response window are not yet guide-configurable. Notice,
+    // advance, and buffers ARE — see loadSettings() and the class javadoc.
     private static final Duration GUIDE_RESPONSE_WINDOW = Duration.ofMinutes(90);
-    private static final Duration RESERVED_BUFFER_AFTER = Duration.ofMinutes(15);
 
     /** Cap on free-text fields (participant notes, cancellation reason) — the columns are TEXT. */
     private static final int MAX_FREE_TEXT_LENGTH = 1000;
@@ -89,12 +102,22 @@ public class BookingService {
     private static final int BOOKING_NUMBER_LENGTH = 10;
     private static final SecureRandom RANDOM = new SecureRandom();
 
+    /**
+     * CTL-54 Task 6: "outside the guide's availability" — distinct from the slot-conflict messages
+     * ("already has a booking" / "overlaps another item"), which are booking-vs-booking, not
+     * booking-vs-availability.
+     */
+    static final String OUTSIDE_AVAILABILITY_MESSAGE =
+            "This time is outside the guide's availability";
+
     private final BookingRepository bookings;
     private final TourOfferingRepository offerings;
     private final GuideProfileRepository guides;
     private final UserRepository users;
     private final UniversityRepository universities;
     private final BookingStatusHistoryRepository statusHistory;
+    private final GuideAvailabilityOccurrenceRepository availabilityOccurrences;
+    private final GuideBookingSettingsRepository settings;
 
     public BookingService(
             BookingRepository bookings,
@@ -102,13 +125,17 @@ public class BookingService {
             GuideProfileRepository guides,
             UserRepository users,
             UniversityRepository universities,
-            BookingStatusHistoryRepository statusHistory) {
+            BookingStatusHistoryRepository statusHistory,
+            GuideAvailabilityOccurrenceRepository availabilityOccurrences,
+            GuideBookingSettingsRepository settings) {
         this.bookings = bookings;
         this.offerings = offerings;
         this.guides = guides;
         this.users = users;
         this.universities = universities;
         this.statusHistory = statusHistory;
+        this.availabilityOccurrences = availabilityOccurrences;
+        this.settings = settings;
     }
 
     /**
@@ -317,8 +344,11 @@ public class BookingService {
             throw new ValidationException("You cannot book your own tour");
         }
 
-        Instant start = parseStart(req.scheduledStartAt(), Instant.now());
+        Instant start = parseStart(req.scheduledStartAt());
+        GuideBookingSettingsEntity guideSettings = loadSettings(offering.getGuideId());
+        requireWithinNoticeAndAdvance(start, Instant.now(), guideSettings);
         Instant end = start.plus(Duration.ofMinutes(offering.getDurationMin()));
+        requireWithinAvailability(offering.getGuideId(), start, end);
 
         BookingEntity b = new BookingEntity();
         b.setId(UUID.randomUUID());
@@ -331,8 +361,8 @@ public class BookingService {
         b.setAcceptanceModeSnap(AcceptanceMode.MANUAL);
         b.setScheduledStartAt(start);
         b.setScheduledEndAt(end);
-        b.setReservedStartAt(start);
-        b.setReservedEndAt(end.plus(RESERVED_BUFFER_AFTER));
+        b.setReservedStartAt(start.minus(Duration.ofMinutes(guideSettings.getBufferBeforeMin())));
+        b.setReservedEndAt(end.plus(Duration.ofMinutes(guideSettings.getBufferAfterMin())));
         // Price snapshot — no payments yet, so fees and taxes are zero and the guide
         // amount equals the total (see class javadoc).
         b.setBasePriceCents(offering.getPriceCents());
@@ -344,6 +374,23 @@ public class BookingService {
         b.setCurrency(offering.getCurrency());
         b.setParticipantNotes(cleanFreeText(req.participantNotes(), "participantNotes"));
         return b;
+    }
+
+    /**
+     * CTL-54 Task 6: the booking's SCHEDULED tour interval (never the buffer-padded reserved
+     * interval) must be CONTAINED by some current materialized availability occurrence for the
+     * guide — {@code occurrence.during @> booking.scheduled}. This is a containment check, never an
+     * EXCLUDE (that relationship is reserved for availability-vs-availability and
+     * booking-vs-booking overlap, which are separate invariants). Called from the shared {@link
+     * #buildDraftBooking} (covers both {@link #createBooking} and {@link #addCartItem}) and again
+     * from {@link #revalidateCartItem} at checkout, since availability can change while an item
+     * sits in the cart.
+     */
+    private void requireWithinAvailability(
+            UUID guideId, Instant scheduledStart, Instant scheduledEnd) {
+        if (!availabilityOccurrences.existsContaining(guideId, scheduledStart, scheduledEnd)) {
+            throw new ValidationException(OUTSIDE_AVAILABILITY_MESSAGE);
+        }
     }
 
     /** DRAFT → PENDING_GUIDE_ACCEPTANCE: the transition that claims the slot. */
@@ -400,8 +447,11 @@ public class BookingService {
 
     /**
      * Checkout-time re-validation: the offering/guide/university may have changed while the item
-     * sat in the cart, and the start may have drifted inside the minimum-notice window. (The
-     * max-advance bound can only become MORE satisfied over time, so it is not rechecked.)
+     * sat in the cart, and the start may have drifted inside the minimum-notice window — or the
+     * guide may since have TIGHTENED their notice/advance/buffer settings (these are
+     * guide-configurable, not fixed constants, so unlike a fixed window neither bound is guaranteed
+     * to only become more satisfied over time). Both bounds are therefore rechecked here against
+     * the guide's CURRENT settings, same as {@link #buildDraftBooking}.
      *
      * <p>Also RE-SNAPSHOTS price, currency, and duration from the offering as it stands now — a
      * DRAFT is not a commitment, so the participant commits to the current terms at checkout, not
@@ -425,13 +475,25 @@ public class BookingService {
             throw new ValidationException(
                     "Cart item " + b.getBookingNumber() + " is no longer bookable");
         }
-        if (b.getScheduledStartAt().isBefore(now.plus(MIN_NOTICE))) {
+
+        GuideBookingSettingsEntity guideSettings = loadSettings(b.getGuideId());
+        Duration minNotice = Duration.ofMinutes(guideSettings.getMinNoticeMin());
+        if (b.getScheduledStartAt().isBefore(now.plus(minNotice))) {
             throw new ValidationException(
                     "Cart item "
                             + b.getBookingNumber()
                             + " starts too soon — bookings need at least "
-                            + MIN_NOTICE.toHours()
-                            + " hours notice");
+                            + formatNoticeWindow(minNotice)
+                            + " notice");
+        }
+        Duration maxAdvance = Duration.ofDays(guideSettings.getMaxAdvanceDays());
+        if (b.getScheduledStartAt().isAfter(now.plus(maxAdvance))) {
+            throw new ValidationException(
+                    "Cart item "
+                            + b.getBookingNumber()
+                            + " is too far out — bookings can be made at most "
+                            + maxAdvance.toDays()
+                            + " days in advance");
         }
 
         // Commitment-time snapshot (fees stay zero until payments are built).
@@ -441,7 +503,21 @@ public class BookingService {
         b.setCurrency(offering.getCurrency());
         Instant end = b.getScheduledStartAt().plus(Duration.ofMinutes(offering.getDurationMin()));
         b.setScheduledEndAt(end);
-        b.setReservedEndAt(end.plus(RESERVED_BUFFER_AFTER));
+        b.setReservedStartAt(
+                b.getScheduledStartAt()
+                        .minus(Duration.ofMinutes(guideSettings.getBufferBeforeMin())));
+        b.setReservedEndAt(end.plus(Duration.ofMinutes(guideSettings.getBufferAfterMin())));
+
+        // CTL-54 Task 6: re-check containment at checkout — the guide's availability can change
+        // (or the re-snapshot above can change the scheduled end) between add-to-cart and
+        // checkout, so an item that was contained when carted must still be contained now.
+        if (!availabilityOccurrences.existsContaining(
+                b.getGuideId(), b.getScheduledStartAt(), end)) {
+            throw new ValidationException(
+                    "Cart item "
+                            + b.getBookingNumber()
+                            + " is no longer within the guide's availability");
+        }
     }
 
     private List<BookingEntity> cartItems(UUID participantUserId) {
@@ -479,26 +555,69 @@ public class BookingService {
                 .orElseThrow(() -> new ValidationException("This tour is not currently bookable"));
     }
 
-    private static Instant parseStart(String raw, Instant now) {
+    /**
+     * Format-parsing ONLY — the notice/advance window check used to live here too, but that check
+     * needs the guide's settings (not available until the offering/guide are resolved in {@link
+     * #buildDraftBooking}), so it now lives in {@link #requireWithinNoticeAndAdvance}.
+     */
+    private static Instant parseStart(String raw) {
         if (raw == null || raw.isBlank()) {
             throw new ValidationException("scheduledStartAt is required");
         }
-        Instant start;
         try {
-            start = Instant.parse(raw.trim());
+            return Instant.parse(raw.trim());
         } catch (Exception ex) {
             throw new ValidationException(
                     "scheduledStartAt must be an ISO-8601 instant, e.g. 2026-07-10T17:00:00Z");
         }
-        if (start.isBefore(now.plus(MIN_NOTICE))) {
+    }
+
+    /**
+     * The guide's booking-policy row, or the {@code guide_booking_settings} schema defaults (see
+     * {@link GuideBookingSettingsEntity}'s javadoc) when the guide has none yet — EXACTLY the
+     * fallback {@link SlotGenerationService} already uses, so a slot it lists as free is bookable
+     * here under the SAME notice/advance/buffer rules.
+     */
+    private GuideBookingSettingsEntity loadSettings(UUID guideId) {
+        return settings.findByGuideId(guideId).orElseGet(GuideBookingSettingsEntity::new);
+    }
+
+    /**
+     * Enforces the guide's minimum-notice / maximum-advance window on a candidate start, using
+     * their OWN {@code guide_booking_settings} (see {@link #loadSettings}) rather than a hardcoded
+     * constant. Shared by {@link #buildDraftBooking} (create + cart-add); {@link
+     * #revalidateCartItem} (checkout) re-runs the same two comparisons with its own
+     * cart-item-prefixed messages, since the guide's settings can tighten while an item sits in the
+     * cart.
+     */
+    private static void requireWithinNoticeAndAdvance(
+            Instant start, Instant now, GuideBookingSettingsEntity guideSettings) {
+        Duration minNotice = Duration.ofMinutes(guideSettings.getMinNoticeMin());
+        if (start.isBefore(now.plus(minNotice))) {
             throw new ValidationException(
-                    "Bookings need at least " + MIN_NOTICE.toHours() + " hours notice");
+                    "Bookings need at least " + formatNoticeWindow(minNotice) + " notice");
         }
-        if (start.isAfter(now.plus(MAX_ADVANCE))) {
+        Duration maxAdvance = Duration.ofDays(guideSettings.getMaxAdvanceDays());
+        if (start.isAfter(now.plus(maxAdvance))) {
             throw new ValidationException(
-                    "Bookings can be made at most " + MAX_ADVANCE.toDays() + " days in advance");
+                    "Bookings can be made at most " + maxAdvance.toDays() + " days in advance");
         }
-        return start;
+    }
+
+    /**
+     * Renders a guide-configurable minimum-notice window for error messages. {@code
+     * Duration.toHours()} TRUNCATES non-hour-aligned values (e.g. 90 minutes -> "1 hours", which is
+     * both wrong and ungrammatical), and {@code minNoticeMin} is guide-configurable so it is no
+     * longer guaranteed to be an exact multiple of 60. Whole-hour values (including the
+     * schema-default 1440min) still read as "{n} hour(s)"; anything else reads as "{n} minutes".
+     */
+    private static String formatNoticeWindow(Duration minNotice) {
+        long minutes = minNotice.toMinutes();
+        if (minutes % 60 == 0) {
+            long hours = minutes / 60;
+            return hours + (hours == 1 ? " hour" : " hours");
+        }
+        return minutes + " minutes";
     }
 
     /**

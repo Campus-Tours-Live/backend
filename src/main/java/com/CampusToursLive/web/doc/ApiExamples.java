@@ -213,4 +213,77 @@ public interface ApiExamples {
                     + "\"avgRating\":4.5,\"reviewCount\":12},"
                     + META
                     + "}";
+
+    // --- Availability (CTL-54) ---
+
+    String AVAILABILITY_RULE_JSON =
+            "{\"id\":\"c1a2c3d4-0000-4000-8000-000000000010\",\"dayOfWeek\":1,"
+                    + "\"startLocal\":\"09:00\",\"windowMin\":60,"
+                    + "\"timezone\":\"America/Los_Angeles\",\"effectiveFrom\":\"2026-07-11\","
+                    + "\"effectiveTo\":null,\"active\":true}";
+
+    String AVAILABILITY_RULE_LIST = "{\"data\":[" + AVAILABILITY_RULE_JSON + "]," + META + "}";
+
+    String AVAILABILITY_RULE_WRITE =
+            "{\"data\":" + AVAILABILITY_RULE_JSON + ",\"affectedBookings\":[]," + META + "}";
+
+    String AVAILABILITY_RULE_WRITE_WITH_WARNING =
+            "{\"data\":"
+                    + AVAILABILITY_RULE_JSON
+                    + ",\"affectedBookings\":[{\"bookingId\":"
+                    + "\"b1a2c3d4-0000-4000-8000-000000000001\",\"bookingNumber\":"
+                    + "\"BK-7F3K2M9QX1\",\"scheduledStartAt\":\"2026-07-13T19:00:00Z\","
+                    + "\"scheduledEndAt\":\"2026-07-13T20:00:00Z\",\"status\":\"CONFIRMED\"}],"
+                    + META
+                    + "}";
+
+    String AVAILABILITY_RULE_LIST_WRITE = "{\"data\":[],\"affectedBookings\":[]," + META + "}";
+
+    String AVAILABILITY_EXCEPTION_JSON =
+            "{\"id\":\"c1a2c3d4-0000-4000-8000-000000000011\",\"exceptionDate\":\"2026-07-12\","
+                    + "\"kind\":\"ADDITIONAL\",\"startLocal\":\"10:00\",\"windowMin\":60,"
+                    + "\"reason\":\"extra hours\"}";
+
+    String AVAILABILITY_EXCEPTION_LIST =
+            "{\"data\":[" + AVAILABILITY_EXCEPTION_JSON + "]," + META + "}";
+
+    String AVAILABILITY_EXCEPTION_WRITE =
+            "{\"data\":" + AVAILABILITY_EXCEPTION_JSON + ",\"affectedBookings\":[]," + META + "}";
+
+    String AVAILABILITY_EXCEPTION_LIST_WRITE = "{\"data\":[],\"affectedBookings\":[]," + META + "}";
+
+    String GUIDE_BOOKING_SETTINGS_JSON =
+            "{\"guideId\":\"11111111-0000-4000-8000-000000000001\","
+                    + "\"acceptanceMode\":\"MANUAL\",\"responseDeadlineMin\":90,"
+                    + "\"minNoticeMin\":1440,\"maxAdvanceDays\":30,\"bufferBeforeMin\":0,"
+                    + "\"bufferAfterMin\":15,\"durationsOffered\":[30,45,60,90],"
+                    + "\"timezone\":\"America/Los_Angeles\",\"updatedAt\":\"2026-07-11T00:00:00Z\"}";
+
+    String GUIDE_BOOKING_SETTINGS = "{\"data\":" + GUIDE_BOOKING_SETTINGS_JSON + "," + META + "}";
+
+    String GUIDE_BOOKING_SETTINGS_WRITE =
+            "{\"data\":" + GUIDE_BOOKING_SETTINGS_JSON + ",\"affectedBookings\":[]," + META + "}";
+
+    String RESOLVED_AVAILABILITY =
+            "{\"data\":{\"rules\":["
+                    + AVAILABILITY_RULE_JSON
+                    + "],\"occurrences\":[{\"startAt\":\"2026-07-13T16:00:00Z\","
+                    + "\"endAt\":\"2026-07-13T17:00:00Z\"}],\"dstGapDays\":[\"2026-03-08\"],"
+                    + "\"bookable\":true,\"hasWeeklyHours\":true},"
+                    + META
+                    + "}";
+
+    String OVERRIDE_PREVIEW_JSON =
+            "{\"days\":[{\"date\":\"2026-07-12\",\"resultingWindows\":"
+                    + "[{\"startAt\":\"2026-07-12T16:00:00Z\",\"endAt\":\"2026-07-12T16:30:00Z\"}],"
+                    + "\"trimmed\":[{\"kind\":\"ADDITIONAL\",\"startLocal\":\"09:00\","
+                    + "\"windowMin\":60}]}],\"valid\":true,\"message\":null}";
+
+    String OVERRIDE_PREVIEW = "{\"data\":" + OVERRIDE_PREVIEW_JSON + "," + META + "}";
+
+    String SLOT_LIST =
+            "{\"data\":[{\"startAt\":\"2026-07-14T10:00:00Z\","
+                    + "\"endAt\":\"2026-07-14T11:00:00Z\"}],"
+                    + META
+                    + "}";
 }
