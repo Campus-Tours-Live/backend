@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.CampusToursLive.domain.participant.ParticipantProfileEntity;
 import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
 import com.CampusToursLive.domain.participant.ParticipantType;
+import com.CampusToursLive.domain.university.CampusImageUrls;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.user.RoleGrantService;
@@ -50,6 +51,7 @@ class GuideServiceTest {
     @Mock UserRepository users;
     @Mock RoleGrantService roleGrant;
     @Mock SchoolDirectory schools;
+    private final CampusImageUrls campusImages = new CampusImageUrls("https://r2.example/");
 
     private GuideService service() {
         return new GuideService(
@@ -60,6 +62,7 @@ class GuideServiceTest {
                 users,
                 roleGrant,
                 schools,
+                campusImages,
                 new ObjectMapper());
     }
 
@@ -144,6 +147,21 @@ class GuideServiceTest {
         assertEquals("sc-243744", saved.getValue().getSlug());
         assertEquals("Stanford University", saved.getValue().getName());
         assertEquals("America/Los_Angeles", saved.getValue().getTimezone()); // CA → Pacific
+    }
+
+    @Test
+    void upsertFromDirectory_setsDerivedImageUrl() {
+        when(universities.findBySlug("sc-166027")).thenReturn(Optional.empty());
+        when(schools.getSchool("166027"))
+                .thenReturn(
+                        new SchoolDirectory.SchoolRef(
+                                "166027", "Harvard University", "Cambridge", "MA"));
+        ArgumentCaptor<UniversityEntity> saved = ArgumentCaptor.forClass(UniversityEntity.class);
+        when(universities.save(saved.capture())).thenAnswer(i -> i.getArgument(0));
+
+        service().resolveUniversityForTest("166027");
+
+        assertEquals("https://r2.example/Harvard%20University.png", saved.getValue().getImageUrl());
     }
 
     @Test
@@ -758,6 +776,7 @@ class GuideServiceTest {
                         users,
                         roleGrant,
                         schools,
+                        campusImages,
                         badMapper);
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
@@ -798,6 +817,7 @@ class GuideServiceTest {
                         users,
                         roleGrant,
                         schools,
+                        campusImages,
                         badMapper);
         GuideProfileEntity profile = new GuideProfileEntity();
         profile.setLanguages("[\"en-US\"]"); // non-blank → readValue invoked → throws → []

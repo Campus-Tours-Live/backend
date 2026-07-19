@@ -43,4 +43,7 @@ public class UniversityEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", columnDefinition = "university_status", nullable = false)
     private UniversityStatus status;
+
+    @Column(name = "image_url")
+    private String imageUrl;
 }

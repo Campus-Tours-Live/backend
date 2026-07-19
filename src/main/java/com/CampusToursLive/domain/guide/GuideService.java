@@ -3,6 +3,7 @@ package com.CampusToursLive.domain.guide;
 import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
 import com.CampusToursLive.domain.participant.ParticipantType;
 import com.CampusToursLive.domain.tour.TourTopic;
+import com.CampusToursLive.domain.university.CampusImageUrls;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.university.UniversityStatus;
@@ -42,6 +43,7 @@ public class GuideService {
     private final UserRepository users;
     private final RoleGrantService roleGrant;
     private final SchoolDirectory schools;
+    private final CampusImageUrls campusImages;
     private final ObjectMapper mapper;
 
     public GuideService(
@@ -52,6 +54,7 @@ public class GuideService {
             UserRepository users,
             RoleGrantService roleGrant,
             SchoolDirectory schools,
+            CampusImageUrls campusImages,
             ObjectMapper mapper) {
         this.guides = guides;
         this.verifications = verifications;
@@ -60,6 +63,7 @@ public class GuideService {
         this.users = users;
         this.roleGrant = roleGrant;
         this.schools = schools;
+        this.campusImages = campusImages;
         this.mapper = mapper;
     }
 
@@ -207,8 +211,14 @@ public class GuideService {
                             u.setRegion(s.state());
                             u.setTimezone(tzForState(s.state()));
                             u.setStatus(UniversityStatus.ACTIVE);
+                            u.setImageUrl(campusImages.forName(s.name()));
                             return universities.save(u).getId();
                         });
+    }
+
+    /** Test-only shim: exposes the private upsert path for {@code GuideServiceTest}. */
+    UUID resolveUniversityForTest(String scorecardId) {
+        return upsertFromDirectory(scorecardId);
     }
 
     /** Best-effort IANA zone for a US state code (demo-grade; onboarding can refine later). */
