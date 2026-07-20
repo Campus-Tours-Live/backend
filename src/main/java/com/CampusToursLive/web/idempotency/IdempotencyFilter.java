@@ -175,6 +175,7 @@ public class IdempotencyFilter extends OncePerRequestFilter {
             // The reservation vanished between our failed INSERT and this read — the original
             // request failed (reservation deleted) or the TTL sweep purged it. Treat as unseen and
             // run the handler, rather than 500-ing a legitimate retry on a missing row.
+            log.warn("Idempotency reservation reaped before re-read; proceeding without dedupe");
             proceedUnrecorded(request, response, filterChain, body);
             return;
         }
