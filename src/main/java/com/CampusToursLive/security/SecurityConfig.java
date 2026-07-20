@@ -38,9 +38,26 @@ public class SecurityConfig {
                                                 "/swagger-ui.html")
                                         .permitAll()
                                         // Public marketplace: the tour catalog + reference-data
-                                        // lookups are readable without a session (GET only).
+                                        // lookups are readable without a session.
+                                        //
+                                        // HEAD is listed alongside GET deliberately (L5#2). Without
+                                        // it a HEAD fell through to anyRequest().authenticated()
+                                        // and
+                                        // 401'd -- and because the BFF forwards public paths
+                                        // anonymously and turns any Core 401 into requireReauth ->
+                                        // clearSession, a single HEAD from a signed-in user's
+                                        // browser, a prefetcher or an uptime probe DESTROYED their
+                                        // session. A publicly readable resource must be publicly
+                                        // HEAD-able; anything else makes a metadata request a
+                                        // logout.
                                         .requestMatchers(
                                                 org.springframework.http.HttpMethod.GET,
+                                                "/tours",
+                                                "/tours/**",
+                                                "/meta/**")
+                                        .permitAll()
+                                        .requestMatchers(
+                                                org.springframework.http.HttpMethod.HEAD,
                                                 "/tours",
                                                 "/tours/**",
                                                 "/meta/**")
