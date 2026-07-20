@@ -99,8 +99,13 @@ matrix in `campus-tours-live/CLAUDE.md`):
   must match bff, and the OAuth client lives in the Google Console — see the hub's "Cross-repo
   environment contract". Run `backend-api-security` for these.
 - **Changing DB schema (Flyway migration)** → if a field is exposed by the API, verify layer
-  by layer along backend → bff → frontend. **Migrations are forward-only — never edit an
-  existing, already-deployed migration file** (add a new one to roll forward/back).
+  by layer along backend → bff → frontend. **Migrations are forward-only — NEVER edit an
+  applied `V<n>` file** (not even reformatting or adding a row): editing it drifts its checksum,
+  and `flyway:repair` only re-aligns the checksum — it does **not** re-run the file, so already-migrated
+  DBs never receive the change's data. To change what an applied migration did, add a **new**
+  `V<n+1>` (for data, an idempotent `UPDATE` keyed by a stable unique column — never mutate the
+  conflict key). Reset a disposable dev DB with `docker compose down -v`; see `README.md`
+  "Database & migrations" for the repair-vs-rebuild recipe.
 - **Contract-first principle**: new features start with backend **defining the contract**,
   then bff adapts and frontend consumes. Breaking contract changes must be flagged and
   coordinated with the other two repos — never merged unilaterally.
