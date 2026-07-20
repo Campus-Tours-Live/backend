@@ -18,48 +18,42 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
     Optional<TourOfferingEntity> findByIdAndGuideId(UUID id, UUID guideId);
 
     /**
+     * The catalog's FROM + WHERE, shared verbatim by the list query and its count query (L5#4).
+     *
+     * <p>Previously both were written out in full, so editing a filter on one side and not the
+     * other desynchronised them: the page reported a total its rows could not account for,
+     * producing empty or unreachable pages. A single constant makes that class of drift impossible
+     * rather than merely discouraged. Annotation attributes need compile-time constants, and text
+     * blocks concatenated from `static final` fields are exactly that.
+     */
+    String DISCOVERABLE_FROM_WHERE =
+            """
+            from TourOfferingEntity o
+            inner join GuideProfileEntity g on g.id = o.guideId
+            inner join UniversityEntity u on u.id = o.universityId
+            where o.status = com.CampusToursLive.domain.tour.TourStatus.ACTIVE
+              and g.applicationStatus = com.CampusToursLive.domain.guide.GuideApplicationStatus.APPROVED
+              and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
+              and o.universityId = coalesce(:universityId, o.universityId)
+              and (:filterByTopic = false or o.topic in :topics)
+              and (
+                :q = ''
+                or lower(o.title) like lower(concat('%', :q, '%')) escape '!'
+                or lower(o.description) like lower(concat('%', :q, '%')) escape '!'
+                or lower(u.name) like lower(concat('%', :q, '%')) escape '!'
+                or lower(coalesce(u.shortName, '')) like lower(concat('%', :q, '%')) escape '!'
+              )
+            """;
+
+    /**
      * Active offerings from approved guides at active universities — the public marketplace
      * catalog. {@code universityId} and {@code topic} are optional filters; {@code q} matches
      * title, description, university name, or short name (case-insensitive; LIKE wildcards in
      * {@code q} are escaped and matched literally).
      */
     @Query(
-            value =
-                    """
-                    select o from TourOfferingEntity o
-                    inner join GuideProfileEntity g on g.id = o.guideId
-                    inner join UniversityEntity u on u.id = o.universityId
-                    where o.status = com.CampusToursLive.domain.tour.TourStatus.ACTIVE
-                      and g.applicationStatus = com.CampusToursLive.domain.guide.GuideApplicationStatus.APPROVED
-                      and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
-                      and o.universityId = coalesce(:universityId, o.universityId)
-                      and (:filterByTopic = false or o.topic in :topics)
-                      and (
-                        :q = ''
-                        or lower(o.title) like lower(concat('%', :q, '%')) escape '!'
-                        or lower(o.description) like lower(concat('%', :q, '%')) escape '!'
-                        or lower(u.name) like lower(concat('%', :q, '%')) escape '!'
-                        or lower(coalesce(u.shortName, '')) like lower(concat('%', :q, '%')) escape '!'
-                      )
-                    """,
-            countQuery =
-                    """
-                    select count(o) from TourOfferingEntity o
-                    inner join GuideProfileEntity g on g.id = o.guideId
-                    inner join UniversityEntity u on u.id = o.universityId
-                    where o.status = com.CampusToursLive.domain.tour.TourStatus.ACTIVE
-                      and g.applicationStatus = com.CampusToursLive.domain.guide.GuideApplicationStatus.APPROVED
-                      and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
-                      and o.universityId = coalesce(:universityId, o.universityId)
-                      and (:filterByTopic = false or o.topic in :topics)
-                      and (
-                        :q = ''
-                        or lower(o.title) like lower(concat('%', :q, '%')) escape '!'
-                        or lower(o.description) like lower(concat('%', :q, '%')) escape '!'
-                        or lower(u.name) like lower(concat('%', :q, '%')) escape '!'
-                        or lower(coalesce(u.shortName, '')) like lower(concat('%', :q, '%')) escape '!'
-                      )
-                    """)
+            value = "select o " + DISCOVERABLE_FROM_WHERE,
+            countQuery = "select count(o) " + DISCOVERABLE_FROM_WHERE)
     Page<TourOfferingEntity> findDiscoverable(
             @Param("universityId") UUID universityId,
             @Param("filterByTopic") boolean filterByTopic,

@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -127,6 +128,30 @@ class TourOfferingRepositoryTest {
                         .getContent();
 
         assertThat(results).extracting(TourOfferingEntity::getId).containsExactly(discoverableId);
+    }
+
+    /**
+     * L5#4 — the count query and the list query must agree.
+     *
+     * <p>They are one @Query with the FROM/WHERE written twice, so a filter edited on one side and
+     * not the other silently desynchronises them: the page reports a total the results cannot
+     * account for, and pagination shows empty or unreachable pages. This pins the invariant against
+     * a filter that actually excludes rows, so the two clauses have something to disagree about.
+     */
+    @Test
+    void findDiscoverable_totalMatchesTheRowsItReturns() {
+        Page<TourOfferingEntity> page =
+                offerings.findDiscoverable(
+                        null,
+                        false,
+                        List.of(TourTopic.values()[0]),
+                        searchMarker,
+                        PageRequest.of(0, 20));
+
+        assertThat(page.getTotalElements()).isEqualTo(page.getContent().size());
+        assertThat(page.getContent())
+                .extracting(TourOfferingEntity::getId)
+                .containsExactly(discoverableId);
     }
 
     @Test
