@@ -161,6 +161,12 @@ class GuideServiceTest {
 
         service().resolveUniversityForTest("166027");
 
+        // L5#5 — BOTH image_url write paths must produce the same URL for the same campus.
+        // This is the CREATE path (a university first seen via Scorecard). The BACKFILL path is
+        // TourOfferingServiceTest#backfillsCampusImageOnFirstOffering (search:
+        // Harvard%20University),
+        // which asserts this identical value. They agree because both go through
+        // CampusImageUrls#forName with that university's name -- keep the two expectations in step.
         assertEquals("https://r2.example/Harvard%20University.png", saved.getValue().getImageUrl());
     }
 
