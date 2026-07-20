@@ -72,19 +72,18 @@ public class SecurityConfig {
      * JWT decoder for the issuer's JWKS, plus an audience check so only id_tokens minted for this
      * app's Google Client ID are accepted.
      *
-     * <p>Fails fast when {@code app.auth.audience} (the Google Client ID) is blank, so a
-     * misconfigured staging/prod never boots silently accepting any Google id_token. Local dev
-     * without a Client ID must opt in explicitly with {@code app.auth.allow-insecure-audience=true}
-     * ({@code ALLOW_INSECURE_AUDIENCE=true}).
+     * <p>Fails fast when {@code app.auth.audience} (the Google Client ID) is blank. There is no
+     * opt-out: without an audience the service would accept any validly-signed Google id_token,
+     * meaning any Google account on the internet could be provisioned here as a user. That is an
+     * authentication bypass, not a local-dev convenience, so it is not reachable by omission.
      */
     @Bean
     public JwtDecoder jwtDecoder(
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}") String issuerUri,
-            @Value("${app.auth.audience:}") String audience,
-            @Value("${app.auth.allow-insecure-audience:false}") boolean allowInsecure) {
+            @Value("${app.auth.audience:}") String audience) {
         // Build (and validate) the token validator BEFORE fetching the issuer's JWKS, so a blank
         // audience fails startup immediately rather than after a network round-trip.
-        OAuth2TokenValidator<Jwt> validator = tokenValidator(issuerUri, audience, allowInsecure);
+        OAuth2TokenValidator<Jwt> validator = tokenValidator(issuerUri, audience);
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withIssuerLocation(issuerUri).build();
         decoder.setJwtValidator(validator);
         return decoder;
@@ -95,19 +94,16 @@ public class SecurityConfig {
      * unit-tested without a Spring context or network (the JWKS fetch lives in {@link
      * #jwtDecoder}).
      *
-     * @throws IllegalStateException when {@code audience} is blank and the insecure opt-out is off.
+     * @throws IllegalStateException when {@code audience} is blank.
      */
-    static OAuth2TokenValidator<Jwt> tokenValidator(
-            String issuerUri, String audience, boolean allowInsecure) {
-        if (audience.isBlank() && !allowInsecure) {
+    static OAuth2TokenValidator<Jwt> tokenValidator(String issuerUri, String audience) {
+        if (audience.isBlank()) {
             throw new IllegalStateException(
-                    "app.auth.audience (GOOGLE_CLIENT_ID) is blank. Set it, or explicitly set "
-                            + "app.auth.allow-insecure-audience=true for local dev (would accept any"
-                            + " Google id_token).");
+                    "app.auth.audience is blank — set GOOGLE_CLIENT_ID. Without it every"
+                            + " validly-signed Google id_token would be accepted, whoever it was"
+                            + " issued for.");
         }
-        OAuth2TokenValidator<Jwt> withIssuer = JwtValidators.createDefaultWithIssuer(issuerUri);
-        return audience.isBlank()
-                ? withIssuer
-                : new DelegatingOAuth2TokenValidator<>(withIssuer, new AudienceValidator(audience));
+        return new DelegatingOAuth2TokenValidator<>(
+                JwtValidators.createDefaultWithIssuer(issuerUri), new AudienceValidator(audience));
     }
 }

@@ -10,11 +10,12 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 /**
- * Unit tests for {@link SecurityConfig#tokenValidator} — the audience fail-fast and the issuer-only
- * vs. issuer+audience decision. Exercised directly (no Spring context, no network: the JWKS fetch
- * lives in the {@code jwtDecoder} bean, not here). Distinguishes the two non-throw cases
- * behaviourally: an issuer-only validator accepts a token whose audience is for another app, while
- * the audience-checking validator rejects it.
+ * Unit tests for {@link SecurityConfig#tokenValidator} — the audience fail-fast, and that a
+ * configured audience is actually enforced. Exercised directly (no Spring context, no network: the
+ * JWKS fetch lives in the {@code jwtDecoder} bean, not here).
+ *
+ * <p>There is deliberately no "start without an audience" case to test: the service has no opt-out.
+ * A blank audience is a configuration error, not a mode.
  */
 class SecurityConfigJwtDecoderTest {
 
@@ -45,25 +46,18 @@ class SecurityConfigJwtDecoderTest {
     }
 
     @Test
-    void blankAudience_withoutOptOut_failsFast() {
-        assertThatThrownBy(() -> SecurityConfig.tokenValidator(ISSUER, "", false))
+    void blankAudience_failsFast() {
+        // No opt-out exists. Booting without an audience would accept any validly-signed Google
+        // id_token — i.e. anyone with a Google account — so it must not be reachable by omission.
+        assertThatThrownBy(() -> SecurityConfig.tokenValidator(ISSUER, ""))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("app.auth.audience")
-                .hasMessageContaining("allow-insecure-audience");
-    }
-
-    @Test
-    void blankAudience_withOptOut_buildsIssuerOnlyValidator() {
-        OAuth2TokenValidator<Jwt> validator = SecurityConfig.tokenValidator(ISSUER, "", true);
-
-        // Issuer-only: no audience check, so a token minted for another app still validates.
-        assertThat(validator.validate(tokenForAnotherApp()).hasErrors()).isFalse();
+                .hasMessageContaining("GOOGLE_CLIENT_ID");
     }
 
     @Test
     void nonBlankAudience_buildsAudienceCheckingValidator() {
-        OAuth2TokenValidator<Jwt> validator =
-                SecurityConfig.tokenValidator(ISSUER, CLIENT_ID, false);
+        OAuth2TokenValidator<Jwt> validator = SecurityConfig.tokenValidator(ISSUER, CLIENT_ID);
 
         // Audience is enforced: another app's token is rejected, ours is accepted.
         assertThat(validator.validate(tokenForAnotherApp()).hasErrors()).isTrue();
