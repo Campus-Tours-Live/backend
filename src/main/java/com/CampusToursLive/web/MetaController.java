@@ -5,7 +5,6 @@ import com.CampusToursLive.domain.tour.TourTopic;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
-import com.CampusToursLive.web.dto.Problem;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
@@ -76,14 +75,6 @@ public class MetaController {
                     @Content(
                             mediaType = "application/json",
                             examples = @ExampleObject(value = ApiExamples.TOUR_TOPICS)))
-    @ApiResponse(
-            responseCode = "401",
-            description = "Missing or invalid platform JWT.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(implementation = Problem.class),
-                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
     @GetMapping("/tour-topics")
     public ApiEnvelope<List<Option>> tourTopics() {
         List<Option> topics =

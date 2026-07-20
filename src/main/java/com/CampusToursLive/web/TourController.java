@@ -56,14 +56,6 @@ public class TourController {
                             mediaType = "application/json",
                             examples = @ExampleObject(value = ApiExamples.TOUR_SUMMARY_LIST)))
     @ApiResponse(
-            responseCode = "401",
-            description = "Missing or invalid platform JWT.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(implementation = Problem.class),
-                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
-    @ApiResponse(
             responseCode = "422",
             description = "Unknown sort value.",
             content =
@@ -120,14 +112,6 @@ public class TourController {
                     @Content(
                             mediaType = "application/json",
                             examples = @ExampleObject(value = ApiExamples.TOUR_DETAIL)))
-    @ApiResponse(
-            responseCode = "401",
-            description = "Missing or invalid platform JWT.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(implementation = Problem.class),
-                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
     @ApiResponse(
             responseCode = "404",
             description = "No bookable tour with that id.",
