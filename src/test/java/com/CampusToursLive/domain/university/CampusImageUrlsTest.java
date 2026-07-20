@@ -36,8 +36,9 @@ class CampusImageUrlsTest {
     }
 
     @Test
-    void blankBaseYieldsBareEncodedKey() {
-        assertThat(new CampusImageUrls("").forName("Yale University"))
-                .isEqualTo("Yale%20University.png");
+    void blankBaseYieldsNull() {
+        // A blank base must return null (not a scheme-less relative "Name.png") so the frontend
+        // falls back instead of crashing next/image at render. See CampusImageUrls#forName.
+        assertThat(new CampusImageUrls("").forName("Yale University")).isNull();
     }
 }
