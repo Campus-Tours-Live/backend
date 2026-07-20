@@ -14,9 +14,15 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StreamUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
@@ -28,8 +34,8 @@ import org.springframework.web.util.ContentCachingResponseWrapper;
  * request passes straight through, so dedupe is strictly best-effort and opt-in):
  *
  * <ol>
- *   <li><b>Reserve.</b> Drain the body, compute {@code request_hash = sha256(method + path +
- *       body)}, and {@code INSERT} a row with {@code response_status = NULL} into {@code
+ *   <li><b>Reserve.</b> Drain the body, compute {@code request_hash = sha256(method + path + query
+ *       + body)}, and {@code INSERT} a row with {@code response_status = NULL} into {@code
  *       idempotency_keys}, relying on {@code UNIQUE(operation, idempotency_key)} to detect
  *       duplicates.
  *   <li><b>Duplicate branch</b> (unique violation): re-read the existing row and either return
@@ -43,6 +49,29 @@ import org.springframework.web.util.ContentCachingResponseWrapper;
  *       500} or a thrown exception) {@code DELETE} the reservation so a legitimate retry is not
  *       wedged on the {@code 409} in-flight branch until the TTL expires.
  * </ol>
+ *
+ * <p><b>Per-caller scope.</b> The reserve folds the authenticated subject into {@code operation}
+ * (the server-derived half of {@code UNIQUE(operation, idempotency_key)}), so two
+ * <em>different</em> users that happen to reuse the same client key never collide — without that,
+ * one caller's key could 422 the other's write or, on a matching hash, replay the first caller's
+ * response to the second. This filter runs nested inside (ordered after) the Spring Security chain,
+ * so the {@link SecurityContextHolder} is still populated here; unauthenticated mutations (none
+ * today — every write is behind auth) fall back to a fixed {@code "anon"} bucket.
+ *
+ * <p><b>Best-effort degradation.</b> Because dedupe is opt-in bookkeeping, it must never fail an
+ * otherwise-valid write. If the reserve {@code INSERT} fails for any reason <em>other</em> than a
+ * duplicate (a transient DB blip), or the duplicate-branch re-read finds the row already reaped
+ * (the original failed and deleted it, or the TTL sweep removed it), the request runs unrecorded
+ * rather than {@code 500}-ing. The natural-key constraints below remain the real duplicate-write
+ * defense in those windows.
+ *
+ * <p><b>Replay fidelity (accepted limits).</b> Replay echoes the stored status + body only. The
+ * body is stored as {@code jsonb}, so Postgres re-serializes it (key order / whitespace may differ)
+ * — semantically identical, which is all idempotent replay requires; there are no byte-sensitive
+ * (ETag/signature) consumers of these responses. The media type is fixed at {@code
+ * application/json} and no other response headers are restored, because this API's mutations return
+ * JSON envelopes in the body and set no {@code Location} or custom headers; the table stores no
+ * header metadata by design.
  *
  * <p><b>Transaction semantics — do not "fix" this.</b> The reserve {@code INSERT} commits in its
  * own transaction (this filter runs outside any {@code @Transactional}, so the {@link JdbcTemplate}
@@ -64,6 +93,8 @@ import org.springframework.web.util.ContentCachingResponseWrapper;
  * that have no {@link JdbcTemplate}.
  */
 public class IdempotencyFilter extends OncePerRequestFilter {
+
+    private static final Logger log = LoggerFactory.getLogger(IdempotencyFilter.class);
 
     static final String HEADER = "Idempotency-Key";
     static final Duration TTL = Duration.ofHours(24);
@@ -97,10 +128,14 @@ public class IdempotencyFilter extends OncePerRequestFilter {
             return;
         }
 
-        String path = request.getRequestURI();
-        String operation = request.getMethod() + " " + path;
+        // Include the query string so two requests that differ only in their query (same key +
+        // body) are treated as distinct operations, not silently deduped into a replay of the
+        // first.
+        String query = request.getQueryString();
+        String target = request.getRequestURI() + (query == null ? "" : "?" + query);
+        String operation = subject() + " " + request.getMethod() + " " + target;
         byte[] body = StreamUtils.copyToByteArray(request.getInputStream());
-        String requestHash = sha256(request.getMethod(), path, body);
+        String requestHash = sha256(request.getMethod(), target, body);
 
         try {
             jdbc.update(
@@ -110,7 +145,13 @@ public class IdempotencyFilter extends OncePerRequestFilter {
                     requestHash,
                     Timestamp.from(Instant.now().plus(TTL)));
         } catch (DuplicateKeyException duplicate) {
-            replayOrReject(response, operation, key, requestHash);
+            replayOrReject(request, response, filterChain, operation, key, body, requestHash);
+            return;
+        } catch (DataAccessException unavailable) {
+            // Not a duplicate — a transient DB failure on the bookkeeping INSERT. Dedupe is
+            // best-effort, so degrade to running the write unrecorded rather than failing it.
+            log.warn("Idempotency reserve failed; proceeding without dedupe", unavailable);
+            proceedUnrecorded(request, response, filterChain, body);
             return;
         }
 
@@ -119,9 +160,24 @@ public class IdempotencyFilter extends OncePerRequestFilter {
 
     /** A key we've seen before: in-flight 409, misuse 422, or replay the stored response. */
     private void replayOrReject(
-            HttpServletResponse response, String operation, String key, String requestHash)
-            throws IOException {
-        Map<String, Object> row = jdbc.queryForMap(SELECT_SQL, operation, key);
+            HttpServletRequest request,
+            HttpServletResponse response,
+            FilterChain filterChain,
+            String operation,
+            String key,
+            byte[] body,
+            String requestHash)
+            throws IOException, ServletException {
+        Map<String, Object> row;
+        try {
+            row = jdbc.queryForMap(SELECT_SQL, operation, key);
+        } catch (EmptyResultDataAccessException reaped) {
+            // The reservation vanished between our failed INSERT and this read — the original
+            // request failed (reservation deleted) or the TTL sweep purged it. Treat as unseen and
+            // run the handler, rather than 500-ing a legitimate retry on a missing row.
+            proceedUnrecorded(request, response, filterChain, body);
+            return;
+        }
         Integer status = (Integer) row.get("response_status");
         if (status == null) {
             writeProblem(
@@ -142,11 +198,22 @@ public class IdempotencyFilter extends OncePerRequestFilter {
         }
         Object storedBody = row.get("response_body");
         response.setStatus(status);
+        // Fixed media type + no header restoration — accepted limitation (see class doc).
         response.setContentType("application/json");
         if (storedBody != null) {
             response.getOutputStream()
                     .write(storedBody.toString().getBytes(StandardCharsets.UTF_8));
         }
+    }
+
+    /** Run the handler with the drained body but keep no idempotency record (degraded path). */
+    private void proceedUnrecorded(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            FilterChain filterChain,
+            byte[] body)
+            throws IOException, ServletException {
+        filterChain.doFilter(new CachedBodyHttpServletRequest(request, body), response);
     }
 
     /** Run the handler with a replayable body, then persist or drop the reservation. */
@@ -186,9 +253,11 @@ public class IdempotencyFilter extends OncePerRequestFilter {
                         : new String(body, StandardCharsets.UTF_8);
         try {
             jdbc.update(UPDATE_SQL, status, json, operation, key);
-        } catch (DataAccessException notJson) {
-            // Non-JSON body (e.g. an empty 204 or a plain-text response) — the jsonb cast rejected
-            // it; persist the status so retries still replay, just without a body to echo.
+        } catch (DataIntegrityViolationException notJson) {
+            // The captured body isn't valid JSON (e.g. a plain-text or empty response) — the jsonb
+            // CAST rejected it (SQLSTATE class 22). Persist the status alone so retries still
+            // replay. Narrow on purpose: a transient/connection DataAccessException must propagate,
+            // not be swallowed into a body-less row.
             jdbc.update(UPDATE_SQL, status, null, operation, key);
         }
     }
@@ -206,11 +275,17 @@ public class IdempotencyFilter extends OncePerRequestFilter {
         jdbc.update("DELETE FROM idempotency_keys WHERE expires_at < now()");
     }
 
-    private static String sha256(String method, String path, byte[] body) {
+    /** The authenticated caller's subject, or {@code "anon"} when there is no authentication. */
+    private static String subject() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return (auth != null && auth.isAuthenticated()) ? auth.getName() : "anon";
+    }
+
+    private static String sha256(String method, String target, byte[] body) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             digest.update(method.getBytes(StandardCharsets.UTF_8));
-            digest.update(path.getBytes(StandardCharsets.UTF_8));
+            digest.update(target.getBytes(StandardCharsets.UTF_8));
             digest.update(body);
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException e) {

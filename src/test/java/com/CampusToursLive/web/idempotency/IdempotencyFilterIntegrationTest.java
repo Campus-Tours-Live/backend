@@ -20,6 +20,8 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.authentication.TestingAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StreamUtils;
@@ -66,8 +68,15 @@ class IdempotencyFilterIntegrationTest {
         filter = new IdempotencyFilter(jdbc);
         handlerCalls = 0;
         bodySeenByHandler = null;
+        SecurityContextHolder.clearContext();
         // Rows persist across tests (autocommit, no rollback) — start each test from empty.
         jdbc.update("DELETE FROM idempotency_keys");
+    }
+
+    /** Authenticate the current thread as {@code subject} so the filter scopes the key to it. */
+    private void setSubject(String subject) {
+        SecurityContextHolder.getContext()
+                .setAuthentication(new TestingAuthenticationToken(subject, null, "ROLE_USER"));
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────
@@ -167,7 +176,7 @@ class IdempotencyFilterIntegrationTest {
                 "INSERT INTO idempotency_keys (idempotency_key, operation, request_hash, expires_at)"
                         + " VALUES (?, ?, ?, ?)",
                 key,
-                "POST /bookings",
+                "anon POST /bookings", // operation the filter computes for this unauthenticated req
                 "any-hash",
                 Timestamp.from(Instant.now().plus(1, ChronoUnit.HOURS)));
 
@@ -351,6 +360,52 @@ class IdempotencyFilterIntegrationTest {
         assertThat(handlerCalls).isEqualTo(1);
         Integer total = jdbc.queryForObject("SELECT count(*) FROM idempotency_keys", Integer.class);
         assertThat(total).isZero();
+    }
+
+    @Test
+    void differentSubjects_sameKey_isolated_bothRun() throws Exception {
+        String key = "k-" + UUID.randomUUID();
+        String body = "{\"offeringId\":\"o1\"}";
+
+        setSubject("user-A");
+        filter.doFilter(
+                post("/bookings", body, key),
+                new MockHttpServletResponse(),
+                handler(201, "{\"id\":\"a\"}"));
+
+        // A second user reusing the SAME client key must not collide with user-A's reservation:
+        // the key is scoped per subject (folded into `operation`), so this runs independently and
+        // does NOT replay user-A's response (which would be a cross-user leak).
+        setSubject("user-B");
+        MockHttpServletResponse second = new MockHttpServletResponse();
+        filter.doFilter(post("/bookings", body, key), second, handler(201, "{\"id\":\"b\"}"));
+
+        assertThat(second.getStatus()).isEqualTo(201);
+        assertThat(second.getContentAsString()).isEqualTo("{\"id\":\"b\"}"); // ran, not replayed
+        assertThat(handlerCalls).isEqualTo(2);
+        assertThat(rowsFor(key)).isEqualTo(2); // one row per subject
+    }
+
+    @Test
+    void sameKeyDifferentQueryString_bothRun_twoRows() throws Exception {
+        String key = "k-" + UUID.randomUUID();
+        String body = "{\"a\":1}";
+
+        MockHttpServletRequest first = post("/bookings", body, key);
+        first.setQueryString("slot=1");
+        filter.doFilter(first, new MockHttpServletResponse(), handler(201, "{\"id\":\"1\"}"));
+
+        // Same key + body but a different query string is a DIFFERENT operation — it must run, not
+        // silently replay the first request's response.
+        MockHttpServletRequest second = post("/bookings", body, key);
+        second.setQueryString("slot=2");
+        MockHttpServletResponse secondResp = new MockHttpServletResponse();
+        filter.doFilter(second, secondResp, handler(201, "{\"id\":\"2\"}"));
+
+        assertThat(secondResp.getStatus()).isEqualTo(201);
+        assertThat(secondResp.getContentAsString()).isEqualTo("{\"id\":\"2\"}");
+        assertThat(handlerCalls).isEqualTo(2);
+        assertThat(rowsFor(key)).isEqualTo(2);
     }
 
     @Test
