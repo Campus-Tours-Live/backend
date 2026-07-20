@@ -8,7 +8,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Per-guide collaborator for {@link OccurrenceHorizonJob} (CTL-54 Task 4).
+ * Per-guide collaborator for {@link OccurrenceHorizonJob}.
  *
  * <p><b>Why a separate bean.</b> {@code @Transactional} is proxy-based: a method on bean A calling
  * another {@code @Transactional} method on the SAME bean A (self-invocation) bypasses the proxy

@@ -16,9 +16,13 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * Stateless security. Every request is authenticated by a Google OIDC id_token (JWT), validated
- * against Google's JWKS (signature + issuer + expiry) and, when configured, the audience (our
- * Google Client ID). There is no local stub.
+ * Stateless security. Authenticated requests carry a Google OIDC id_token (JWT), validated against
+ * Google's JWKS (signature + issuer + expiry) plus the audience (our Google Client ID, which is
+ * required — see {@link #tokenValidator}). There is no local stub.
+ *
+ * <p>Not everything is authenticated: the public marketplace (GET/HEAD on {@code /tours}, {@code
+ * /tours/**}, {@code /meta/**}) plus health and the API docs are served anonymously. The matcher
+ * list below is the authoritative statement of that surface.
  */
 @Configuration
 public class SecurityConfig {
@@ -40,7 +44,7 @@ public class SecurityConfig {
                                         // Public marketplace: the tour catalog + reference-data
                                         // lookups are readable without a session.
                                         //
-                                        // HEAD is listed alongside GET deliberately (L5#2). Without
+                                        // HEAD is listed alongside GET deliberately. Without
                                         // it a HEAD fell through to anyRequest().authenticated()
                                         // and
                                         // 401'd -- and because the BFF forwards public paths

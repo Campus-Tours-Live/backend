@@ -5,11 +5,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
- * Response for {@code GET /availability/preview} (CTL-54 v2.1 Task 4): the resulting net-available
- * windows the proposed override would produce, per date in the requested range, WITHOUT persisting
- * anything. {@code valid} is always {@code true} under the newest-wins trim/replace model (there is
- * no hard-block case for a date-specific override) -- the field (and {@code message}) are kept for
- * a future rule that might reject rather than trim.
+ * Response for {@code GET /availability/preview}: the resulting net-available windows the proposed
+ * override would produce, per date in the requested range, WITHOUT persisting anything. {@code
+ * valid} is always {@code true} under the newest-wins trim/replace model (there is no hard-block
+ * case for a date-specific override) -- the field (and {@code message}) are kept for a future rule
+ * that might reject rather than trim.
  */
 @Schema(
         name = "OverridePreviewResponse",

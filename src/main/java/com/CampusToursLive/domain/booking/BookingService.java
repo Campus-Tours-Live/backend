@@ -66,9 +66,9 @@ public class BookingService {
 
     /**
      * Statuses that hold a slot — mirrors the WHERE clause of the DB exclusion constraints.
-     * Package-private (not {@code private}) so {@link SlotGenerationService} (CTL-54 Task 8, same
-     * package) can subtract the SAME set of held bookings from candidate slots — a CONFIRMED-only
-     * view (like {@link BookingRepository
+     * Package-private (not {@code private}) so {@link SlotGenerationService} can subtract the SAME
+     * set of held bookings from candidate slots — a CONFIRMED-only view (like {@link
+     * BookingRepository
      * #findByGuideIdAndStatusAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc}, used
      * by Task 7) would under-count what actually occupies a guide's calendar.
      */

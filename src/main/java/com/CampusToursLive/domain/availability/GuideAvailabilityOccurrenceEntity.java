@@ -15,10 +15,10 @@ import lombok.Setter;
  * UTC instants.
  *
  * <p>This is a DERIVED cache (spec "(G)"): wholesale re-computed and replaced by the persistence
- * layer (CTL-54 Task 3) whenever a rule, exception, or the guide's settings timezone changes —
- * never edited row-by-row. {@code sourceRuleId} / {@code sourceExceptionId} are informational only
- * (after union/difference the net interval doesn't map 1:1 to a single input row); they may be
- * {@code null} and are not a foreign-key-style ownership link.
+ * layer whenever a rule, exception, or the guide's settings timezone changes — never edited
+ * row-by-row. {@code sourceRuleId} / {@code sourceExceptionId} are informational only (after
+ * union/difference the net interval doesn't map 1:1 to a single input row); they may be {@code
+ * null} and are not a foreign-key-style ownership link.
  *
  * <p>The logical "{@code during tstzrange}" interval is represented as two physical columns, {@code
  * duringStartAt} / {@code duringEndAt} — the same shape this schema already uses for {@code

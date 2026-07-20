@@ -25,7 +25,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Public marketplace catalog (BFF maps /v1/tours → here). Returns only ACTIVE offerings from
- * APPROVED guides at active universities — no auth role required beyond the platform JWT.
+ * APPROVED guides at active universities. Genuinely public: these routes are {@code permitAll} in
+ * {@code SecurityConfig}, so anonymous callers are served and no token is required.
  */
 @RestController
 @RequestMapping("/tours")

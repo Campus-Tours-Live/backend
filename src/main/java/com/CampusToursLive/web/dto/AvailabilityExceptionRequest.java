@@ -9,11 +9,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * plain wall-clock time. Under the start+duration model there is no separate {@code ALL_DAY} kind —
  * an all-day block is {@code UNAVAILABLE} with {@code startLocal="00:00"}, {@code windowMin=1440}.
  *
- * <p><b>Single date vs. multi-day (CTL-54 v2.1 Task 3).</b> A caller supplies EITHER {@code
- * exceptionDate} (a single date) OR both {@code dateFrom}/{@code dateTo} (an inclusive multi-day
- * range, applied per-date in one transaction, capped at 366 days) — never a mix. Whichever date(s)
- * are targeted, an override newest-wins trims/replaces any existing same-date exception segment it
- * covers, so stored same-date exceptions stay non-overlapping.
+ * <p><b>Single date vs. multi-day.</b> A caller supplies EITHER {@code exceptionDate} (a single
+ * date) OR both {@code dateFrom}/{@code dateTo} (an inclusive multi-day range, applied per-date in
+ * one transaction, capped at 366 days) — never a mix. Whichever date(s) are targeted, an override
+ * newest-wins trims/replaces any existing same-date exception segment it covers, so stored
+ * same-date exceptions stay non-overlapping.
  */
 @Schema(
         name = "AvailabilityExceptionRequest",

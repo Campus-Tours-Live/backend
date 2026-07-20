@@ -15,7 +15,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * L5#2 — a HEAD on a PUBLIC path must not require authentication.
+ * A HEAD on a PUBLIC path must not require authentication.
  *
  * <p>This is not tidiness; it forces a logout. The chain: the BFF's {@code isPublicGet} accepts GET
  * <em>or</em> HEAD and forwards public paths anonymously (no bearer); this config's {@code

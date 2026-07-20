@@ -8,11 +8,11 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 /**
- * Dedicated repository for {@link OccurrenceHorizonJob}'s (CTL-54 Task 4) per-guide claim: a {@code
- * SELECT ... FOR UPDATE SKIP LOCKED} against the guide's OWN {@code guide_profiles} row, used
- * purely as a per-guide lock target so two scheduler instances never both materialize the same
- * guide concurrently. No CRUD on guide profiles happens through this repository — it exists only
- * for {@link #claimForUpdateSkipLocked(UUID)}.
+ * Dedicated repository for {@link OccurrenceHorizonJob}'s per-guide claim: a {@code SELECT ... FOR
+ * UPDATE SKIP LOCKED} against the guide's OWN {@code guide_profiles} row, used purely as a
+ * per-guide lock target so two scheduler instances never both materialize the same guide
+ * concurrently. No CRUD on guide profiles happens through this repository — it exists only for
+ * {@link #claimForUpdateSkipLocked(UUID)}.
  */
 public interface GuideHorizonClaimRepository extends JpaRepository<GuideProfileEntity, UUID> {
 

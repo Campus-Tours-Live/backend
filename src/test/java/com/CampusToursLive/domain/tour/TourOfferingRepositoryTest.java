@@ -131,7 +131,7 @@ class TourOfferingRepositoryTest {
     }
 
     /**
-     * L5#4 — the count query and the list query must agree.
+     * The count query and the list query must agree.
      *
      * <p>They are one @Query with the FROM/WHERE written twice, so a filter edited on one side and
      * not the other silently desynchronises them: the page reports a total the results cannot

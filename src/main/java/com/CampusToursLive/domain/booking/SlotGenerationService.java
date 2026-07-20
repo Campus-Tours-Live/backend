@@ -23,10 +23,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Participant-facing slot generation (CTL-54 Task 8) — the PRIMARY consumer of the materialized
- * availability occurrences (Task 2/3): {@code occurrence / offered duration - existing bookings
- * (reserved) - notice/advance window} = the concrete slots a participant can actually book for one
- * offering.
+ * Participant-facing slot generation — the PRIMARY consumer of the materialized availability
+ * occurrences (Task 2/3): {@code occurrence / offered duration - existing bookings (reserved) -
+ * notice/advance window} = the concrete slots a participant can actually book for one offering.
  *
  * <p><b>Reuse, not reinvention.</b> A slot listed here as "free" must actually be bookable — so the
  * would-be RESERVED interval of a candidate slot is computed with the EXACT same buffer math {@link
@@ -104,12 +103,12 @@ public class SlotGenerationService {
                 settings.findByGuideId(guideId).orElseGet(GuideBookingSettingsEntity::new);
 
         // Zone resolution here is settings-or-default, deliberately WITHOUT the rules-mode
-        // heuristic fallback AvailabilityReadService.resolveGuideZone carries (CTL-54 M3). That
+        // heuristic fallback AvailabilityReadService.resolveGuideZone carries. That
         // divergence is unreachable: occurrences are only materialized after getOrCreateSettings
         // has persisted a settings row, so any guide reaching slot generation already has a real
         // settings row; a guide with no settings row has no occurrences and returns empty before
         // the zone matters. The orElseGet default is a pure safety net for that empty case.
-        // Parse the calendar-date from/to filter in the GUIDE's own timezone, not UTC (CTL-54 #6):
+        // Parse the calendar-date from/to filter in the GUIDE's own timezone, not UTC:
         // an occurrence late in the guide's local evening can carry a UTC instant on the NEXT
         // calendar day, so a UTC start-of-day boundary would wrongly exclude/include it.
         ZoneId guideZone = ZoneId.of(guideSettings.getTimezone());

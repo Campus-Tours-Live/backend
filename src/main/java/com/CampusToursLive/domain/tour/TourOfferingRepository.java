@@ -18,7 +18,7 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
     Optional<TourOfferingEntity> findByIdAndGuideId(UUID id, UUID guideId);
 
     /**
-     * The catalog's FROM + WHERE, shared verbatim by the list query and its count query (L5#4).
+     * The catalog's FROM + WHERE, shared verbatim by the list query and its count query.
      *
      * <p>Previously both were written out in full, so editing a filter on one side and not the
      * other desynchronised them: the page reported a total its rows could not account for,

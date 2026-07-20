@@ -21,10 +21,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Guide-facing date-specific override dry-run/PREVIEW (CTL-54 v2.1 Task 4): given a proposed
- * override that has NOT been saved, computes the resulting net-available windows per date exactly
- * as an actual save (see {@link AvailabilityWriteService#createException}) would produce them,
- * WITHOUT persisting anything — a pure read, so a guide/frontend can render a before/after.
+ * Guide-facing date-specific override dry-run/PREVIEW: given a proposed override that has NOT been
+ * saved, computes the resulting net-available windows per date exactly as an actual save (see
+ * {@link AvailabilityWriteService#createException}) would produce them, WITHOUT persisting anything
+ * — a pure read, so a guide/frontend can render a before/after.
  *
  * <p><b>Shares the write path's trim logic (DRY).</b> This calls the SAME package-visible {@link
  * AvailabilityWriteService#requireOverrideValid} guard (the same-day + 366-day-cap 422s) and the
@@ -77,12 +77,11 @@ public class AvailabilityPreviewService {
 
     /**
      * Whether {@code date} falls OUTSIDE the materialization horizon {@code [today, today+375)}
-     * that {@link AvailabilityService#rematerialize} projects (CTL-54 #6) -- i.e. a past date or
-     * one at or beyond {@code today + HORIZON_DAYS}. Such a date is "inert / not-yet-effective": an
-     * actual save persists the override rows but no occurrence materializes for it yet, so the
-     * preview must NOT claim net-available windows a save would not produce -- it reports empty
-     * windows and flags the date inert instead, matching what {@code GET /availability} would show
-     * post-save.
+     * that {@link AvailabilityService#rematerialize} projects -- i.e. a past date or one at or
+     * beyond {@code today + HORIZON_DAYS}. Such a date is "inert / not-yet-effective": an actual
+     * save persists the override rows but no occurrence materializes for it yet, so the preview
+     * must NOT claim net-available windows a save would not produce -- it reports empty windows and
+     * flags the date inert instead, matching what {@code GET /availability} would show post-save.
      */
     private boolean isInertDate(LocalDate date) {
         LocalDate today = LocalDate.now(clock);
@@ -132,11 +131,11 @@ public class AvailabilityPreviewService {
     }
 
     /**
-     * Computes the per-date preview of applying a MULTI-WINDOW proposed override (CTL-54 v2.1 Task
-     * 4, multi-window) to {@code guideId}'s availability over {@code [dateFrom, dateTo]} inclusive.
-     * All windows of the same {@code kind} are applied TOGETHER and previewed as ONE combined
-     * result per date, so the frontend never has to merge N single-window previews (which would
-     * recompute overlap/trim/net itself). Persists nothing.
+     * Computes the per-date preview of applying a MULTI-WINDOW proposed override to {@code
+     * guideId}'s availability over {@code [dateFrom, dateTo]} inclusive. All windows of the same
+     * {@code kind} are applied TOGETHER and previewed as ONE combined result per date, so the
+     * frontend never has to merge N single-window previews (which would recompute overlap/trim/net
+     * itself). Persists nothing.
      *
      * <p>Every window is validated up front via the SAME {@link
      * AvailabilityWriteService#requireOverrideValid} guard the single-window {@link #preview} and
@@ -271,8 +270,8 @@ public class AvailabilityPreviewService {
                         .map(iv -> new ResolvedOccurrence(iv.startAt(), iv.endAt()))
                         .toList();
 
-        // Which of the date's existing exceptions this override would GENUINELY drop/clip on save
-        // (CTL-54 #trimmedSegments, M4). An existing exception is reported when it OVERLAPS one of
+        // Which of the date's existing exceptions this override would GENUINELY drop/clip on save.
+        // An existing exception is reported when it OVERLAPS one of
         // the new windows (it gets trimmed newest-wins) OR -- in replace mode only -- when it is a
         // SAME-KIND sibling being wholesale replaced, EVEN IF it does not overlap any new window
         // (replace mode drops every same-kind existing, not just the overlapping ones). Without the
@@ -317,8 +316,8 @@ public class AvailabilityPreviewService {
     }
 
     /**
-     * The preview entry for an out-of-horizon (inert) date (CTL-54 #6): empty net-available windows
-     * and no trimmed segments, flagged {@code inert=true}. The date is not-yet-effective -- a save
+     * The preview entry for an out-of-horizon (inert) date: empty net-available windows and no
+     * trimmed segments, flagged {@code inert=true}. The date is not-yet-effective -- a save
      * persists its override rows but nothing materializes until the horizon reaches it.
      */
     private static DatePreview inertPreview(LocalDate date) {
@@ -455,7 +454,7 @@ public class AvailabilityPreviewService {
         } catch (DateTimeParseException ex) {
             throw new ValidationException("Invalid startLocal (expected e.g. \"09:00\"): " + raw);
         }
-        // Reject sub-minute (seconds/nanos) precision (CTL-54 #7) so preview validation matches the
+        // Reject sub-minute (seconds/nanos) precision so preview validation matches the
         // write path's whole-minute contract -- see AvailabilityWriteService.parseLocalTime.
         if (parsed.getSecond() != 0 || parsed.getNano() != 0) {
             throw new ValidationException(

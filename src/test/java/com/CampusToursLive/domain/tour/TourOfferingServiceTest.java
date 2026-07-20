@@ -403,7 +403,7 @@ class TourOfferingServiceTest {
 
         service().create(user(uid), validReq("Walk"));
 
-        // L5#5 — the BACKFILL path. Its counterpart is GuideServiceTest's create path, which
+        // The BACKFILL path. Its counterpart is GuideServiceTest's create path, which
         // asserts this same URL; both delegate to CampusImageUrls#forName, so a change to one
         // expectation without the other means the two paths have diverged.
         assertEquals("https://r2.example/Harvard%20University.png", uni.getImageUrl());

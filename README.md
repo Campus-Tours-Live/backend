@@ -31,6 +31,8 @@ stateless Spring Boot service that validates a Google OIDC `id_token` on every r
   - [Testing](#testing)
   - [Database \& migrations](#database--migrations)
   - [Architecture](#architecture)
+  - [External integration: College Scorecard](#external-integration-college-scorecard)
+  - [Idempotent writes (`Idempotency-Key`)](#idempotent-writes-idempotency-key)
   - [API overview](#api-overview)
   - [API documentation (OpenAPI / Swagger)](#api-documentation-openapi--swagger)
   - [Authentication \& roles](#authentication--roles)
@@ -52,6 +54,7 @@ stateless Spring Boot service that validates a Google OIDC `id_token` on every r
 | Observability    | Spring Boot **Actuator** (health + k8s liveness/readiness probes)                 |
 | Testing          | JUnit 5, Mockito, Spring Test, **Testcontainers** (real Postgres)                 |
 | Tooling          | **Spotless** (google-java-format, AOSP) + **JaCoCo** (coverage)                   |
+| Resilience       | Spring Cache + **Caffeine**, **Resilience4j** rate limiter (outbound Scorecard)   |
 | Misc             | Lombok                                                                            |
 
 ---
@@ -63,8 +66,8 @@ stateless Spring Boot service that validates a Google OIDC `id_token` on every r
 - Maven is **not** needed separately — the bundled `./mvnw` wrapper downloads it on first run.
 - A **Google OAuth Client** — create it once (see [Google OAuth setup](#google-oauth-setup)). The
   Core needs only the **Client ID** (the `id_token` audience it enforces); the client secret belongs
-  to the BFF. _(Optional for local-only Core — leave `GOOGLE_CLIENT_ID` blank to skip the audience
-  check.)_
+  to the BFF. _(It is required: a blank `GOOGLE_CLIENT_ID` **fails startup** rather than silently
+  starting a service that accepts any caller.)_
 
 ---
 
@@ -174,8 +177,9 @@ docker compose ps        # wait until ctl-core-postgres is "healthy"
 
 Then run the Core. `./mvnw spring-boot:run` **compiles and launches in one step** (no separate build
 needed); Flyway applies the schema on startup and the server listens on **:8080**. `GOOGLE_CLIENT_ID`
-is the `id_token` audience the Core enforces — see [Configuration](#configuration-environment-variables)
-(it can be left blank for local-only dev).
+is the `id_token` audience the Core enforces — see
+[Configuration](#configuration-environment-variables). It is required; the app will not start
+without it.
 
 **macOS / Linux:**
 
@@ -223,8 +227,11 @@ The Core reads its settings from the **process environment** — Spring resolves
 placeholders in `application.properties` from OS env vars / system properties. **Spring Boot does
 not auto-load a `.env` file** (unlike the Node BFF).
 
-Every variable has a sensible default, so for **local dev against the bundled Postgres you can set
-nothing** and it just runs. To override a value, choose one of:
+Almost every variable has a sensible default. The one exception is `GOOGLE_CLIENT_ID`: the app
+**refuses to start** without it, because a service that accepts any Google `id_token` is not
+something you should end up running by accident. Fill it in before the first run.
+
+To override a value, choose one of:
 
 - pass it inline for a single run — `GOOGLE_CLIENT_ID=... ./mvnw spring-boot:run`;
 - export it in your shell, or set it in your IDE's run configuration;
@@ -233,22 +240,22 @@ nothing** and it just runs. To override a value, choose one of:
   seeds `backend/.env` from `.env.example` on first run and injects it into the Spring Boot process
   for you (an explicitly-exported shell variable still wins over the `.env` value).
 
-The full set of variables (all optional for local dev; some required in prod):
+The full set of variables (optional for local dev unless marked otherwise; some required in prod):
 
 > **Secrets policy:** never commit real secrets. A local `.env`, if you keep one, is git-ignored.
 > In production, inject `DB_PASSWORD` / `GOOGLE_CLIENT_ID` from the platform's env config or a
 > secrets manager.
 
-| Variable           | Purpose                                                                                                            | Default                                        | Secret?         |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- | --------------- |
-| `DB_URL`           | Postgres JDBC URL                                                                                                  | `jdbc:postgresql://localhost:5432/campustours` | no              |
-| `DB_USERNAME`      | DB user                                                                                                            | `ctl`                                          | no (local)      |
-| `DB_PASSWORD`      | DB password                                                                                                        | `ctl`                                          | **yes in prod** |
-| `OIDC_ISSUER_URI`  | OIDC issuer whose JWKS validates the `id_token`                                                                    | `https://accounts.google.com`                  | no              |
-| `GOOGLE_CLIENT_ID` | Google OAuth Client ID; required in the `id_token` `aud` claim. Blank → audience check skipped (**not for prod**). | _(blank)_                                      | no (public)     |
-| `SCORECARD_API_KEY` | College Scorecard key for the live university/major directory (guide onboarding). Each dev uses their **own free** key ([sign up](https://api.data.gov/signup/)). Blank → `/meta/universities` & `/meta/majors` return an empty list. | _(blank)_ | **yes** |
-| `SCORECARD_BASE_URL` | Override the Scorecard API base URL.                                                                             | `https://api.data.gov/ed/collegescorecard/v1`  | no              |
-| `CORE_PORT`        | HTTP port                                                                                                          | `8080`                                         | no              |
+| Variable             | Purpose                                                                                                                                                                                                                               | Default                                        | Secret?         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | --------------- |
+| `DB_URL`             | Postgres JDBC URL                                                                                                                                                                                                                     | `jdbc:postgresql://localhost:5432/campustours` | no              |
+| `DB_USERNAME`        | DB user                                                                                                                                                                                                                               | `ctl`                                          | no (local)      |
+| `DB_PASSWORD`        | DB password                                                                                                                                                                                                                           | `ctl`                                          | **yes in prod** |
+| `OIDC_ISSUER_URI`    | OIDC issuer whose JWKS validates the `id_token`                                                                                                                                                                                       | `https://accounts.google.com`                  | no              |
+| `GOOGLE_CLIENT_ID`   | Google OAuth Client ID; enforced as the `id_token` `aud` claim. Blank → **startup fails** (see [Authentication & roles](#authentication--roles)).                                                                                     | _(blank)_                                      | no (public)     |
+| `SCORECARD_API_KEY`  | College Scorecard key for the live university/major directory (guide onboarding). Each dev uses their **own free** key ([sign up](https://api.data.gov/signup/)). Blank → `/meta/universities` & `/meta/majors` return an empty list. | _(blank)_                                      | **yes**         |
+| `SCORECARD_BASE_URL` | Override the Scorecard API base URL.                                                                                                                                                                                                  | `https://api.data.gov/ed/collegescorecard/v1`  | no              |
+| `CORE_PORT`          | HTTP port                                                                                                                                                                                                                             | `8080`                                         | no              |
 
 ---
 
@@ -259,8 +266,9 @@ The full set of variables (all optional for local dev; some required in prod):
 ./mvnw verify        # the above + JaCoCo coverage report + Spotless check (Recommended)
 ```
 
-- **Docker must be running** — `UniversityRepositoryTest` uses **Testcontainers** to spin up a
-  real Postgres (the schema relies on PG enums + `jsonb`, which H2 can't emulate).
+- **Docker must be running** — 18 test classes use **Testcontainers** to spin up a real Postgres
+  (the schema relies on PG enums, `jsonb`, and exclusion constraints, none of which H2 can
+  emulate), so this is not optional for a full `verify`.
 - Coverage report: `target/site/jacoco/index.html` (written by `verify`).
 - Test layers: pure **Mockito** unit tests (services / `CurrentUser`), `@WebMvcTest` slice tests
   (controllers + problem+json mapping), and `@DataJpaTest` + Testcontainers (Flyway + repositories).
@@ -272,11 +280,11 @@ The full set of variables (all optional for local dev; some required in prod):
 - **Flyway owns the schema** (`spring.jpa.hibernate.ddl-auto=none`); Hibernate never alters it.
 - Migrations live in `src/main/resources/db/migration/`:
 
-  | File                                    | Purpose                                                             |
-  | --------------------------------------- | ------------------------------------------------------------------- |
-  | `V1__schema.sql`                        | The complete baseline schema (tables, enums, constraints, indexes). |
-  | `V2__seed_universities.sql`             | Seeds the university catalog (~50 rows, idempotent). **Frozen.**    |
-  | `V3__seed_demo_data.sql`                | Seeds demo guides + tour offerings for the marketplace.             |
+  | File                                    | Purpose                                                                                     |
+  | --------------------------------------- | ------------------------------------------------------------------------------------------- |
+  | `V1__schema.sql`                        | The complete baseline schema (tables, enums, constraints, indexes).                         |
+  | `V2__seed_universities.sql`             | Seeds the university catalog (~50 rows, idempotent). **Frozen.**                            |
+  | `V3__seed_demo_data.sql`                | Seeds demo guides + tour offerings for the marketplace.                                     |
   | `V4__backfill_university_image_url.sql` | Forward-only backfill of `image_url`/`name` for rows V2's `ON CONFLICT DO NOTHING` skipped. |
 
 - **Conventions:** `V<n>__<snake_case>.sql`, applied in ascending order. Migrations are
@@ -298,7 +306,7 @@ The full set of variables (all optional for local dev; some required in prod):
     migration for the data.** Be aware of the boundary: **`flyway:repair` only re-aligns the
     `flyway_schema_history` checksum — it does NOT re-run the migration**, so a drifted DB never
     receives any data the edit added (e.g. the `image_url`/`name` values). Repair fixes the
-    *checksum*, not the *data*; a new forward migration (like `V4`, an idempotent `UPDATE` keyed
+    _checksum_, not the _data_; a new forward migration (like `V4`, an idempotent `UPDATE` keyed
     by the stable `slug`) is what reconciles the data. Never set `spring.flyway.validate-on-migrate=false`
     to paper over a mismatch.
 
@@ -312,16 +320,22 @@ DTOs in `web/dto/`). Rooted at `com.CampusToursLive`:
 ```
 src/main/java/com/CampusToursLive/
 ├── BackendApplication.java        # Spring Boot entry point
-├── config/                        # WebConfig, etc.
+├── config/                        # WebConfig, CacheConfig (Caffeine), OpenApiConfig
 ├── security/                      # SecurityConfig, JWT/audience validation, CurrentUser, provisioning
 ├── domain/                        # business logic, by feature
 │   ├── user/                      #   users, user_roles, RoleGrantService
 │   ├── guide/                     #   guide profiles, verification, approval
 │   ├── participant/               #   participant profiles
 │   ├── tour/                      #   tour offerings (supply side)
-│   └── university/                #   university catalog
+│   ├── university/                #   university catalog + campus image URLs
+│   ├── availability/              #   guide availability: rules, exceptions, materialized occurrences
+│   └── booking/                   #   bookings, cart, slot generation
+├── integration/                   # outbound third-party clients
+│   └── scorecard/                 #   College Scorecard (cached + rate-limited)
 ├── web/                           # @RestControllers
-│   └── dto/                       #   request/response records + ApiEnvelope
+│   ├── dto/                       #   request/response records + ApiEnvelope
+│   ├── idempotency/               #   Idempotency-Key filter (replay / in-flight / misuse)
+│   └── doc/                       #   OpenAPI doc-only helpers
 └── error/                         # framework-agnostic domain exceptions
 ```
 
@@ -331,7 +345,10 @@ Key principles:
   is a cross-cut. Controllers are thin and delegate to services.
 - **Errors:** the domain throws framework-agnostic exceptions (`ValidationException`,
   `NotFoundException`, `ForbiddenException`, `UnauthorizedException`); `GlobalExceptionHandler`
-  is the single place that maps them to **RFC 7807 `application/problem+json`** (422/404/403/401).
+  is the single place that maps them to **RFC 7807 `application/problem+json`** — 422/404/403/401,
+  plus 409 for a constraint conflict and 500 as the catch-all. (One deliberate exception: the
+  `Idempotency-Key` filter runs before the handler and emits its own 409/422, so those do not pass
+  through the handler and do not appear in the generated spec.)
 - **DTOs:** responses are immutable `record`s (e.g. `MeResponse`, `TourOfferingResponse`) — no
   stringly-typed maps on the wire.
 - The deeper multi-role / role-switching design is captured in the project's design docs; the role
@@ -339,10 +356,85 @@ Key principles:
 
 ---
 
+## External integration: College Scorecard
+
+The Core is the only service that talks to the **US Department of Education College Scorecard API**
+(`api.data.gov`). It backs the university typeahead and the major list a guide picks from during
+onboarding, exposed as `/meta/universities` and `/meta/majors`.
+
+It is worth knowing about even if you never touch it, because it is the one dependency with an
+**external quota on a key shared by every request the service makes**. `SCORECARD_API_KEY` is
+per-developer and free ([sign up](https://api.data.gov/signup/)); the default quota is **1000
+requests/hour per key**.
+
+**Two layers keep the service inside that quota** (`ScorecardClient` → `ScorecardApi`):
+
+| Layer               | Where                            | What                                                                                                                                                                  |
+| ------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cache               | `ScorecardClient` (`@Cacheable`) | Caffeine, three caches — `scorecardUniversities` (5000 entries, 30 min), `scorecardMajors` and `scorecardSchools` (5000, 24 h). Names are constants in `CacheConfig`. |
+| Outbound rate limit | `ScorecardApi` (`@RateLimiter`)  | Resilience4j, **800 calls/hour** shared across all three call sites, `timeout-duration=0`.                                                                            |
+
+Two details in that split are load-bearing and easy to undo by accident:
+
+- **They live on different beans on purpose.** Both annotations are proxy-based Spring AOP, so a
+  limiter on a private helper of the same class would be a self-invocation that silently never
+  applies. The split is also what makes a **cache hit cost no rate-limit permit**.
+- **Nothing here throws.** A blank key, an HTTP failure, or an exhausted limiter all degrade to an
+  empty list (or `null` from `getSchool`), so a Scorecard outage cannot fail a request outright.
+  The visible symptom is an empty university/major list, and a guide's university showing as
+  `Unknown university` during onboarding. `unless` keeps those degraded results out of the cache —
+  otherwise one outage would be pinned for the whole TTL.
+
+> ### ⚠️ Before running more than one instance
+>
+> The rate limiter is **per-JVM**, not distributed, so 800/hour is a **per-instance** budget. At two
+> instances the real outbound rate is 1600/hour — past the 1000/hour key quota — while each
+> limiter still reports healthy and `api.data.gov` throttles the shared key. Before scaling out,
+> divide the budget by the instance count or move to a distributed (e.g. Redis-backed) limiter.
+> The current setting assumes a single instance.
+
+---
+
+## Idempotent writes (`Idempotency-Key`)
+
+Any mutation (`POST` / `PATCH` / `PUT` / `DELETE`) may carry an **`Idempotency-Key`** header. It is
+**opt-in**: without the header the request runs normally with no deduplication. The BFF forwards the
+client's key when one was sent and never invents one — a fresh key per request would be unique every
+time, so nothing would ever dedupe.
+
+With a key, a servlet filter records the attempt before the handler runs and keys it on
+`(operation, key)`, where `operation` includes the method, path, query string **and the
+authenticated subject** — so two users sending the same key cannot collide. The request is also
+fingerprinted as `sha256(method + path + query + body)`. A repeat of the same key then resolves to
+one of three outcomes:
+
+| Outcome    | Meaning                                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------------------- |
+| **replay** | The first attempt finished. The stored status and body are returned again; the handler does not re-run. |
+| **`409`**  | The first attempt is still **in flight** (a double-submit). Retry shortly.                              |
+| **`422`**  | Same key, **different request body** — a client bug, not a retry.                                       |
+
+A failed attempt (5xx or a thrown exception) **deletes** its own reservation, so an honest retry of
+the same key is not wedged behind the `409` branch; a scheduled hourly sweep reaps anything left
+after the 24-hour TTL.
+
+> These three responses are produced by a filter that runs **before** `GlobalExceptionHandler`, so
+> they are not part of the springdoc-generated spec. This section is their contract.
+
+---
+
 ## API overview
 
 The BFF maps `/v1/*` → these Core paths. Every successful response uses the `{ data, meta }`
 envelope; errors are `application/problem+json`.
+
+> **The authoritative list is the generated spec**, not this table — `/v3/api-docs` (or
+> [Swagger UI](http://localhost:8080/swagger-ui.html)) is produced from the annotations, so it
+> cannot drift. The table below is a hand-kept orientation map of the main resources; it omits the
+> availability module (`/availability/rules*`, `/availability/exceptions*`, `/availability/preview`,
+> `/availability/settings`, `/availability/overrides/replace`), `/offerings/{id}/slots`, and the
+> reference vocabularies under `/meta/*`. Consult the spec before assuming an endpoint does not
+> exist.
 
 | Method        | Path                              | Purpose                                                   |
 | ------------- | --------------------------------- | --------------------------------------------------------- |
@@ -387,13 +479,13 @@ statuses) and requires the **GUIDE** role.
 
 **Query parameters** (`GET /tours`):
 
-| Param          | Default       | Description                                                      |
-| -------------- | ------------- | ---------------------------------------------------------------- |
-| `universityId` | —             | Filter by university UUID                                        |
-| `topic`        | —             | Filter by `tour_topic` enum (see `/meta/tour-topics`)            |
-| `q`            | `""`          | Search title, description, university name, or short name        |
-| `sort`         | `RECOMMENDED` | `RECOMMENDED` \| `PRICE_ASC` \| `PRICE_DESC` \| `RATING`         |
-| `limit`        | `20`          | Page size (max **50**)                                           |
+| Param          | Default       | Description                                               |
+| -------------- | ------------- | --------------------------------------------------------- |
+| `universityId` | —             | Filter by university UUID                                 |
+| `topic`        | —             | Filter by `tour_topic` enum (see `/meta/tour-topics`)     |
+| `q`            | `""`          | Search title, description, university name, or short name |
+| `sort`         | `RECOMMENDED` | `RECOMMENDED` \| `PRICE_ASC` \| `PRICE_DESC` \| `RATING`  |
+| `limit`        | `20`          | Page size (max **50**)                                    |
 
 **Responses:** `TourSummaryResponse[]` (list) or `TourDetailResponse` (by id). Invalid `sort` or
 `topic` → `422`; a malformed `tourId` (not a UUID) → `422`. Unknown or non-discoverable id → `404`.
@@ -452,9 +544,9 @@ mint a token directly with the [OAuth 2.0 Playground](https://developers.google.
 6. In [Swagger UI](http://localhost:8080/swagger-ui.html) → **Authorize** → paste it into `bearerAuth`
    **without** a `Bearer ` prefix (Swagger adds it) → **Authorize**. Requests now send the token.
 
-The `id_token` expires after **~1 hour** — repeat steps 4–6 for a fresh one. (Local-only shortcut: run
-the Core with `GOOGLE_CLIENT_ID` unset to skip the `aud` check — but signature, issuer, and expiry are
-still enforced, so you still need a real, current Google `id_token`.)
+The `id_token` expires after **~1 hour** — repeat steps 4–6 for a fresh one. (The token must carry your
+`GOOGLE_CLIENT_ID` as its `aud`, so generate it with the same OAuth client the Core is configured
+with.)
 
 > **One token ≠ access to every endpoint.** The `id_token` identifies a **Google account**, not a
 > role — the Core reads _that account's_ roles from `user_roles` (never from the token; see
@@ -468,9 +560,14 @@ still enforced, so you still need a real, current Google `id_token`.)
 ## Authentication & roles
 
 - **AuthN:** every request carries a Google OIDC `id_token` as a Bearer JWT (forwarded by the BFF).
-  The Core validates it against Google's JWKS (signature + issuer + expiry) and, when
-  `GOOGLE_CLIENT_ID` is set, the `aud` claim (see `AudienceValidator`). There is **no local auth
-  stub**.
+  The Core validates it against Google's JWKS (signature + issuer + expiry) plus the `aud` claim
+  (see `AudienceValidator`), and **refuses to start** if `GOOGLE_CLIENT_ID` is blank. There is
+  **no local auth stub and no opt-out** — not even for local dev. Without an audience the Core
+  would accept any validly-signed Google `id_token`: signature, issuer and expiry would still
+  hold, so the token would be real and current, but it would no longer have to have been issued
+  for _this_ application. Anyone with a Google account could mint one from their own OAuth client
+  and be provisioned here as a user. That is an authentication bypass rather than a convenience,
+  so it is not reachable by omitting a variable.
 - **Identity:** the token's `sub` claim maps to `users.oidc_subject`. Accounts are provisioned
   just-in-time on first sign-up (a "bare" account with no role).
 - **AuthZ:** authorization always reads the authoritative `user_roles` set (via
@@ -518,16 +615,16 @@ honor a skill's `tools:` allowlist.
 
 Skills this repo enables (both agents unless noted):
 
-| Skill / plugin | Used for |
-| --- | --- |
-| `jvm-languages` | Spring Boot / Java 21 / layered architecture |
-| `database-design` | schema, queries, indexes, performance |
-| `database-migrations` | Flyway migrations |
-| `api-scaffolding` | REST endpoints / DTO contracts |
-| `backend-api-security` | Spring Security / OAuth2 resource server / JWT |
-| `security-scanning` | authz, injection, dependency CVEs, OWASP |
-| `qa-orchestra` | QA / test automation — **Codex: use `unit-testing` + `api-testing-observability`** |
-| `comprehensive-review` | multi-perspective code review |
+| Skill / plugin         | Used for                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `jvm-languages`        | Spring Boot / Java 21 / layered architecture                                       |
+| `database-design`      | schema, queries, indexes, performance                                              |
+| `database-migrations`  | Flyway migrations                                                                  |
+| `api-scaffolding`      | REST endpoints / DTO contracts                                                     |
+| `backend-api-security` | Spring Security / OAuth2 resource server / JWT                                     |
+| `security-scanning`    | authz, injection, dependency CVEs, OWASP                                           |
+| `qa-orchestra`         | QA / test automation — **Codex: use `unit-testing` + `api-testing-observability`** |
+| `comprehensive-review` | multi-perspective code review                                                      |
 
 > Process skills — `superpowers:*` (plan / TDD / debug) and `doc-coauthoring` — are **Claude-only**
 > user-level installs (see `../campus-tours-live/README.md`). In Codex, follow the same discipline
@@ -553,11 +650,11 @@ setup). The `git-build-hook-maven-plugin` points git's `core.hooksPath` at the v
 
 The hooks (`.githooks/`, all POSIX `sh`):
 
-| Hook         | Runs                | Purpose                                                      |
-| ------------ | ------------------- | ----------------------------------------------------------- |
+| Hook         | Runs                    | Purpose                                                            |
+| ------------ | ----------------------- | ------------------------------------------------------------------ |
 | `pre-commit` | `./mvnw spotless:check` | Blocks the commit if code isn't formatted (fix: `spotless:apply`). |
-| `commit-msg` | message-format check | Enforces the commit convention below.                       |
-| `pre-push`   | `./mvnw verify`     | Runs the full test suite + coverage gate before pushing.    |
+| `commit-msg` | message-format check    | Enforces the commit convention below.                              |
+| `pre-push`   | `./mvnw verify`         | Runs the full test suite + coverage gate before pushing.           |
 
 **Commit message format** (identical to the BFF):
 

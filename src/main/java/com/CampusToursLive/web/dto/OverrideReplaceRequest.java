@@ -5,12 +5,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
- * Request body for {@code POST /availability/overrides/replace} (CTL-54 v2.1 remediation B2): an
- * ATOMIC single-day replace of ONE kind's date-specific overrides. The guide's existing same-kind
- * exceptions for {@code date} are dropped and replaced by exactly {@code windows} in one
- * transaction; other-kind exceptions on that date are preserved (trimmed only where a new window
- * overlaps them, newest-wins). An EMPTY {@code windows} list is allowed and means "clear this kind
- * for the day".
+ * Request body for {@code POST /availability/overrides/replace}: an ATOMIC single-day replace of
+ * ONE kind's date-specific overrides. The guide's existing same-kind exceptions for {@code date}
+ * are dropped and replaced by exactly {@code windows} in one transaction; other-kind exceptions on
+ * that date are preserved (trimmed only where a new window overlaps them, newest-wins). An EMPTY
+ * {@code windows} list is allowed and means "clear this kind for the day".
  *
  * <p>Unlike {@link AvailabilityExceptionRequest} (which carries a single {@code startLocal}/{@code
  * windowMin} pair and an optional multi-day range) this is a single {@code date} plus a {@code

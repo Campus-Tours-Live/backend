@@ -14,11 +14,11 @@ public interface GuideAvailabilityOccurrenceRepository
     List<GuideAvailabilityOccurrenceEntity> findByGuideIdOrderByDuringStartAtAsc(UUID guideId);
 
     /**
-     * Derived readiness signal {@code bookable} (CTL-54 v2.1 B1): {@code true} iff this guide has
-     * at least one materialized occurrence that has not yet ended ({@code during_end_at > now}). A
-     * plain Spring-Data derived query — {@code duringEndAt} is the entity's {@code Instant} mapping
-     * of the {@code during_end_at} column. This is a pure existence probe, never re-coalesced or
-     * read into memory.
+     * Derived readiness signal {@code bookable}: {@code true} iff this guide has at least one
+     * materialized occurrence that has not yet ended ({@code during_end_at > now}). A plain
+     * Spring-Data derived query — {@code duringEndAt} is the entity's {@code Instant} mapping of
+     * the {@code during_end_at} column. This is a pure existence probe, never re-coalesced or read
+     * into memory.
      */
     boolean existsByGuideIdAndDuringEndAtAfter(UUID guideId, Instant now);
 
@@ -29,12 +29,12 @@ public interface GuideAvailabilityOccurrenceRepository
     long deleteByGuideId(UUID guideId);
 
     /**
-     * Booking-availability CONTAINMENT (CTL-54 Task 6) — {@code true} iff some current occurrence
-     * for this guide fully contains the given interval: {@code occurrence.during @> [schedStart,
-     * schedEnd)}. This checks the booking's SCHEDULED tour interval, never the (buffer-padded)
-     * reserved interval, and is a containment query, never an EXCLUDE — the inverse relationship
-     * from availability-vs-availability (gist backstop) and booking-vs-booking
-     * (excl_guide_no_overlap) overlap checks.
+     * Booking-availability CONTAINMENT — {@code true} iff some current occurrence for this guide
+     * fully contains the given interval: {@code occurrence.during @> [schedStart, schedEnd)}. This
+     * checks the booking's SCHEDULED tour interval, never the (buffer-padded) reserved interval,
+     * and is a containment query, never an EXCLUDE — the inverse relationship from
+     * availability-vs-availability (gist backstop) and booking-vs-booking (excl_guide_no_overlap)
+     * overlap checks.
      *
      * <p>{@code tstzrange} defaults to half-open bounds {@code [)}, matching how {@code
      * schedStart}/{@code schedEnd} (and {@code duringStartAt}/{@code duringEndAt}) are already used

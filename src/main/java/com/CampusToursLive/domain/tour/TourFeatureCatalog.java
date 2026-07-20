@@ -10,7 +10,8 @@ import java.util.Set;
  * Which {@link TourFeature}s a guide may pick for an offering, keyed by the offering's {@link
  * TourTopic}. Each topic exposes exactly ten options; the guide selects up to {@link
  * TourFeature#MAX_PER_OFFERING}. This is the single source of truth for feature validation ({@code
- * TourOfferingService}) and for a future "options for topic" meta endpoint / creation UI.
+ * TourOfferingService}) and for the {@code GET /meta/tour-features} endpoint that serves the
+ * options for a topic.
  */
 public final class TourFeatureCatalog {
 

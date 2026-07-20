@@ -68,7 +68,7 @@ public class MetaController {
             summary = "List tour topics",
             description =
                     "Returns the controlled tour-topic vocabulary as { value, label } options."
-                            + " Public — no role required beyond a valid platform JWT.")
+                            + " Public: served anonymously, no token required.")
     @ApiResponse(
             responseCode = "200",
             description = "The tour-topic options.",

@@ -23,8 +23,8 @@ class CampusImageUrlsTest {
     }
 
     /**
-     * L5#6 — the seed generator (scripts/generate-seed.mjs) must derive the SAME key for the same
-     * name, or a seeded row points at an object that does not exist and the image 404s.
+     * The seed generator (scripts/generate-seed.mjs) must derive the SAME key for the same name, or
+     * a seeded row points at an object that does not exist and the image 404s.
      *
      * <p>These names are the shared golden set: the JS side asserts the identical expectations at
      * run time (see `ENCODING_GOLDEN` there). Apostrophes are the case that actually differs -- JS

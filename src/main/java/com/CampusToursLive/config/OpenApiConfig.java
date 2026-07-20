@@ -12,7 +12,8 @@ import org.springframework.context.annotation.Configuration;
 /**
  * springdoc/OpenAPI wiring. Declares the API metadata and a JWT bearer security scheme so the
  * generated spec documents auth and Swagger UI's "Authorize" button sends {@code Authorization:
- * Bearer <token>} (the same Google OIDC id_token every non-doc request requires).
+ * Bearer <token>} (the same Google OIDC id_token authenticated requests carry -- the public
+ * marketplace and health routes need none; see {@code SecurityConfig}).
  */
 @Configuration
 @SecurityScheme(

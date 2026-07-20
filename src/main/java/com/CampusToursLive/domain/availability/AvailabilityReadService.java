@@ -19,10 +19,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Guide-facing resolved-availability READ (CTL-54 Task 5b) -- the single {@code GET /availability}
- * contract CTL-55/CTL-56 consume for the "actual availability" preview: the guide's editable rules
- * (reused from {@link AvailabilityWriteService}'s rule mapping), the backend-coalesced occurrences
- * (already disjoint + ascending -- see {@link
+ * Guide-facing resolved-availability READ -- the single {@code GET /availability} contract
+ * CTL-55/CTL-56 consume for the "actual availability" preview: the guide's editable rules (reused
+ * from {@link AvailabilityWriteService}'s rule mapping), the backend-coalesced occurrences (already
+ * disjoint + ascending -- see {@link
  * GuideAvailabilityOccurrenceRepository#findByGuideIdOrderByDuringStartAtAsc(UUID)}), and the DST
  * gap-moved/skipped days the projection reported (see {@link
  * GuideAvailabilityDstNoticeRepository}).
@@ -32,11 +32,11 @@ import org.springframework.transaction.annotation.Transactional;
  * job (Task 4) are the only owners of materialization. The frontend/BFF render the occurrences
  * returned here as-is; they must NOT re-coalesce (single source of truth).
  *
- * <p><b>guideId resolution</b> is REPLICATED here (not extracted into a shared helper) from {@link
- * AvailabilityWriteService}'s private {@code requireGuideId}: it is a 3-line {@code
- * guide_profiles.id} lookup by {@code user_id}, and duplicating it keeps this read feature's diff
- * confined to new files -- it does not touch the write service's tested surface at all. If a third
- * consumer needs the same resolution, extracting a shared helper then would be the better trade.
+ * <p><b>guideId resolution</b> is REPLICATED here rather than shared: it is a 3-line {@code
+ * guide_profiles.id} lookup by {@code user_id}. There are now THREE private copies -- this one,
+ * {@link AvailabilityWriteService}'s, and {@code AvailabilityController}'s -- which is past the
+ * point where duplication was the cheaper trade. Extracting one shared helper is the outstanding
+ * cleanup; it was deferred because each copy sits in a differently-tested surface.
  */
 @Service
 public class AvailabilityReadService {
@@ -75,7 +75,7 @@ public class AvailabilityReadService {
 
         List<GuideAvailabilityRuleEntity> guideRules = rules.findByGuideId(guideId);
 
-        // Parse the calendar-date from/to filter in the GUIDE's own timezone, not UTC (CTL-54 #6):
+        // Parse the calendar-date from/to filter in the GUIDE's own timezone, not UTC:
         // an occurrence late in the guide's local evening can carry a UTC instant on the NEXT
         // calendar day, so a UTC start-of-day boundary would wrongly exclude/include it. Resolving
         // the guide's zone the same way materialization did keeps this filter aligned with the
@@ -106,7 +106,7 @@ public class AvailabilityReadService {
                         .map(LocalDate::toString)
                         .toList();
 
-        // Derived readiness signals (CTL-54 v2.1 B1, Contract B) -- computed, never stored:
+        // Derived readiness signals -- computed, never stored:
         //   bookable       = the guide has an occurrence that has not yet ended (something to
         // book).
         //   hasWeeklyHours = the guide has at least one active weekly rule (an expired-but-active
@@ -160,7 +160,7 @@ public class AvailabilityReadService {
      */
     private ZoneId resolveGuideZone(UUID guideId, List<GuideAvailabilityRuleEntity> guideRules) {
         // This carries the rules-mode heuristic fallback (settings row -> rules-mode -> default);
-        // SlotGenerationService intentionally uses only settings-or-default (CTL-54 M3). The extra
+        // SlotGenerationService intentionally uses only settings-or-default. The extra
         // branch here (no settings row but rules present) is currently unreachable in practice --
         // getOrCreateSettings guarantees a settings row before any occurrence is materialized --
         // but it is kept so this read path degrades gracefully to the materialization zone rather
