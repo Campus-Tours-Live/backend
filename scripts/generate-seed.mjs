@@ -8,7 +8,7 @@
 // Writes: src/main/resources/db/migration/V2__seed_universities.sql
 //         src/main/resources/db/migration/V3__seed_demo_data.sql
 
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -31,10 +31,41 @@ const pick = (a) => a[Math.floor(rnd() * a.length)];
 const esc = (s) => String(s).replace(/'/g, "''");
 const uuid = (n) => `10000000-0000-0000-0000-${n.toString(16).padStart(12, "0")}`;
 
-// Cloudflare R2 campus image bucket. Encoding must match the Java CampusImageUrls builder
-// (URLEncoder.encode(...).replace("+", "%20")): spaces -> %20, & -> %26, etc.
+// Cloudflare R2 campus image bucket. The key MUST come out byte-identical to the Java builder
+// (CampusImageUrls#forName = URLEncoder.encode(name, UTF_8).replace("+", "%20")), or a seeded row
+// points at an object that does not exist and the image 404s.
+//
+// encodeURIComponent alone is NOT equivalent: it leaves ! ' ( ) ~ bare, while URLEncoder escapes
+// them. Apostrophes are the one that bites in practice -- "Saint Mary's College" encoded to
+// ...Mary's... here and ...Mary%27s... in Java. (Java also leaves `*` bare, and so does
+// encodeURIComponent, so that one already agrees.)
 const CAMPUS_IMAGE_BASE = "https://pub-3225b84a9a0b4728b11f261ee52251ba.r2.dev/";
-const campusImageUrl = (name) => `${CAMPUS_IMAGE_BASE}${encodeURIComponent(name)}.png`;
+const encodeLikeJava = (name) =>
+  encodeURIComponent(name).replace(
+    /[!'()~]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+const campusImageUrl = (name) => `${CAMPUS_IMAGE_BASE}${encodeLikeJava(name)}.png`;
+
+// Shared golden set — the SAME names and expectations are asserted on the Java side in
+// CampusImageUrlsTest. Checked here at run time because this repo has no JS test runner: if the
+// two encoders ever drift, generating a seed fails loudly instead of emitting rows that 404.
+// Keep both lists in step.
+const ENCODING_GOLDEN = [
+  ["University of California-Berkeley", "University%20of%20California-Berkeley"],
+  ["Texas A&M University-College Station", "Texas%20A%26M%20University-College%20Station"],
+  ["Saint Mary's College", "Saint%20Mary%27s%20College"],
+  ["Foo (Bar)~Baz!", "Foo%20%28Bar%29%7EBaz%21"],
+];
+for (const [input, expected] of ENCODING_GOLDEN) {
+  const got = encodeLikeJava(input);
+  if (got !== expected) {
+    throw new Error(
+      `campus image encoding drift: ${JSON.stringify(input)} -> ${got}, expected ${expected}. ` +
+        "The Java side (CampusImageUrls#forName) is the source of truth; fix encodeLikeJava.",
+    );
+  }
+}
 
 // ---- Universities: 50 well-known US schools, deliberately EXCLUDING the previous demo set
 // (MIT, NYU, Stanford, UChicago, UCLA). [slug, name, short, city, region, tz]
@@ -266,8 +297,37 @@ JOIN universities university ON university.slug = seed.university_slug
 ON CONFLICT (guide_id, slug) DO NOTHING;
 `;
 
-writeFileSync(resolve(MIG, "V2__seed_universities.sql"), V2);
-writeFileSync(resolve(MIG, "V3__seed_demo_data.sql"), V3);
+/**
+ * Refuse to overwrite a migration that has been FROZEN (C1).
+ *
+ * Flyway checksums an applied migration; editing the file afterwards makes every deployed
+ * database fail to start. C1 fixed exactly that and froze V2 with a do-not-edit header — but
+ * this generator still rewrote it on every run, silently stripping the freeze header and
+ * re-introducing the bug the moment the seed data changed. (Found the hard way: a run during
+ * L5#6 removed the header.)
+ *
+ * Forward-only means the generator's output is a STARTING point, not a live artefact. If you
+ * genuinely need different seed data, add a new V{n} — do not regenerate a frozen file.
+ * `--force` exists only for regenerating before a migration has ever been applied anywhere.
+ */
+const FREEZE_MARKER = "APPLIED MIGRATION";
+function writeMigration(fileName, contents) {
+  const path = resolve(MIG, fileName);
+  if (existsSync(path) && readFileSync(path, "utf8").includes(FREEZE_MARKER)) {
+    if (!process.argv.includes("--force")) {
+      throw new Error(
+        `${fileName} is marked "${FREEZE_MARKER}" and will not be overwritten. Flyway has ` +
+          "checksummed it; rewriting it breaks every deployed database. Add a new V{n} instead. " +
+          "(--force only if this migration has never been applied anywhere.)",
+      );
+    }
+    console.warn(`WARNING: --force is overwriting the frozen ${fileName}.`);
+  }
+  writeFileSync(path, contents);
+}
+
+writeMigration("V2__seed_universities.sql", V2);
+writeMigration("V3__seed_demo_data.sql", V3);
 console.error(
   `Wrote V2 (${UNIS.length} universities) + V3 (${GUIDES} guides, ${offeringRows.length} offerings).`,
 );
