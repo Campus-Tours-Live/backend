@@ -148,17 +148,31 @@ class ScorecardClientCacheTest {
         verify(api, never()).majorsForSchool(any());
     }
 
-    // --- getSchool (uncached, but still rate-limited) ----------------------------------------
+    // --- getSchool (cached, and rate-limited) ------------------------------------------------
 
     @Test
-    void getSchoolIsUncached_everyCallReachesTheRateLimitedBean() {
+    void secondLookupOfTheSameSchoolIsServedFromCache_outboundCallHappensOnce() {
         SchoolRef ref = new SchoolRef("243744", "Stanford University", "Stanford", "CA");
         given(api.getSchool("243744")).willReturn(ref);
 
         assertThat(client.getSchool("243744")).isEqualTo(ref);
         assertThat(client.getSchool("243744")).isEqualTo(ref);
 
-        verify(api, times(2)).getSchool("243744");
+        // Shares the single 800/h budget with the anonymous typeahead, so every hit here is a
+        // permit the search path keeps.
+        verify(api, times(1)).getSchool("243744");
+    }
+
+    @Test
+    void nullSchoolIsNotCached_soARecoveredUpstreamIsRetried() {
+        // null == "not found OR degraded" (upstream error / limiter fallback). Caching it would
+        // outlast the outage by 24h.
+        given(api.getSchool("999")).willReturn(null);
+
+        assertThat(client.getSchool("999")).isNull();
+        assertThat(client.getSchool("999")).isNull();
+
+        verify(api, times(2)).getSchool("999");
     }
 
     @Test
@@ -167,5 +181,18 @@ class ScorecardClientCacheTest {
         assertThat(client.getSchool("  ")).isNull();
 
         verifyNoInteractions(api);
+    }
+
+    // --- cache manager wiring -----------------------------------------------------------------
+
+    @Test
+    void unregisteredCacheNameIsRejectedRatherThanLazilyCreatedUnbounded() {
+        assertThat(caches.getCache(CacheConfig.SCORECARD_UNIVERSITIES)).isNotNull();
+        assertThat(caches.getCache(CacheConfig.SCORECARD_MAJORS)).isNotNull();
+        assertThat(caches.getCache(CacheConfig.SCORECARD_SCHOOLS)).isNotNull();
+
+        // Left dynamic, CaffeineCacheManager would lazily build an UNBOUNDED, TTL-less cache for
+        // a typo'd cacheNames — a silent memory leak. Locked to the registered names instead.
+        assertThat(caches.getCache("scorecardTypo")).isNull();
     }
 }

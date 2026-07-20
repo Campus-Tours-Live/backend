@@ -21,6 +21,16 @@ import org.springframework.stereotype.Component;
  * aspects fire, and it buys the property that matters: <strong>a cache HIT does not consume a
  * rate-limit permit</strong>, because Spring's cache interceptor returns before {@link
  * ScorecardApi} is ever called. See {@link ScorecardApi} for the full rationale.
+ *
+ * <p><strong>Why not {@code @Cacheable(sync = true)}?</strong> Without it, N concurrent misses on
+ * the same key each reach {@link ScorecardApi} before the first one backfills (a cache stampede),
+ * so concurrent identical searches are not de-duplicated. {@code sync = true} would single-flight
+ * them — but Spring does <em>not</em> support {@code unless} together with {@code sync}, and {@code
+ * unless = "#result.isEmpty()"} is load-bearing here: this client degrades failures to an empty
+ * list, and caching one would pin an upstream outage in memory for the full TTL. Keeping {@code
+ * unless} is the better trade — the stampede only affects organic concurrency on a hot key (bounded
+ * anyway by the Layer 2 limiter), whereas caching a swallowed failure is a self-inflicted outage.
+ * Adding {@code sync = true} here fails fast at startup; that is intentional, not a bug.
  */
 @Component
 public class ScorecardClient implements SchoolDirectory {
@@ -65,12 +75,25 @@ public class ScorecardClient implements SchoolDirectory {
     }
 
     /**
-     * Deliberately <strong>uncached</strong>: this is called once per guide-onboarding submit (an
-     * authenticated, low-volume write path), not from the anonymous typeahead, so it has no organic
-     * repetition to absorb. It still routes through {@link ScorecardApi} and is therefore still
-     * covered by the Layer 2 outbound rate limiter.
+     * Cached for 24 hours — a school looked up by id is near-static, and this shares the single
+     * 800/h outbound budget with the anonymous typeahead, so every hit here is a permit the search
+     * path keeps.
+     *
+     * <p>{@code unless} skips caching a {@code null}: null means "not found <em>or</em> degraded"
+     * (upstream error, or the rate limiter tripped and the fallback fired), and pinning a degraded
+     * lookup for 24h would outlast the outage.
+     *
+     * <p><strong>Known limitation.</strong> Because the degraded path returns {@code null}, the
+     * onboarding upsert cannot tell "no such school" from "we were rate-limited", and reports the
+     * guide's real university as {@code Unknown university}. Distinguishing them would mean
+     * breaking the "this client never throws, it degrades" contract that keeps a flaky upstream
+     * from failing onboarding outright — not worth it at the current (very low) trip frequency.
      */
     @Override
+    @Cacheable(
+            cacheNames = "scorecardSchools",
+            key = "(#schoolId == null ? '' : #schoolId.strip())",
+            unless = "#result == null")
     public SchoolRef getSchool(String schoolId) {
         if (schoolId == null || schoolId.isBlank()) return null;
         return api.getSchool(schoolId);
