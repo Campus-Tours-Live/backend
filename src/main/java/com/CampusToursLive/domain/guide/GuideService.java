@@ -3,14 +3,17 @@ package com.CampusToursLive.domain.guide;
 import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
 import com.CampusToursLive.domain.participant.ParticipantType;
 import com.CampusToursLive.domain.tour.TourTopic;
+import com.CampusToursLive.domain.university.CampusImageUrls;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
+import com.CampusToursLive.domain.university.UniversityStatus;
 import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -39,6 +42,8 @@ public class GuideService {
     private final ParticipantProfileRepository participants;
     private final UserRepository users;
     private final RoleGrantService roleGrant;
+    private final SchoolDirectory schools;
+    private final CampusImageUrls campusImages;
     private final ObjectMapper mapper;
 
     public GuideService(
@@ -48,6 +53,8 @@ public class GuideService {
             ParticipantProfileRepository participants,
             UserRepository users,
             RoleGrantService roleGrant,
+            SchoolDirectory schools,
+            CampusImageUrls campusImages,
             ObjectMapper mapper) {
         this.guides = guides;
         this.verifications = verifications;
@@ -55,6 +62,8 @@ public class GuideService {
         this.participants = participants;
         this.users = users;
         this.roleGrant = roleGrant;
+        this.schools = schools;
+        this.campusImages = campusImages;
         this.mapper = mapper;
     }
 
@@ -164,18 +173,82 @@ public class GuideService {
         return toResponse(user, profile);
     }
 
+    /**
+     * Resolve the submitted university to a local id. A UUID must be an existing local university
+     * (the seeded catalog or a previously-upserted school). Anything else is treated as a live
+     * College Scorecard school id and upserted into the catalog on first use — so onboarding can
+     * offer every U.S. school without pre-seeding them.
+     */
     private UUID parseUniversity(String raw) {
         if (raw == null || raw.isBlank()) return null;
-        UUID id;
+        String value = raw.trim();
         try {
-            id = UUID.fromString(raw.trim());
-        } catch (IllegalArgumentException ex) {
-            throw new ValidationException("Invalid universityId: " + raw);
-        }
-        if (!universities.existsById(id)) {
+            UUID id = UUID.fromString(value);
+            if (universities.existsById(id)) return id;
             throw new ValidationException("Unknown universityId: " + raw);
+        } catch (IllegalArgumentException notUuid) {
+            return upsertFromDirectory(value);
         }
-        return id;
+    }
+
+    /** Idempotently persist a live-directory school (keyed by a stable {@code sc-<id>} slug). */
+    private UUID upsertFromDirectory(String scorecardId) {
+        String slug = "sc-" + scorecardId;
+        return universities
+                .findBySlug(slug)
+                .map(UniversityEntity::getId)
+                .orElseGet(
+                        () -> {
+                            SchoolDirectory.SchoolRef s = schools.getSchool(scorecardId);
+                            if (s == null) {
+                                throw new ValidationException("Unknown university: " + scorecardId);
+                            }
+                            UniversityEntity u = new UniversityEntity();
+                            u.setId(UUID.randomUUID());
+                            u.setSlug(slug);
+                            u.setName(s.name());
+                            u.setCity(s.city() == null || s.city().isBlank() ? "N/A" : s.city());
+                            u.setRegion(s.state());
+                            u.setTimezone(tzForState(s.state()));
+                            u.setStatus(UniversityStatus.ACTIVE);
+                            u.setImageUrl(campusImages.forName(s.name()));
+                            return universities.save(u).getId();
+                        });
+    }
+
+    /** Test-only shim: exposes the private upsert path for {@code GuideServiceTest}. */
+    UUID resolveUniversityForTest(String scorecardId) {
+        return upsertFromDirectory(scorecardId);
+    }
+
+    /** Best-effort IANA zone for a US state code (demo-grade; onboarding can refine later). */
+    private static String tzForState(String state) {
+        if (state == null) return "America/New_York";
+        return switch (state.trim().toUpperCase()) {
+            case "CA", "WA", "OR", "NV" -> "America/Los_Angeles";
+            case "AZ" -> "America/Phoenix";
+            case "CO", "UT", "NM", "MT", "WY", "ID" -> "America/Denver";
+            case "TX",
+                            "IL",
+                            "MO",
+                            "MN",
+                            "WI",
+                            "IA",
+                            "LA",
+                            "AR",
+                            "OK",
+                            "KS",
+                            "NE",
+                            "SD",
+                            "ND",
+                            "AL",
+                            "MS",
+                            "TN" ->
+                    "America/Chicago";
+            case "HI" -> "Pacific/Honolulu";
+            case "AK" -> "America/Anchorage";
+            default -> "America/New_York";
+        };
     }
 
     private List<String> validateTopics(List<String> raw) {

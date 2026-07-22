@@ -62,6 +62,11 @@ public class TourOfferingEntity {
     @Column(name = "languages", columnDefinition = "jsonb", nullable = false)
     private String languages = "[\"en-US\"]";
 
+    /** JSONB array of {@link TourFeature} names the guide attached. Raw JSON string. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "features", columnDefinition = "jsonb", nullable = false)
+    private String features = "[]";
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", columnDefinition = "tour_status", nullable = false)
     private TourStatus status = TourStatus.DRAFT;

@@ -157,6 +157,29 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String TOUR_FEATURES =
+            "{\"data\":{\"GENERAL_CAMPUS\":[{\"value\":\"Q_AND_A\",\"label\":\"Q&A\"},"
+                    + "{\"value\":\"HIDDEN_SPOTS\",\"label\":\"Hidden spots\"}]},"
+                    + META
+                    + "}";
+
+    String LANGUAGES =
+            "{\"data\":[{\"value\":\"en-US\",\"label\":\"English\"},"
+                    + "{\"value\":\"es\",\"label\":\"Spanish\"}],"
+                    + META
+                    + "}";
+
+    String UNIVERSITIES_LIVE =
+            "{\"data\":[{\"value\":\"166027\","
+                    + "\"label\":\"Harvard University \u2014 Cambridge, MA\"}],"
+                    + META
+                    + "}";
+
+    String MAJORS_LIVE =
+            "{\"data\":[{\"value\":\"Computer Science\",\"label\":\"Computer Science\"}],"
+                    + META
+                    + "}";
+
     String UNIVERSITY_LIST =
             "{\"data\":[{\"id\":\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"slug\":\"north-coast\",\"name\":\"North Coast University\","
@@ -190,6 +213,8 @@ public interface ApiExamples {
                     + "\"topic\":\"GENERAL_CAMPUS\","
                     + "\"universityId\":\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"universityName\":\"North Coast University\","
+                    + "\"universityImageUrl\":\"https://pub-3225b84a9a0b4728b11f261ee52251ba.r2"
+                    + ".dev/Stanford%20University.png\","
                     + "\"guideId\":\"11111111-0000-4000-8000-000000000001\","
                     + "\"guideDisplayName\":\"Maya Chen\",\"durationMin\":60,\"priceCents\":4200,"
                     + "\"currency\":\"USD\",\"avgRating\":4.5,\"reviewCount\":12}],"
@@ -204,6 +229,8 @@ public interface ApiExamples {
                     + "\"languages\":[\"en-US\"],"
                     + "\"universityId\":\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"universityName\":\"North Coast University\","
+                    + "\"universityImageUrl\":\"https://pub-3225b84a9a0b4728b11f261ee52251ba.r2"
+                    + ".dev/Stanford%20University.png\","
                     + "\"universitySlug\":\"north-coast\",\"universityCity\":\"Arcata\","
                     + "\"universityRegion\":\"CA\","
                     + "\"guideId\":\"11111111-0000-4000-8000-000000000001\","

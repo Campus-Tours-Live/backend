@@ -36,7 +36,14 @@ public class UniversityEntity {
     @Column(name = "region")
     private String region;
 
+    /** IANA zone. Set on live-directory upsert; DB defaults it for the SQL-seeded rows. */
+    @Column(name = "timezone", nullable = false)
+    private String timezone;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", columnDefinition = "university_status", nullable = false)
     private UniversityStatus status;
+
+    @Column(name = "image_url")
+    private String imageUrl;
 }

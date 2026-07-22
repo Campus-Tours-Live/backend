@@ -46,9 +46,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Guide-facing availability WRITE API (CTL-54 Task 5): create/update/delete recurring rules and
- * one-off exceptions, plus read/update booking settings. Every route is GENERIC — no {@code /guide}
- * prefix — the caller's role and guide id come from the security context ({@link
+ * Guide-facing availability WRITE API: create/update/delete recurring rules and one-off exceptions,
+ * plus read/update booking settings. Every route is GENERIC — no {@code /guide} prefix — the
+ * caller's role and guide id come from the security context ({@link
  * CurrentUser#requireRole(UserRole)}), never from the URL (mirrors {@code BookingController} /
  * {@code CartController}, the CTL-43 convention). Consumed via the BFF (CTL-56), not directly by
  * clients.
@@ -102,11 +102,10 @@ public class AvailabilityController {
     }
 
     /**
-     * The guide's resolved availability (CTL-54 Task 5b): editable rules + backend-coalesced
-     * occurrences + DST gap-days -- the single source of truth CTL-55/CTL-56 render read-only
-     * without re-coalescing. {@code from} / {@code to} (ISO {@code yyyy-MM-dd}) optionally narrow
-     * the returned occurrences to those intersecting {@code [from, to)}; omitted, every
-     * materialized occurrence is returned.
+     * The guide's resolved availability: editable rules + backend-coalesced occurrences + DST
+     * gap-days -- the single source of truth CTL-55/CTL-56 render read-only without re-coalescing.
+     * {@code from} / {@code to} (ISO {@code yyyy-MM-dd}) optionally narrow the returned occurrences
+     * to those intersecting {@code [from, to)}; omitted, every materialized occurrence is returned.
      */
     @Operation(
             summary = "Resolved availability (rules + occurrences + DST gaps)",
@@ -164,11 +163,11 @@ public class AvailabilityController {
     }
 
     /**
-     * Date-specific override dry-run/preview (CTL-54 v2.1 Task 4): given a proposed override that
-     * has NOT been saved, returns the resulting net-available windows per date exactly as an actual
-     * save would produce them, plus which existing exception segments the override would trim --
-     * WITHOUT persisting anything. Owner-scoped like every other route here: the guide id is
-     * resolved from the caller's own guide profile, never from the request.
+     * Date-specific override dry-run/preview: given a proposed override that has NOT been saved,
+     * returns the resulting net-available windows per date exactly as an actual save would produce
+     * them, plus which existing exception segments the override would trim -- WITHOUT persisting
+     * anything. Owner-scoped like every other route here: the guide id is resolved from the
+     * caller's own guide profile, never from the request.
      */
     @Operation(
             summary = "Preview a date-specific override (dry-run, no persist)",
@@ -251,17 +250,16 @@ public class AvailabilityController {
     }
 
     /**
-     * Multi-window date-specific override dry-run/preview (CTL-54 v2.1 Task 4, multi-window): given
-     * a proposed override made of MULTIPLE time windows (multiple slots on one date or date range)
-     * that have NOT been saved, returns ONE combined resulting net-available window set per date --
-     * all windows applied together (newest-wins trim/replace across the windows too) exactly as an
-     * actual sequence of saves would produce -- plus which existing exception segments any window
-     * would trim, WITHOUT persisting anything. This is the additive companion to the single-window
-     * {@code GET /availability/preview}: the frontend sends the full {@code windows} list and the
-     * backend computes the net result, so the frontend never merges N single-window previews
-     * itself. A POST with a body is the clean way to carry {@code windows[]}. Owner-scoped like
-     * every other route here: the guide id is resolved from the caller's own guide profile, never
-     * the request.
+     * Multi-window date-specific override dry-run/preview: given a proposed override made of
+     * MULTIPLE time windows (multiple slots on one date or date range) that have NOT been saved,
+     * returns ONE combined resulting net-available window set per date -- all windows applied
+     * together (newest-wins trim/replace across the windows too) exactly as an actual sequence of
+     * saves would produce -- plus which existing exception segments any window would trim, WITHOUT
+     * persisting anything. This is the additive companion to the single-window {@code GET
+     * /availability/preview}: the frontend sends the full {@code windows} list and the backend
+     * computes the net result, so the frontend never merges N single-window previews itself. A POST
+     * with a body is the clean way to carry {@code windows[]}. Owner-scoped like every other route
+     * here: the guide id is resolved from the caller's own guide profile, never the request.
      */
     @Operation(
             summary = "Preview a multi-window date-specific override (dry-run, no persist)",
@@ -373,7 +371,7 @@ public class AvailabilityController {
                             + " rule's timezone is server-set to the guide's settings timezone —"
                             + " never taken from the request. The write re-materializes the guide's"
                             + " occurrences in the same transaction, and the response also"
-                            + " surfaces (CTL-54 Task 7) any of the guide's own future CONFIRMED"
+                            + " surfaces any of the guide's own future CONFIRMED"
                             + " bookings this edit left uncovered by any occurrence; the edit still"
                             + " succeeds and no booking is mutated. Contiguous or overlapping"
                             + " ACTIVE rules on the same day of week with the same effectiveFrom/"
@@ -440,7 +438,7 @@ public class AvailabilityController {
             description =
                     "Updates an owned recurring availability rule. The rule's timezone is never"
                             + " updated from the request. The write re-materializes the guide's"
-                            + " occurrences and the response surfaces (CTL-54 Task 7) any newly"
+                            + " occurrences and the response surfaces any newly"
                             + " uncovered future CONFIRMED bookings; the edit still succeeds and no"
                             + " booking is mutated. Contiguous or overlapping ACTIVE rules on the"
                             + " same day of week with the same effectiveFrom/effectiveTo are"
@@ -508,7 +506,7 @@ public class AvailabilityController {
             description =
                     "Deletes an owned recurring availability rule and returns the guide's"
                             + " remaining rules. The write re-materializes the guide's occurrences"
-                            + " and the response surfaces (CTL-54 Task 7) any newly uncovered"
+                            + " and the response surfaces any newly uncovered"
                             + " future CONFIRMED bookings; the deletion still succeeds and no"
                             + " booking is mutated.")
     @ApiResponse(
@@ -593,7 +591,7 @@ public class AvailabilityController {
             description =
                     "Creates a one-off availability exception (UNAVAILABLE removes availability,"
                             + " ADDITIONAL adds it) for a specific date. The write re-materializes"
-                            + " the guide's occurrences and the response surfaces (CTL-54 Task 7)"
+                            + " the guide's occurrences and the response surfaces"
                             + " any newly uncovered future CONFIRMED bookings; the edit still"
                             + " succeeds and no booking is mutated.")
     @ApiResponse(
@@ -649,7 +647,7 @@ public class AvailabilityController {
             summary = "Update an availability exception",
             description =
                     "Updates an owned one-off availability exception. The write re-materializes"
-                            + " the guide's occurrences and the response surfaces (CTL-54 Task 7)"
+                            + " the guide's occurrences and the response surfaces"
                             + " any newly uncovered future CONFIRMED bookings; the edit still"
                             + " succeeds and no booking is mutated.")
     @ApiResponse(
@@ -710,7 +708,7 @@ public class AvailabilityController {
             description =
                     "Deletes an owned one-off availability exception and returns the guide's"
                             + " remaining exceptions. The write re-materializes the guide's"
-                            + " occurrences and the response surfaces (CTL-54 Task 7) any newly"
+                            + " occurrences and the response surfaces any newly"
                             + " uncovered future CONFIRMED bookings; the deletion still succeeds"
                             + " and no booking is mutated.")
     @ApiResponse(
@@ -756,11 +754,11 @@ public class AvailabilityController {
     }
 
     /**
-     * Atomic single-day override replace (CTL-54 v2.1 remediation B2): replaces the guide's
-     * same-kind exceptions on one date with exactly the supplied windows, in one transaction under
-     * the per-guide advisory lock. An empty windows list clears that kind for the day; other-kind
-     * exceptions on the date are preserved. Owner-scoped like every other route here: the guide id
-     * is resolved from the caller's own guide profile, never from the request.
+     * Atomic single-day override replace: replaces the guide's same-kind exceptions on one date
+     * with exactly the supplied windows, in one transaction under the per-guide advisory lock. An
+     * empty windows list clears that kind for the day; other-kind exceptions on the date are
+     * preserved. Owner-scoped like every other route here: the guide id is resolved from the
+     * caller's own guide profile, never from the request.
      */
     @Operation(
             summary = "Atomically replace a date's overrides for one kind",
@@ -774,7 +772,7 @@ public class AvailabilityController {
                             + " mid-transaction failure rolls the whole replace back, so a prior"
                             + " override is never partially lost. The write re-materializes the"
                             + " guide's occurrences in the same transaction and the response"
-                            + " surfaces (CTL-54 Task 7) any newly uncovered future CONFIRMED"
+                            + " surfaces any newly uncovered future CONFIRMED"
                             + " bookings; the edit still succeeds and no booking is mutated.")
     @ApiResponse(
             responseCode = "200",
@@ -826,11 +824,11 @@ public class AvailabilityController {
     }
 
     /**
-     * Atomic weekly-rule replace (CTL-54 v2.1 remediation B2, Task 5): replaces the guide's ACTIVE
-     * recurring rules for one day of week with exactly the supplied windows, in one transaction
-     * under the per-guide advisory lock. An empty windows list clears that weekday's rules; every
-     * other weekday is left untouched. Owner-scoped like every other route here: the guide id is
-     * resolved from the caller's own guide profile, never from the request.
+     * Atomic weekly-rule replace: replaces the guide's ACTIVE recurring rules for one day of week
+     * with exactly the supplied windows, in one transaction under the per-guide advisory lock. An
+     * empty windows list clears that weekday's rules; every other weekday is left untouched.
+     * Owner-scoped like every other route here: the guide id is resolved from the caller's own
+     * guide profile, never from the request.
      */
     @Operation(
             summary = "Atomically replace one weekday's availability rules",
@@ -1015,10 +1013,10 @@ public class AvailabilityController {
     }
 
     /**
-     * Resolves the caller's own {@code guide_profiles.id} for {@link #getOverridePreview} (the only
-     * route here that needs a bare guide id rather than a {@link UserEntity} -- {@link
-     * AvailabilityPreviewService#preview} takes the id directly). Deliberately REPLICATED (not
-     * extracted into a shared helper) from {@link AvailabilityWriteService}'s private {@code
+     * Resolves the caller's own {@code guide_profiles.id} for the routes that need a bare guide id
+     * rather than a {@link UserEntity} -- the two preview endpoints and the two replace endpoints.
+     * ({@link AvailabilityPreviewService#preview} takes the id directly). Deliberately REPLICATED
+     * (not extracted into a shared helper) from {@link AvailabilityWriteService}'s private {@code
      * requireGuideId} / {@link AvailabilityReadService}'s private {@code requireGuideId} -- the
      * same 3-line lookup, kept independent per this codebase's convention (see {@link
      * AvailabilityReadService}'s class javadoc for the same rationale).

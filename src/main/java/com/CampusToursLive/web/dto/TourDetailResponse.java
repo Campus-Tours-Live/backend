@@ -49,6 +49,13 @@ public record TourDetailResponse(
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 String universityName,
         @Schema(
+                        description =
+                                "University campus photo URL (Cloudflare R2). Null if unknown.",
+                        example =
+                                "https://pub-3225b84a9a0b4728b11f261ee52251ba.r2.dev/Stanford%20University.png",
+                        nullable = true)
+                String universityImageUrl,
+        @Schema(
                         description = "University URL-safe slug.",
                         example = "north-coast",
                         requiredMode = Schema.RequiredMode.REQUIRED)

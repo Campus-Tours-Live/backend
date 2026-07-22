@@ -39,9 +39,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Persistence integration test for {@link AvailabilityReadService} (CTL-54 Task 5b) against a REAL
- * PostgreSQL (Testcontainers). Rules -- and the occurrences + DST notices they materialize -- are
- * created through {@link AvailabilityWriteService} / {@link AvailabilityService} (the real write +
+ * Persistence integration test for {@link AvailabilityReadService} against a REAL PostgreSQL
+ * (Testcontainers). Rules -- and the occurrences + DST notices they materialize -- are created
+ * through {@link AvailabilityWriteService} / {@link AvailabilityService} (the real write +
  * projection path, T3/T5) with a FIXED clock, so what this read service serves is exactly what
  * production would have coalesced -- never hand-assembled. Mirrors {@code
  * AvailabilityWriteServiceIntegrationTest}.

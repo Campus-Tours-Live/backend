@@ -40,10 +40,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Integration test for {@link OccurrenceHorizonJob} (CTL-54 Task 4) against a REAL PostgreSQL
- * (Testcontainers) — the only way to exercise the real {@code SELECT ... FOR UPDATE SKIP LOCKED}
- * claim and genuine {@code REQUIRES_NEW} transaction boundaries (needed for the failure-isolation
- * proof below).
+ * Integration test for {@link OccurrenceHorizonJob} against a REAL PostgreSQL (Testcontainers) —
+ * the only way to exercise the real {@code SELECT ... FOR UPDATE SKIP LOCKED} claim and genuine
+ * {@code REQUIRES_NEW} transaction boundaries (needed for the failure-isolation proof below).
  *
  * <p>The default {@code @DataJpaTest} test-transaction wrapping is turned OFF
  * ({@code @Transactional(propagation = NOT_SUPPORTED)}): {@link GuideHorizonClaimService}'s {@code

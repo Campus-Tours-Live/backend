@@ -1,6 +1,9 @@
 package com.CampusToursLive.web.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.util.List;
 
 /** Public marketplace card for a bookable tour offering. */
 @Schema(
@@ -38,6 +41,13 @@ public record TourSummaryResponse(
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 String universityName,
         @Schema(
+                        description =
+                                "University campus photo URL (Cloudflare R2). Null if unknown.",
+                        example =
+                                "https://pub-3225b84a9a0b4728b11f261ee52251ba.r2.dev/Stanford%20University.png",
+                        nullable = true)
+                String universityImageUrl,
+        @Schema(
                         description = "Id of the guide who offers the tour.",
                         example = "11111111-0000-4000-8000-000000000001",
                         requiredMode = Schema.RequiredMode.REQUIRED)
@@ -47,6 +57,21 @@ public record TourSummaryResponse(
                         example = "Maya Chen",
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 String guideDisplayName,
+        @Schema(
+                        description = "Guide's field of study (major).",
+                        example = "Computer Science",
+                        requiredMode = Schema.RequiredMode.REQUIRED)
+                String guideMajor,
+        @Schema(
+                        description = "Guide's degree level (e.g. BS, MS, PhD). Null if unknown.",
+                        example = "BS",
+                        nullable = true)
+                String guideDegree,
+        @Schema(
+                        description = "Year the guide entered the university. Null if unknown.",
+                        example = "2023",
+                        nullable = true)
+                Integer guideEntryYear,
         @Schema(
                         description = "Tour duration in minutes.",
                         example = "60",
@@ -71,4 +96,29 @@ public record TourSummaryResponse(
                         description = "Number of reviews backing avgRating.",
                         example = "12",
                         requiredMode = Schema.RequiredMode.REQUIRED)
-                int reviewCount) {}
+                int reviewCount,
+        @ArraySchema(
+                        arraySchema =
+                                @Schema(
+                                        description = "Languages the tour can be given in.",
+                                        requiredMode = Schema.RequiredMode.REQUIRED),
+                        schema = @Schema(description = "BCP-47 language tag.", example = "en-US"))
+                List<String> languages,
+        @ArraySchema(
+                        arraySchema =
+                                @Schema(
+                                        description =
+                                                "Feature chips (max 3) the guide attached — "
+                                                        + "TourFeature enum names.",
+                                        requiredMode = Schema.RequiredMode.REQUIRED),
+                        schema =
+                                @Schema(
+                                        description = "TourFeature enum name.",
+                                        example = "Q_AND_A"))
+                List<String> features,
+        @JsonProperty("isNew")
+                @Schema(
+                        description = "True if the offering was created within the last 30 days.",
+                        example = "true",
+                        requiredMode = Schema.RequiredMode.REQUIRED)
+                boolean isNew) {}

@@ -5,9 +5,10 @@ target/
 # --- Logs ---
 *.log
 
-# --- Environment / secrets (no committed .env — set vars via the environment) ---
+# --- Environment / secrets (real .env stays local; only the template is committed) ---
 .env
 .env.*
+!.env.example
 
 # --- IDEs / editors ---
 # Ignore user-specific IDE files, but keep the shared, committed config.

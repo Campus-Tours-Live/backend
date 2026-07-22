@@ -23,10 +23,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Participant-facing bookable-slots read (CTL-54 Task 8) — the primary consumer of the materialized
- * availability occurrences. GENERIC route (no {@code /guide} prefix); role comes from the security
- * context, never the URL (mirrors {@code AvailabilityController} / {@code BookingController}, the
- * CTL-43 convention). Consumed via the BFF (CTL-56), not directly by clients.
+ * Participant-facing bookable-slots read — the primary consumer of the materialized availability
+ * occurrences. GENERIC route (no {@code /guide} prefix); role comes from the security context,
+ * never the URL (mirrors {@code AvailabilityController} / {@code BookingController}, the CTL-43
+ * convention). Consumed via the BFF (CTL-56), not directly by clients.
  */
 @RestController
 @RequestMapping("/offerings")

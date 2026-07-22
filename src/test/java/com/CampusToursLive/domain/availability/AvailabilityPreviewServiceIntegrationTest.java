@@ -41,8 +41,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Persistence integration test for {@link AvailabilityPreviewService} (CTL-54 v2.1 Task 4) against
- * a REAL PostgreSQL (Testcontainers) -- the only way to exercise a genuine {@link
+ * Persistence integration test for {@link AvailabilityPreviewService} against a REAL PostgreSQL
+ * (Testcontainers) -- the only way to exercise a genuine {@link
  * AvailabilityExceptionRepository#findByGuideIdAndExceptionDate} read alongside {@link
  * AvailabilityWriteService}'s real trim/replace write path, so the preview can be asserted to MATCH
  * an actual save while never mutating the database itself.
@@ -522,7 +522,7 @@ class AvailabilityPreviewServiceIntegrationTest {
 
         DatePreview dp = previewService.previewMulti(guideAId, req).days().get(0);
         // The genuinely-dropped 14:00-15:00 sibling IS reported; the re-supplied 09:00-10:00 window
-        // survives the replace unchanged and must NOT be over-reported as trimmed (CTL-54 M4).
+        // survives the replace unchanged and must NOT be over-reported as trimmed.
         assertThat(dp.trimmed())
                 .extracting(
                         TrimmedSegment::kind, TrimmedSegment::startLocal, TrimmedSegment::windowMin)
@@ -585,7 +585,7 @@ class AvailabilityPreviewServiceIntegrationTest {
     }
 
     // ---------------------------------------------------------------------
-    // Out-of-horizon (inert) dates (CTL-54 #6): a preview must not claim net-available windows a
+    // Out-of-horizon (inert) dates: a preview must not claim net-available windows a
     // save won't materialize -- a past date or one beyond [today, today+375) is flagged inert with
     // empty windows, matching what GET /availability shows post-save.
     // ---------------------------------------------------------------------

@@ -42,10 +42,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Persistence integration test for {@link SlotGenerationService} (CTL-54 Task 8) against a REAL
- * PostgreSQL (Testcontainers). Occurrences and held bookings are seeded directly (this task
- * consumes the already-materialized occurrences from Tasks 2/3/5b -- their own correctness is
- * covered there); this suite proves the slicing / booking-subtraction / notice-window math on top.
+ * Persistence integration test for {@link SlotGenerationService} against a REAL PostgreSQL
+ * (Testcontainers). Occurrences and held bookings are seeded directly (this task consumes the
+ * already-materialized occurrences from Tasks 2/3/5b -- their own correctness is covered there);
+ * this suite proves the slicing / booking-subtraction / notice-window math on top.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)

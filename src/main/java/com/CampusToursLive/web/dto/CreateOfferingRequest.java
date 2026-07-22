@@ -58,4 +58,29 @@ public record CreateOfferingRequest(
                                         description = "Languages the tour can be given in.",
                                         requiredMode = Schema.RequiredMode.NOT_REQUIRED),
                         schema = @Schema(description = "BCP-47 language tag.", example = "en-US"))
-                List<String> languages) {}
+                List<String> languages,
+        @ArraySchema(
+                        arraySchema =
+                                @Schema(
+                                        description =
+                                                "Feature chips (max 3) selected from the set allowed"
+                                                        + " for this topic — see TourFeatureCatalog.",
+                                        requiredMode = Schema.RequiredMode.NOT_REQUIRED),
+                        schema =
+                                @Schema(
+                                        description = "TourFeature enum name.",
+                                        example = "Q_AND_A"))
+                List<String> features) {
+
+    /** Convenience constructor for callers that don't set features (defaults to none). */
+    public CreateOfferingRequest(
+            String title,
+            String universityId,
+            String topic,
+            Integer durationMin,
+            Long priceCents,
+            String description,
+            List<String> languages) {
+        this(title, universityId, topic, durationMin, priceCents, description, languages, null);
+    }
+}
