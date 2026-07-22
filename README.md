@@ -66,8 +66,10 @@ stateless Spring Boot service that validates a Google OIDC `id_token` on every r
 - Maven is **not** needed separately — the bundled `./mvnw` wrapper downloads it on first run.
 - A **Google OAuth Client** — create it once (see [Google OAuth setup](#google-oauth-setup)). The
   Core needs only the **Client ID** (the `id_token` audience it enforces); the client secret belongs
-  to the BFF. _(It is required: a blank `GOOGLE_CLIENT_ID` **fails startup** rather than silently
-  starting a service that accepts any caller.)_
+  to the BFF. `.env.example` ships a **placeholder**, so a seeded backend boots — but every
+  signed-in request `401`s until you replace it with your real Client ID. (An _explicitly empty_
+  value is different: the code fails fast at startup, guarding against a deploy that would trust any
+  caller. See [Configuration](#configuration-environment-variables).)_
 
 ---
 
@@ -227,9 +229,11 @@ The Core reads its settings from the **process environment** — Spring resolves
 placeholders in `application.properties` from OS env vars / system properties. **Spring Boot does
 not auto-load a `.env` file** (unlike the Node BFF).
 
-Almost every variable has a sensible default. The one exception is `GOOGLE_CLIENT_ID`: the app
-**refuses to start** without it, because a service that accepts any Google `id_token` is not
-something you should end up running by accident. Fill it in before the first run.
+Almost every variable has a sensible default. `GOOGLE_CLIENT_ID` is the one you must supply:
+`.env.example` seeds a placeholder so the app boots, but it validates every `id_token`'s `aud`
+against that value, so **sign-in fails (401) until you set your real Client ID**. Note the code
+still fails fast on an _explicitly empty_ audience — running `./mvnw spring-boot:run` with nothing
+set, no `.env`, gives you a clean startup error rather than a service that trusts any caller.
 
 To override a value, choose one of:
 
@@ -246,16 +250,16 @@ The full set of variables (optional for local dev unless marked otherwise; some 
 > In production, inject `DB_PASSWORD` / `GOOGLE_CLIENT_ID` from the platform's env config or a
 > secrets manager.
 
-| Variable             | Purpose                                                                                                                                                                                                                               | Default                                        | Secret?         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | --------------- |
-| `DB_URL`             | Postgres JDBC URL                                                                                                                                                                                                                     | `jdbc:postgresql://localhost:5432/campustours` | no              |
-| `DB_USERNAME`        | DB user                                                                                                                                                                                                                               | `ctl`                                          | no (local)      |
-| `DB_PASSWORD`        | DB password                                                                                                                                                                                                                           | `ctl`                                          | **yes in prod** |
-| `OIDC_ISSUER_URI`    | OIDC issuer whose JWKS validates the `id_token`                                                                                                                                                                                       | `https://accounts.google.com`                  | no              |
-| `GOOGLE_CLIENT_ID`   | Google OAuth Client ID; enforced as the `id_token` `aud` claim. Blank → **startup fails** (see [Authentication & roles](#authentication--roles)).                                                                                     | _(blank)_                                      | no (public)     |
-| `SCORECARD_API_KEY`  | College Scorecard key for the live university/major directory (guide onboarding). Each dev uses their **own free** key ([sign up](https://api.data.gov/signup/)). Blank → `/meta/universities` & `/meta/majors` return an empty list. | _(blank)_                                      | **yes**         |
-| `SCORECARD_BASE_URL` | Override the Scorecard API base URL.                                                                                                                                                                                                  | `https://api.data.gov/ed/collegescorecard/v1`  | no              |
-| `CORE_PORT`          | HTTP port                                                                                                                                                                                                                             | `8080`                                         | no              |
+| Variable             | Purpose                                                                                                                                                                                                                                                              | Default                                                                  | Secret?         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | --------------- |
+| `DB_URL`             | Postgres JDBC URL                                                                                                                                                                                                                                                    | `jdbc:postgresql://localhost:5432/campustours`                           | no              |
+| `DB_USERNAME`        | DB user                                                                                                                                                                                                                                                              | `ctl`                                                                    | no (local)      |
+| `DB_PASSWORD`        | DB password                                                                                                                                                                                                                                                          | `ctl`                                                                    | **yes in prod** |
+| `OIDC_ISSUER_URI`    | OIDC issuer whose JWKS validates the `id_token`                                                                                                                                                                                                                      | `https://accounts.google.com`                                            | no              |
+| `GOOGLE_CLIENT_ID`   | Google OAuth Client ID; enforced as the `id_token` `aud` claim. `.env.example` ships a placeholder → boots but every signed-in request `401`s until it's real. An _explicitly empty_ value **fails startup** (see [Authentication & roles](#authentication--roles)). | _(placeholder in `.env.example`; property default is empty → fail-fast)_ | no (public)     |
+| `SCORECARD_API_KEY`  | College Scorecard key for the live university/major directory (guide onboarding). Each dev uses their **own free** key ([sign up](https://api.data.gov/signup/)). Blank → `/meta/universities` & `/meta/majors` return an empty list.                                | _(blank)_                                                                | **yes**         |
+| `SCORECARD_BASE_URL` | Override the Scorecard API base URL.                                                                                                                                                                                                                                 | `https://api.data.gov/ed/collegescorecard/v1`                            | no              |
+| `CORE_PORT`          | HTTP port                                                                                                                                                                                                                                                            | `8080`                                                                   | no              |
 
 ---
 
