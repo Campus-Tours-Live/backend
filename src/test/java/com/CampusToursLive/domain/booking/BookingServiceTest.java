@@ -903,6 +903,65 @@ class BookingServiceTest {
         verify(bookings, never()).saveAndFlush(any());
     }
 
+    // ── createBooking: acceptance mode from guide settings (CTL-34) ────────────────────────────
+
+    @Test
+    void createBooking_autoAcceptanceMode_confirmsImmediately() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        when(users.findById(ctx.guideUserId()))
+                .thenReturn(Optional.of(user(ctx.guideUserId(), "Jane Guide")));
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setAcceptanceMode(AcceptanceMode.AUTO);
+        when(settings.findByGuideId(ctx.guideProfileId())).thenReturn(Optional.of(guideSettings));
+        stubNoOverlaps();
+
+        BookingDetailResponse resp = service().createBooking(participant, validRequest(ctx, null));
+
+        ArgumentCaptor<BookingEntity> saved = ArgumentCaptor.forClass(BookingEntity.class);
+        verify(bookings).saveAndFlush(saved.capture());
+        BookingEntity b = saved.getValue();
+        // AUTO → straight to CONFIRMED, confirmed_at set, no guide response deadline.
+        assertEquals(BookingStatus.CONFIRMED, b.getStatus());
+        assertEquals(AcceptanceMode.AUTO, b.getAcceptanceModeSnap());
+        assertNotNull(b.getConfirmedAt());
+        assertNull(b.getGuideResponseDeadlineAt());
+        assertEquals("CONFIRMED", resp.status());
+
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory).save(audit.capture());
+        assertEquals(BookingStatus.CONFIRMED, audit.getValue().getNewStatus());
+    }
+
+    @Test
+    void createBooking_manualAcceptanceMode_usesGuidesConfiguredResponseDeadline() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        when(users.findById(ctx.guideUserId()))
+                .thenReturn(Optional.of(user(ctx.guideUserId(), "Jane Guide")));
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setAcceptanceMode(AcceptanceMode.MANUAL);
+        guideSettings.setResponseDeadlineMin(120); // not the 90-min schema default
+        when(settings.findByGuideId(ctx.guideProfileId())).thenReturn(Optional.of(guideSettings));
+        stubNoOverlaps();
+
+        Instant before = Instant.now();
+        BookingDetailResponse resp = service().createBooking(participant, validRequest(ctx, null));
+        Instant after = Instant.now();
+
+        ArgumentCaptor<BookingEntity> saved = ArgumentCaptor.forClass(BookingEntity.class);
+        verify(bookings).saveAndFlush(saved.capture());
+        BookingEntity b = saved.getValue();
+        assertEquals(BookingStatus.PENDING_GUIDE_ACCEPTANCE, b.getStatus());
+        assertEquals(AcceptanceMode.MANUAL, b.getAcceptanceModeSnap());
+        assertNull(b.getConfirmedAt());
+        // Deadline is now + the guide's configured 120 minutes (not the 90-min default).
+        assertFalse(b.getGuideResponseDeadlineAt().isBefore(before.plus(120, ChronoUnit.MINUTES)));
+        assertFalse(b.getGuideResponseDeadlineAt().isAfter(after.plus(120, ChronoUnit.MINUTES)));
+        assertEquals("WAITING_FOR_GUIDE", resp.status());
+    }
+
     @Test
     void createBooking_outsideAvailability_isRejected() {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
@@ -1252,6 +1311,32 @@ class BookingServiceTest {
         verify(statusHistory, times(2)).save(audit.capture());
         assertEquals(BookingStatus.DRAFT, audit.getAllValues().get(0).getPreviousStatus());
         assertEquals("CART_CHECKOUT", audit.getAllValues().get(0).getReasonCode());
+    }
+
+    @Test
+    void checkout_autoAcceptanceMode_confirmsImmediately() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity item =
+                draftItem(participant.getId(), Instant.now().plus(3, ChronoUnit.DAYS), 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        UUID gu = stubCheckoutLookups(item, TourStatus.ACTIVE);
+        when(users.findById(gu)).thenReturn(Optional.of(user(gu, "G")));
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setAcceptanceMode(AcceptanceMode.AUTO);
+        when(settings.findByGuideId(item.getGuideId())).thenReturn(Optional.of(guideSettings));
+        stubNoOverlaps();
+        when(bookings.saveAllAndFlush(any())).thenReturn(List.of(item));
+
+        List<BookingDetailResponse> resp = service().checkout(participant);
+
+        // The guide flipped to AUTO while the item sat in the cart → checkout confirms it.
+        assertEquals(BookingStatus.CONFIRMED, item.getStatus());
+        assertEquals(AcceptanceMode.AUTO, item.getAcceptanceModeSnap());
+        assertNotNull(item.getConfirmedAt());
+        assertNull(item.getGuideResponseDeadlineAt());
+        assertEquals("CONFIRMED", resp.get(0).status());
     }
 
     @Test

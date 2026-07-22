@@ -23,7 +23,9 @@ import com.CampusToursLive.web.dto.PendingActionsResponse;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -39,16 +41,19 @@ import org.springframework.transaction.annotation.Transactional;
  * guide_profiles.id} primary key, not the user id — resolving to a display name requires a two-step
  * lookup through {@code GuideProfileRepository}.
  *
- * <p><b>MVP booking policy.</b> Acceptance is always MANUAL (new bookings wait for the guide, with
- * a 90-minute response window — not yet guide-configurable). Minimum notice, maximum advance, and
- * the reserved-interval buffers ARE guide-configurable via {@code guide_booking_settings} (CTL-54
- * Task 5's read/write endpoints) and are read here — {@code createBooking}/{@code addCartItem} (via
- * {@link #buildDraftBooking}) and {@code checkout} (via {@link #revalidateCartItem}) both load the
- * guide's row, falling back to the table's schema defaults (24h notice, 30-day advance, 0-minute
- * pre-tour buffer, 15-minute post-tour buffer) when a guide has none yet — the SAME fallback {@link
- * SlotGenerationService} uses, so the two paths never disagree about what is bookable. Payments are
- * not built yet, so the PENDING_PAYMENT_AUTH stage is skipped and the platform fee snapshot is
- * zero.
+ * <p><b>Booking policy (CTL-34).</b> The guide's acceptance mode, response window, minimum notice,
+ * maximum advance, and reserved-interval buffers all come from their {@code guide_booking_settings}
+ * row (CTL-54 Task 5's read/write endpoints); {@code createBooking}/{@code addCartItem} (via {@link
+ * #buildDraftBooking}) and {@code checkout} (via {@link #revalidateCartItem}) load it, falling back
+ * to the table's schema defaults (MANUAL, 90-minute response window, 24h notice, 30-day advance,
+ * 0-minute pre-tour buffer, 15-minute post-tour buffer) when a guide has none yet — the SAME
+ * fallback {@link SlotGenerationService} uses, so the two paths never disagree about what is
+ * bookable. When the slot is claimed ({@link #promote}), the snapshotted acceptance mode decides
+ * the outcome: <b>AUTO</b> confirms immediately (straight to {@code CONFIRMED}, no response
+ * deadline); <b>MANUAL</b> holds the slot as {@code PENDING_GUIDE_ACCEPTANCE} with {@code
+ * guide_response_deadline_at = now + response_deadline_min}, awaiting the guide's response (CTL-45)
+ * or auto-approve on timeout (CTL-46). Payments are not built yet, so the PENDING_PAYMENT_AUTH
+ * stage is skipped and the platform fee snapshot is zero.
  */
 @Service
 public class BookingService {
@@ -87,10 +92,6 @@ public class BookingService {
                     BookingStatus.PENDING_GUIDE_ACCEPTANCE,
                     BookingStatus.PAYMENT_ACTION_REQUIRED,
                     BookingStatus.CONFIRMED);
-
-    // MVP policy: acceptance mode + response window are not yet guide-configurable. Notice,
-    // advance, and buffers ARE — see loadSettings() and the class javadoc.
-    private static final Duration GUIDE_RESPONSE_WINDOW = Duration.ofMinutes(90);
 
     /** Cap on free-text fields (participant notes, cancellation reason) — the columns are TEXT. */
     private static final int MAX_FREE_TEXT_LENGTH = 1000;
@@ -185,16 +186,17 @@ public class BookingService {
 
     /**
      * Create a booking for a bookable offering (ACTIVE offering, APPROVED guide, ACTIVE
-     * university). The offering's duration and price are snapshotted onto the booking; the booking
-     * starts in PENDING_GUIDE_ACCEPTANCE with a 90-minute guide response window (MANUAL acceptance
-     * — see the class javadoc for the MVP policy). Overlaps are pre-checked here and enforced
-     * transactionally by the DB exclusion constraints.
+     * university). The offering's duration and price are snapshotted onto the booking, which is
+     * then claimed per the guide's acceptance mode (AUTO → CONFIRMED; MANUAL →
+     * PENDING_GUIDE_ACCEPTANCE with the guide's response deadline — see the class javadoc).
+     * Overlaps are pre-checked here and enforced transactionally by the DB exclusion constraints.
      */
     @Transactional
     public BookingDetailResponse createBooking(UserEntity participant, CreateBookingRequest req) {
-        BookingEntity b = buildDraftBooking(participant, req);
+        Draft draft = buildDraftBooking(participant, req);
+        BookingEntity b = draft.booking();
         requireNoHeldOverlaps(b);
-        promoteToPending(b);
+        promote(b, draft.settings());
         try {
             // Flush now (id is assigned, so save() alone would defer the INSERT to commit):
             // the audit row's FK needs the booking row in place, and flushing here is what
@@ -261,7 +263,7 @@ public class BookingService {
                 >= MAX_CART_ITEMS) {
             throw new ValidationException("Your cart is full (max " + MAX_CART_ITEMS + " items)");
         }
-        BookingEntity b = buildDraftBooking(participant, req);
+        BookingEntity b = buildDraftBooking(participant, req).booking();
         requireNoHeldOverlaps(b);
         requireNoCartOverlaps(b, cartItems(participant.getId()));
         // Flush so the audit row's FK sees the booking row (assigned id → deferred insert).
@@ -304,16 +306,19 @@ public class BookingService {
         }
         Instant now = Instant.now();
         // Re-validate (and re-snapshot) every item first, THEN cross-check overlaps: the
-        // re-snapshot can change an item's duration, which changes what overlaps what.
+        // re-snapshot can change an item's duration, which changes what overlaps what. Keep each
+        // item's guide settings (loaded during re-validation) so the promote loop can claim the
+        // slot per the guide's acceptance mode without reloading the row.
+        Map<UUID, GuideBookingSettingsEntity> settingsByItem = new HashMap<>();
         for (BookingEntity b : items) {
-            revalidateCartItem(b, now);
+            settingsByItem.put(b.getId(), revalidateCartItem(b, now));
         }
         for (BookingEntity b : items) {
             requireNoHeldOverlaps(b);
             requireNoCartOverlaps(b, items);
         }
         for (BookingEntity b : items) {
-            promoteToPending(b);
+            promote(b, settingsByItem.get(b.getId()));
         }
         try {
             bookings.saveAllAndFlush(items);
@@ -332,11 +337,19 @@ public class BookingService {
     // ---------------------------------------------------------------------------
 
     /**
-     * Validates a booking request end-to-end (bookable offering, approved guide, active university,
-     * not the guide's own tour, time window) and builds the unsaved booking in DRAFT status with
-     * the price snapshot. No slot is checked or claimed here.
+     * A freshly built DRAFT booking together with the guide settings used to build it, so the
+     * caller can claim the slot ({@link #promote}) per the guide's acceptance mode / response
+     * window without re-loading the row.
      */
-    private BookingEntity buildDraftBooking(UserEntity participant, CreateBookingRequest req) {
+    private record Draft(BookingEntity booking, GuideBookingSettingsEntity settings) {}
+
+    /**
+     * Validates a booking request end-to-end (bookable offering, approved guide, active university,
+     * not the guide's own tour, time window, availability) and builds the unsaved booking in DRAFT
+     * status with the price snapshot and the guide's acceptance mode. No slot is checked or claimed
+     * here.
+     */
+    private Draft buildDraftBooking(UserEntity participant, CreateBookingRequest req) {
         TourOfferingEntity offering = requireBookableOffering(req.tourOfferingId());
         GuideProfileEntity guide = requireApprovedGuide(offering.getGuideId());
         requireActiveUniversity(offering.getUniversityId());
@@ -358,7 +371,8 @@ public class BookingService {
         b.setTourOfferingId(offering.getId());
         b.setUniversityId(offering.getUniversityId());
         b.setStatus(BookingStatus.DRAFT);
-        b.setAcceptanceModeSnap(AcceptanceMode.MANUAL);
+        // Snapshot the guide's current acceptance mode; promote() reads it to decide the outcome.
+        b.setAcceptanceModeSnap(guideSettings.getAcceptanceMode());
         b.setScheduledStartAt(start);
         b.setScheduledEndAt(end);
         b.setReservedStartAt(start.minus(Duration.ofMinutes(guideSettings.getBufferBeforeMin())));
@@ -373,7 +387,7 @@ public class BookingService {
         b.setGuideAmountCents(offering.getPriceCents());
         b.setCurrency(offering.getCurrency());
         b.setParticipantNotes(cleanFreeText(req.participantNotes(), "participantNotes"));
-        return b;
+        return new Draft(b, guideSettings);
     }
 
     /**
@@ -393,10 +407,30 @@ public class BookingService {
         }
     }
 
-    /** DRAFT → PENDING_GUIDE_ACCEPTANCE: the transition that claims the slot. */
-    private static void promoteToPending(BookingEntity b) {
-        b.setStatus(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
-        b.setGuideResponseDeadlineAt(Instant.now().plus(GUIDE_RESPONSE_WINDOW));
+    /**
+     * Claims the slot for a DRAFT booking per the guide's acceptance mode (CTL-34):
+     *
+     * <ul>
+     *   <li><b>AUTO</b> → straight to {@code CONFIRMED} with {@code confirmed_at = now}, no guide
+     *       response deadline (the guide pre-authorized instant booking).
+     *   <li><b>MANUAL</b> → {@code PENDING_GUIDE_ACCEPTANCE} with {@code guide_response_deadline_at
+     *       = now + response_deadline_min}, awaiting the guide's response (CTL-45) or auto-approve
+     *       on timeout (CTL-46).
+     * </ul>
+     *
+     * Either way the booking now holds its slot (both statuses are in {@link
+     * #SLOT_HOLDING_STATUSES}).
+     */
+    private static void promote(BookingEntity b, GuideBookingSettingsEntity guideSettings) {
+        Instant now = Instant.now();
+        if (b.getAcceptanceModeSnap() == AcceptanceMode.AUTO) {
+            b.setStatus(BookingStatus.CONFIRMED);
+            b.setConfirmedAt(now);
+        } else {
+            b.setStatus(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
+            b.setGuideResponseDeadlineAt(
+                    now.plus(Duration.ofMinutes(guideSettings.getResponseDeadlineMin())));
+        }
     }
 
     /** Friendly 422s for conflicts with slot-holding bookings (DB constraints are the backstop). */
@@ -453,11 +487,12 @@ public class BookingService {
      * to only become more satisfied over time). Both bounds are therefore rechecked here against
      * the guide's CURRENT settings, same as {@link #buildDraftBooking}.
      *
-     * <p>Also RE-SNAPSHOTS price, currency, and duration from the offering as it stands now — a
-     * DRAFT is not a commitment, so the participant commits to the current terms at checkout, not
-     * the ones from add-to-cart time.
+     * <p>Also RE-SNAPSHOTS price, currency, duration, and the guide's acceptance mode from the
+     * offering/settings as they stand now — a DRAFT is not a commitment, so the participant commits
+     * to the current terms at checkout, not the ones from add-to-cart time. Returns the guide's
+     * settings so the caller can claim the slot ({@link #promote}) without re-loading the row.
      */
-    private void revalidateCartItem(BookingEntity b, Instant now) {
+    private GuideBookingSettingsEntity revalidateCartItem(BookingEntity b, Instant now) {
         TourOfferingEntity offering =
                 offerings
                         .findById(b.getTourOfferingId())
@@ -501,6 +536,7 @@ public class BookingService {
         b.setTotalCents(offering.getPriceCents());
         b.setGuideAmountCents(offering.getPriceCents());
         b.setCurrency(offering.getCurrency());
+        b.setAcceptanceModeSnap(guideSettings.getAcceptanceMode());
         Instant end = b.getScheduledStartAt().plus(Duration.ofMinutes(offering.getDurationMin()));
         b.setScheduledEndAt(end);
         b.setReservedStartAt(
@@ -518,6 +554,7 @@ public class BookingService {
                             + b.getBookingNumber()
                             + " is no longer within the guide's availability");
         }
+        return guideSettings;
     }
 
     private List<BookingEntity> cartItems(UUID participantUserId) {
