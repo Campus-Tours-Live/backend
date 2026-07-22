@@ -259,6 +259,7 @@ The full set of variables (optional for local dev unless marked otherwise; some 
 | `GOOGLE_CLIENT_ID`   | Google OAuth Client ID; enforced as the `id_token` `aud` claim. `.env.example` ships a placeholder → boots but every signed-in request `401`s until it's real. An _explicitly empty_ value **fails startup** (see [Authentication & roles](#authentication--roles)). | _(placeholder in `.env.example`; property default is empty → fail-fast)_ | no (public)     |
 | `SCORECARD_API_KEY`  | College Scorecard key for the live university/major directory (guide onboarding). Each dev uses their **own free** key ([sign up](https://api.data.gov/signup/)). Blank → `/meta/universities` & `/meta/majors` return an empty list.                                | _(blank)_                                                                | **yes**         |
 | `SCORECARD_BASE_URL` | Override the Scorecard API base URL.                                                                                                                                                                                                                                 | `https://api.data.gov/ed/collegescorecard/v1`                            | no              |
+| `CAMPUS_IMAGE_BASE_URL` | Public Cloudflare R2 base URL prefixed onto each university's `image_url`. Ships a baked default, so images resolve out of the box; must stay in sync with the frontend's `next.config` `images.remotePatterns`.                                                     | `https://pub-3225b84a9a0b4728b11f261ee52251ba.r2.dev/`                   | no (public)     |
 | `CORE_PORT`          | HTTP port                                                                                                                                                                                                                                                            | `8080`                                                                   | no              |
 
 ---
@@ -287,7 +288,7 @@ The full set of variables (optional for local dev unless marked otherwise; some 
   | File                                    | Purpose                                                                                     |
   | --------------------------------------- | ------------------------------------------------------------------------------------------- |
   | `V1__schema.sql`                        | The complete baseline schema (tables, enums, constraints, indexes).                         |
-  | `V2__seed_universities.sql`             | Seeds the university catalog (~50 rows, idempotent). **Frozen.**                            |
+  | `V2__seed_universities.sql`             | Seeds the university catalog (~1,900 rows, idempotent). **Frozen.**                         |
   | `V3__seed_demo_data.sql`                | Seeds demo guides + tour offerings for the marketplace.                                     |
   | `V4__backfill_university_image_url.sql` | Forward-only backfill of `image_url`/`name` for rows V2's `ON CONFLICT DO NOTHING` skipped. |
 
@@ -435,8 +436,9 @@ envelope; errors are `application/problem+json`.
 > **The authoritative list is the generated spec**, not this table — `/v3/api-docs` (or
 > [Swagger UI](http://localhost:8080/swagger-ui.html)) is produced from the annotations, so it
 > cannot drift. The table below is a hand-kept orientation map of the main resources; it omits the
-> availability module (`/availability/rules*`, `/availability/exceptions*`, `/availability/preview`,
-> `/availability/settings`, `/availability/overrides/replace`), `/offerings/{id}/slots`, and the
+> availability module (`/availability` (resolved slots read), `/availability/rules*`,
+> `/availability/exceptions*`, `/availability/preview`, `/availability/settings`,
+> `/availability/overrides/replace`), `/offerings/{id}/slots`, and the
 > reference vocabularies under `/meta/*`. Consult the spec before assuming an endpoint does not
 > exist.
 
@@ -486,9 +488,10 @@ statuses) and requires the **GUIDE** role.
 | Param          | Default       | Description                                               |
 | -------------- | ------------- | --------------------------------------------------------- |
 | `universityId` | —             | Filter by university UUID                                 |
-| `topic`        | —             | Filter by `tour_topic` enum (see `/meta/tour-topics`)     |
+| `topic`        | —             | Filter by one or more tour topic codes (repeatable or comma-separated; see `/meta/tour-topics`) |
 | `q`            | `""`          | Search title, description, university name, or short name |
 | `sort`         | `RECOMMENDED` | `RECOMMENDED` \| `PRICE_ASC` \| `PRICE_DESC` \| `RATING`  |
+| `page`         | `0`           | Zero-based page index                                     |
 | `limit`        | `20`          | Page size (max **50**)                                    |
 
 **Responses:** `TourSummaryResponse[]` (list) or `TourDetailResponse` (by id). Invalid `sort` or

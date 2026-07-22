@@ -96,7 +96,7 @@
 			<artifactId>spring-boot-starter-aop</artifactId>
 		</dependency>
 
-		<!-- Flyway migrations (owns the PostgreSQL schema: V1..V2) -->
+		<!-- Flyway migrations (owns the PostgreSQL schema: V1..V4) -->
 		<dependency>
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-core</artifactId>
