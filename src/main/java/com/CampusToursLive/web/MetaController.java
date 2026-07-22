@@ -91,6 +91,13 @@ public class MetaController {
                             + " topic (each topic offers 10 options; a guide picks up to 3). Keyed by"
                             + " TourTopic name → { value, label } options. Single source of truth for the"
                             + " tour-creation dropdown and for rendering feature chips.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The feature options grouped by topic.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.TOUR_FEATURES)))
     @GetMapping("/tour-features")
     public ApiEnvelope<Map<String, List<Option>>> tourFeatures() {
         Map<String, List<Option>> byTopic = new LinkedHashMap<>();
@@ -114,6 +121,13 @@ public class MetaController {
                     "The languages a guide may select for a profile / tour, as { value, label }"
                             + " options. `value` is the BCP-47 tag stored by the API; `label` is the"
                             + " English display name (derived from the tag).")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The supported language options.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.LANGUAGES)))
     @GetMapping("/languages")
     public ApiEnvelope<List<Option>> languages() {
         List<Option> options =
@@ -134,6 +148,13 @@ public class MetaController {
                     "Typeahead search over every U.S. institution via the College Scorecard API, as"
                             + " { value = school id, label = 'Name — City, ST' }. Backs the guide"
                             + " onboarding university picker; the chosen school is upserted on submit.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "Matching universities (live Scorecard search).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.UNIVERSITIES_LIVE)))
     @GetMapping("/universities")
     public ApiEnvelope<List<Option>> universities(@RequestParam("q") String q) {
         return ApiEnvelope.of(schools.searchSchools(q, 20));
@@ -145,6 +166,13 @@ public class MetaController {
                     "The distinct fields of study a school actually offers (College Scorecard CIP-4"
                             + " program titles), as { value = label = title }. Backs the onboarding major"
                             + " picker for the selected university.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The school's majors (live Scorecard).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.MAJORS_LIVE)))
     @GetMapping("/majors")
     public ApiEnvelope<List<Option>> majors(@RequestParam("schoolId") String schoolId) {
         return ApiEnvelope.of(schools.majorsForSchool(schoolId));

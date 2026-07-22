@@ -157,6 +157,29 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String TOUR_FEATURES =
+            "{\"data\":{\"GENERAL_CAMPUS\":[{\"value\":\"Q_AND_A\",\"label\":\"Q&A\"},"
+                    + "{\"value\":\"HIDDEN_SPOTS\",\"label\":\"Hidden spots\"}]},"
+                    + META
+                    + "}";
+
+    String LANGUAGES =
+            "{\"data\":[{\"value\":\"en-US\",\"label\":\"English\"},"
+                    + "{\"value\":\"es\",\"label\":\"Spanish\"}],"
+                    + META
+                    + "}";
+
+    String UNIVERSITIES_LIVE =
+            "{\"data\":[{\"value\":\"166027\","
+                    + "\"label\":\"Harvard University \u2014 Cambridge, MA\"}],"
+                    + META
+                    + "}";
+
+    String MAJORS_LIVE =
+            "{\"data\":[{\"value\":\"Computer Science\",\"label\":\"Computer Science\"}],"
+                    + META
+                    + "}";
+
     String UNIVERSITY_LIST =
             "{\"data\":[{\"id\":\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"slug\":\"north-coast\",\"name\":\"North Coast University\","
