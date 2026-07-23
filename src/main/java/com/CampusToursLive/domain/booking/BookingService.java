@@ -99,6 +99,9 @@ public class BookingService {
     /** Cap on DRAFT items per participant — keeps carts (and checkout batches) bounded. */
     private static final int MAX_CART_ITEMS = 10;
 
+    /** How long a DRAFT cart item is retained before the expiry sweep retires it (CTL-91). */
+    private static final Duration MAX_CART_AGE = Duration.ofDays(30);
+
     private static final String BOOKING_NUMBER_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final int BOOKING_NUMBER_LENGTH = 10;
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -305,6 +308,42 @@ public class BookingService {
                         .orElseThrow(() -> new NotFoundException("Cart item not found"));
         bookings.delete(b);
         return getCart(participant.getId());
+    }
+
+    /**
+     * Clear the whole cart (CTL-91): hard-delete all of the participant's DRAFT items (a
+     * user-initiated empty, so the rows go, audit trail cascading with them — same as a single
+     * {@link #removeCartItem}). Returns the now-empty cart; a no-op when already empty.
+     */
+    @Transactional
+    public List<CartItemResponse> clearCart(UserEntity participant) {
+        List<BookingEntity> items = cartItems(participant.getId());
+        if (!items.isEmpty()) {
+            bookings.deleteAll(items);
+        }
+        return List.of();
+    }
+
+    /**
+     * Retire stale cart items (CTL-91): every DRAFT whose scheduled start has passed, or that has
+     * been carted longer than the {@link #MAX_CART_AGE} retention, is marked {@link
+     * BookingStatus#EXPIRED} (system-actor audit row) rather than deleted, so the record is kept
+     * and the item simply drops out of the DRAFT-only cart listing. A carted DRAFT reserves
+     * nothing, so expiring it releases no slot. Returns how many were expired. Driven by {@code
+     * CartExpiryJob}.
+     */
+    @Transactional
+    public int expireStaleCartItems() {
+        Instant now = Instant.now();
+        List<BookingEntity> stale =
+                bookings.findStaleDrafts(BookingStatus.DRAFT, now, now.minus(MAX_CART_AGE));
+        for (BookingEntity b : stale) {
+            b.setStatus(BookingStatus.EXPIRED);
+            b.setCancelledAt(now);
+            bookings.save(b);
+            recordTransition(b, BookingStatus.DRAFT, BookingActor.SYSTEM, null, "CART_EXPIRED");
+        }
+        return stale.size();
     }
 
     /**
@@ -670,13 +709,24 @@ public class BookingService {
     }
 
     /** Append one row to the booking_status_history audit trail. */
+    /** Append a participant-actor row to the booking_status_history audit trail. */
     private void recordTransition(
             BookingEntity b, BookingStatus previous, UUID actorUserId, String reasonCode) {
+        recordTransition(b, previous, BookingActor.PARTICIPANT, actorUserId, reasonCode);
+    }
+
+    /** Append one row to the booking_status_history audit trail with an explicit actor. */
+    private void recordTransition(
+            BookingEntity b,
+            BookingStatus previous,
+            BookingActor actor,
+            UUID actorUserId,
+            String reasonCode) {
         BookingStatusHistoryEntity h = new BookingStatusHistoryEntity();
         h.setBookingId(b.getId());
         h.setPreviousStatus(previous);
         h.setNewStatus(b.getStatus());
-        h.setActorType(BookingActor.PARTICIPANT);
+        h.setActorType(actor);
         h.setActorUserId(actorUserId);
         h.setReasonCode(reasonCode);
         statusHistory.save(h);
