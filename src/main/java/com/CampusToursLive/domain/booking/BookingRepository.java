@@ -59,6 +59,19 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
     long countByParticipantUserIdAndStatus(UUID participantUserId, BookingStatus status);
 
     /**
+     * Stale cart items to retire (CTL-91): DRAFT bookings whose scheduled start is already in the
+     * past, OR that were created before {@code cutoff} (the cart-retention horizon). Used by the
+     * scheduled expiry sweep across all participants.
+     */
+    @Query(
+            "select b from BookingEntity b where b.status = :status "
+                    + "and (b.scheduledStartAt < :now or b.createdAt < :cutoff)")
+    List<BookingEntity> findStaleDrafts(
+            @Param("status") BookingStatus status,
+            @Param("now") Instant now,
+            @Param("cutoff") Instant cutoff);
+
+    /**
      * A guide's bookings in one status scheduled to start at or after {@code from}, chronological.
      * CTL-54 Task 7 ("(A) allow + notify") uses this — scoped to {@code CONFIRMED} — to find future
      * bookings an availability edit may have left uncovered, so the write's response can warn the
