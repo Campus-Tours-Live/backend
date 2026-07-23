@@ -104,6 +104,17 @@ class CartControllerTest {
     }
 
     @Test
+    void clear_requiresParticipantRole_andReturnsEmptyCart() {
+        UserEntity u = participantUser();
+        List<CartItemResponse> empty = List.of();
+        when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
+        when(bookingService.clearCart(u)).thenReturn(empty);
+
+        assertSame(empty, controller().clear().data());
+        verify(bookingService).clearCart(u);
+    }
+
+    @Test
     void checkout_requiresParticipantRole_andWrapsSubmittedBookings() {
         UserEntity u = participantUser();
         List<BookingDetailResponse> submitted =

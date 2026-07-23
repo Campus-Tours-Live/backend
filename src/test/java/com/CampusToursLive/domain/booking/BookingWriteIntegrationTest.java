@@ -356,6 +356,10 @@ class BookingWriteIntegrationTest {
 
     /** A CONFIRMED 60-min booking for this test's guide/offering with the 15-min buffer. */
     private BookingEntity heldBooking(UUID participantUserId, Instant start) {
+        return bookingAt(participantUserId, BookingStatus.CONFIRMED, start);
+    }
+
+    private BookingEntity bookingAt(UUID participantUserId, BookingStatus status, Instant start) {
         BookingEntity b = new BookingEntity();
         b.setId(UUID.randomUUID());
         b.setBookingNumber("BK-IT" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
@@ -363,7 +367,7 @@ class BookingWriteIntegrationTest {
         b.setGuideId(guide.getId());
         b.setTourOfferingId(offering.getId());
         b.setUniversityId(offering.getUniversityId());
-        b.setStatus(BookingStatus.CONFIRMED);
+        b.setStatus(status);
         b.setAcceptanceModeSnap(AcceptanceMode.MANUAL);
         b.setScheduledStartAt(start);
         b.setScheduledEndAt(start.plus(60, ChronoUnit.MINUTES));
@@ -375,5 +379,28 @@ class BookingWriteIntegrationTest {
         b.setGuideAmountCents(5000L);
         b.setCurrency("USD");
         return b;
+    }
+
+    @Test
+    void findStaleDrafts_matchesPastStartDraftsOnly_againstRealPostgres() {
+        // CTL-91: the expiry-sweep query. A DRAFT whose start is in the past is stale; a future
+        // DRAFT is not; a past-start CONFIRMED booking is not a cart item and must be excluded.
+        UUID p = participant.getId();
+        BookingEntity pastDraft =
+                bookingAt(p, BookingStatus.DRAFT, Instant.now().minus(2, ChronoUnit.HOURS));
+        BookingEntity futureDraft =
+                bookingAt(p, BookingStatus.DRAFT, Instant.now().plus(2, ChronoUnit.DAYS));
+        BookingEntity pastConfirmed =
+                bookingAt(
+                        users.save(user("Other")).getId(),
+                        BookingStatus.CONFIRMED,
+                        Instant.now().minus(3, ChronoUnit.HOURS));
+        bookings.saveAllAndFlush(List.of(pastDraft, futureDraft, pastConfirmed));
+
+        Instant now = Instant.now();
+        List<BookingEntity> stale =
+                bookings.findStaleDrafts(BookingStatus.DRAFT, now, now.minus(Duration.ofDays(30)));
+
+        assertThat(stale).extracting(BookingEntity::getId).containsExactly(pastDraft.getId());
     }
 }

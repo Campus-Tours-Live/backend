@@ -1325,6 +1325,70 @@ class BookingServiceTest {
         verify(bookings, never()).delete(any());
     }
 
+    // ── clearCart / expireStaleCartItems (CTL-91) ──────────────────────────────
+
+    @Test
+    void clearCart_deletesAllDraftItems_returnsEmpty() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        List<BookingEntity> items =
+                List.of(
+                        draftItem(participant.getId(), futureStart(), 60),
+                        draftItem(participant.getId(), futureStart(), 60));
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(items);
+
+        assertTrue(service().clearCart(participant).isEmpty());
+        verify(bookings).deleteAll(items);
+    }
+
+    @Test
+    void clearCart_emptyCart_isNoOp() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of());
+
+        assertTrue(service().clearCart(participant).isEmpty());
+        verify(bookings, never()).deleteAll(any());
+    }
+
+    @Test
+    void expireStaleCartItems_marksStaleDraftsExpired_withSystemAuditRow() {
+        BookingEntity stale =
+                draftItem(UUID.randomUUID(), Instant.now().minus(1, ChronoUnit.HOURS), 60);
+        when(bookings.findStaleDrafts(
+                        eq(BookingStatus.DRAFT), any(Instant.class), any(Instant.class)))
+                .thenReturn(List.of(stale));
+
+        int expired = service().expireStaleCartItems();
+
+        assertEquals(1, expired);
+        assertEquals(BookingStatus.EXPIRED, stale.getStatus());
+        assertNotNull(stale.getCancelledAt());
+        verify(bookings).save(stale);
+
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory).save(audit.capture());
+        assertEquals(BookingStatus.DRAFT, audit.getValue().getPreviousStatus());
+        assertEquals(BookingStatus.EXPIRED, audit.getValue().getNewStatus());
+        assertEquals(BookingActor.SYSTEM, audit.getValue().getActorType());
+        assertNull(audit.getValue().getActorUserId());
+        assertEquals("CART_EXPIRED", audit.getValue().getReasonCode());
+    }
+
+    @Test
+    void expireStaleCartItems_noneStale_returnsZero_writesNothing() {
+        when(bookings.findStaleDrafts(
+                        eq(BookingStatus.DRAFT), any(Instant.class), any(Instant.class)))
+                .thenReturn(List.of());
+
+        assertEquals(0, service().expireStaleCartItems());
+        verify(bookings, never()).save(any());
+        verifyNoInteractions(statusHistory);
+    }
+
     // ── checkout ─────────────────────────────────────────────────────────────
 
     @Test
