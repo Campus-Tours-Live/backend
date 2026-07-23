@@ -1,9 +1,11 @@
 package com.CampusToursLive.web;
 
+import com.CampusToursLive.domain.guide.GuideEarningsService;
 import com.CampusToursLive.domain.guide.GuideService;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
+import com.CampusToursLive.web.dto.GuideDashboardStatsResponse;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.CampusToursLive.web.dto.Problem;
@@ -31,10 +33,15 @@ public class GuideController {
 
     private final CurrentUser currentUser;
     private final GuideService guideService;
+    private final GuideEarningsService guideEarningsService;
 
-    public GuideController(CurrentUser currentUser, GuideService guideService) {
+    public GuideController(
+            CurrentUser currentUser,
+            GuideService guideService,
+            GuideEarningsService guideEarningsService) {
         this.currentUser = currentUser;
         this.guideService = guideService;
+        this.guideEarningsService = guideEarningsService;
     }
 
     @Operation(
@@ -95,5 +102,39 @@ public class GuideController {
     public ApiEnvelope<GuideProfileResponse> updateProfile(
             @RequestBody GuideProfileUpdateRequest req) {
         return ApiEnvelope.of(guideService.updateProfile(currentUser.require(), req));
+    }
+
+    @Operation(
+            summary = "Get guide dashboard stats",
+            description =
+                    "Returns the guide's aggregate rating, this-month earnings, and upcoming payout"
+                            + " from confirmed tours — the three stats shown on the guide dashboard"
+                            + " summary row.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The guide's dashboard stats snapshot.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_DASHBOARD_STATS)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "The caller has not started guide onboarding.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @GetMapping("/dashboard/stats")
+    public ApiEnvelope<GuideDashboardStatsResponse> getDashboardStats() {
+        return ApiEnvelope.of(guideEarningsService.getStats(currentUser.require()));
     }
 }

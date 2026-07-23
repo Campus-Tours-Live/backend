@@ -114,6 +114,13 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String GUIDE_DASHBOARD_STATS =
+            "{\"data\":{\"avgRating\":4.5,\"reviewCount\":12,"
+                    + "\"earningsThisMonthCents\":8400,\"upcomingPayoutCents\":4200,"
+                    + "\"currency\":\"USD\"},"
+                    + META
+                    + "}";
+
     String GUIDE_PROFILE =
             "{\"data\":{\"userId\":\"11111111-0000-4000-8000-000000000001\","
                     + "\"firstName\":\"Maya\",\"lastName\":\"Chen\",\"displayName\":\"Maya Chen\","
