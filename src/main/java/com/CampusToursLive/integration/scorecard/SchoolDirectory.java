@@ -11,8 +11,11 @@ import java.util.List;
  */
 public interface SchoolDirectory {
 
-    /** Search schools by (partial) name → { value = school id, label = "Name — City, ST" }. */
-    List<Option> searchSchools(String query, int limit);
+    /**
+     * Search schools by (partial) name → { value = school id, label = "Name — City, ST" }. {@code
+     * page} is zero-based and maps to College Scorecard's {@code page} query param.
+     */
+    List<Option> searchSchools(String query, int limit, int page);
 
     /** The distinct majors (CIP-4 program titles) a school offers → { value = label = title }. */
     List<Option> majorsForSchool(String schoolId);

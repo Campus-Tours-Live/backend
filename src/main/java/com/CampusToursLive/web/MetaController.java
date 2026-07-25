@@ -6,6 +6,7 @@ import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -146,8 +147,10 @@ public class MetaController {
             summary = "Search universities (live)",
             description =
                     "Typeahead search over every U.S. institution via the College Scorecard API, as"
-                            + " { value = school id, label = 'Name — City, ST' }. Backs the guide"
-                            + " onboarding university picker; the chosen school is upserted on submit.")
+                            + " { value = school id, label = 'Name — City, ST' }. Supports page/limit"
+                            + " for incremental typeahead loading. Backs the guide onboarding"
+                            + " university picker and the home header search; the chosen school is"
+                            + " upserted on guide-profile submit.")
     @ApiResponse(
             responseCode = "200",
             description = "Matching universities (live Scorecard search).",
@@ -156,8 +159,15 @@ public class MetaController {
                             mediaType = "application/json",
                             examples = @ExampleObject(value = ApiExamples.UNIVERSITIES_LIVE)))
     @GetMapping("/universities")
-    public ApiEnvelope<List<Option>> universities(@RequestParam("q") String q) {
-        return ApiEnvelope.of(schools.searchSchools(q, 20));
+    public ApiEnvelope<List<Option>> universities(
+            @Parameter(description = "Free-text school name search.") @RequestParam("q") String q,
+            @Parameter(description = "Max rows per page (clamped 1–50).")
+                    @RequestParam(name = "limit", required = false, defaultValue = "20")
+                    int limit,
+            @Parameter(description = "Zero-based page index (College Scorecard page).")
+                    @RequestParam(name = "page", required = false, defaultValue = "0")
+                    int page) {
+        return ApiEnvelope.of(schools.searchSchools(q, limit, Math.max(page, 0)));
     }
 
     @Operation(

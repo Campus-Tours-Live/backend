@@ -57,23 +57,23 @@ class ScorecardClientCacheTest {
 
     @Test
     void secondIdenticalSearchIsServedFromCache_outboundCallHappensOnce() {
-        given(api.searchSchools("stanford", 5)).willReturn(HITS);
+        given(api.searchSchools("stanford", 5, 0)).willReturn(HITS);
 
-        assertThat(client.searchSchools("stanford", 5)).isEqualTo(HITS);
-        assertThat(client.searchSchools("stanford", 5)).isEqualTo(HITS);
+        assertThat(client.searchSchools("stanford", 5, 0)).isEqualTo(HITS);
+        assertThat(client.searchSchools("stanford", 5, 0)).isEqualTo(HITS);
 
-        verify(api, times(1)).searchSchools("stanford", 5);
+        verify(api, times(1)).searchSchools("stanford", 5, 0);
     }
 
     @Test
     void cacheKeyNormalisesCaseAndSurroundingWhitespace() {
-        given(api.searchSchools(anyString(), anyInt())).willReturn(HITS);
+        given(api.searchSchools(anyString(), anyInt(), anyInt())).willReturn(HITS);
 
-        client.searchSchools("Stanford", 5);
-        client.searchSchools("  stanford  ", 5);
-        client.searchSchools("STANFORD", 5);
+        client.searchSchools("Stanford", 5, 0);
+        client.searchSchools("  stanford  ", 5, 0);
+        client.searchSchools("STANFORD", 5, 0);
 
-        verify(api, times(1)).searchSchools(anyString(), anyInt());
+        verify(api, times(1)).searchSchools(anyString(), anyInt(), anyInt());
     }
 
     /**
@@ -82,13 +82,24 @@ class ScorecardClientCacheTest {
      */
     @Test
     void differentLimitForSameQueryDoesNotCollide() {
-        given(api.searchSchools(anyString(), anyInt())).willReturn(HITS);
+        given(api.searchSchools(anyString(), anyInt(), anyInt())).willReturn(HITS);
 
-        client.searchSchools("stanford", 5);
-        client.searchSchools("stanford", 10);
+        client.searchSchools("stanford", 5, 0);
+        client.searchSchools("stanford", 10, 0);
 
-        verify(api, times(1)).searchSchools("stanford", 5);
-        verify(api, times(1)).searchSchools("stanford", 10);
+        verify(api, times(1)).searchSchools("stanford", 5, 0);
+        verify(api, times(1)).searchSchools("stanford", 10, 0);
+    }
+
+    @Test
+    void differentPageForSameQueryDoesNotCollide() {
+        given(api.searchSchools(anyString(), anyInt(), anyInt())).willReturn(HITS);
+
+        client.searchSchools("stanford", 8, 0);
+        client.searchSchools("stanford", 8, 1);
+
+        verify(api, times(1)).searchSchools("stanford", 8, 0);
+        verify(api, times(1)).searchSchools("stanford", 8, 1);
     }
 
     /**
@@ -97,12 +108,12 @@ class ScorecardClientCacheTest {
      */
     @Test
     void emptyResultIsNotCached_soARecoveredUpstreamIsRetried() {
-        given(api.searchSchools("obscure", 5)).willReturn(List.of());
+        given(api.searchSchools("obscure", 5, 0)).willReturn(List.of());
 
-        assertThat(client.searchSchools("obscure", 5)).isEmpty();
-        assertThat(client.searchSchools("obscure", 5)).isEmpty();
+        assertThat(client.searchSchools("obscure", 5, 0)).isEmpty();
+        assertThat(client.searchSchools("obscure", 5, 0)).isEmpty();
 
-        verify(api, times(2)).searchSchools("obscure", 5);
+        verify(api, times(2)).searchSchools("obscure", 5, 0);
     }
 
     /**
@@ -112,10 +123,10 @@ class ScorecardClientCacheTest {
      */
     @Test
     void nullOrBlankQueryShortCircuitsWithoutNpeAndWithoutOutboundCall() {
-        assertThat(client.searchSchools(null, 5)).isEmpty();
-        assertThat(client.searchSchools("   ", 5)).isEmpty();
+        assertThat(client.searchSchools(null, 5, 0)).isEmpty();
+        assertThat(client.searchSchools("   ", 5, 0)).isEmpty();
 
-        verify(api, never()).searchSchools(any(), anyInt());
+        verify(api, never()).searchSchools(any(), anyInt(), anyInt());
     }
 
     // --- majorsForSchool --------------------------------------------------------------------

@@ -23,8 +23,8 @@ class MetaControllerTest {
     private static final SchoolDirectory SCHOOLS =
             new SchoolDirectory() {
                 @Override
-                public List<Option> searchSchools(String query, int limit) {
-                    return List.of(new Option("243744", "Stanford University — Stanford, CA"));
+                public List<Option> searchSchools(String query, int limit, int page) {
+                    return List.of(new Option("243744", "Stanford University ? Stanford, CA"));
                 }
 
                 @Override
@@ -89,7 +89,7 @@ class MetaControllerTest {
 
     @Test
     void universities_delegatesToTheLiveDirectory() {
-        List<Option> results = new MetaController(SCHOOLS).universities("stanford").data();
+        List<Option> results = new MetaController(SCHOOLS).universities("stanford", 20, 0).data();
         assertEquals(1, results.size());
         assertEquals("243744", results.get(0).value());
         assertTrue(results.get(0).label().startsWith("Stanford"));

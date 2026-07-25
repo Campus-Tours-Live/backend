@@ -71,9 +71,10 @@ public class ScorecardApi {
 
     /** Search schools by (partial) name. Empty list on blank key/query or any failure. */
     @RateLimiter(name = "scorecard", fallbackMethod = "searchSchoolsRateLimited")
-    public List<Option> searchSchools(String query, int limit) {
+    public List<Option> searchSchools(String query, int limit, int page) {
         if (apiKey.isBlank() || query == null || query.isBlank()) return List.of();
         int perPage = Math.min(Math.max(limit, 1), 50);
+        int safePage = Math.max(page, 0);
         try {
             JsonNode root =
                     http.get()
@@ -85,6 +86,7 @@ public class ScorecardApi {
                                                             "fields",
                                                             "id,school.name,school.city,school.state")
                                                     .queryParam("per_page", perPage)
+                                                    .queryParam("page", safePage)
                                                     .queryParam("api_key", apiKey)
                                                     .build())
                             .retrieve()
@@ -184,7 +186,7 @@ public class ScorecardApi {
     // upstream exception, so RequestNotPermittedException is effectively the only way in here.
     // Each returns the exact degraded value the caller already handles, and never throws.
 
-    List<Option> searchSchoolsRateLimited(String query, int limit, Throwable t) {
+    List<Option> searchSchoolsRateLimited(String query, int limit, int page, Throwable t) {
         log.warn("Scorecard outbound rate limit hit; degrading school search: {}", t.toString());
         return List.of();
     }

@@ -78,12 +78,12 @@ class ScorecardApiRateLimiterTest {
                             ScorecardApi api = context.getBean(ScorecardApi.class);
 
                             // First call gets the only permit and really goes out.
-                            assertThat(api.searchSchools("stanford", 5)).hasSize(1);
+                            assertThat(api.searchSchools("stanford", 5, 0)).hasSize(1);
                             assertThat(calls.get()).isEqualTo(1);
 
                             // Second call has no permit: fallback, no throw, and — the point of
                             // Layer 2 — no outbound request against the shared API key.
-                            assertThat(api.searchSchools("berkeley", 5)).isEmpty();
+                            assertThat(api.searchSchools("berkeley", 5, 0)).isEmpty();
                             assertThat(calls.get()).isEqualTo(1);
                         });
     }

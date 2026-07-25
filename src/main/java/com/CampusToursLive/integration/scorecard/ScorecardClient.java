@@ -45,19 +45,21 @@ public class ScorecardClient implements SchoolDirectory {
      * Cached for 30 minutes. The cache key is evaluated by the interceptor <em>before</em> the
      * method body runs, so it must null-short-circuit on its own or a null query would NPE inside
      * SpEL. The query is normalised (strip + lowercase) so trivially different spellings share an
-     * entry, and {@code limit} is part of the key — the same query at a different limit is a
-     * different result set and must not collide. {@code unless} keeps empty results out of the
-     * cache: this class degrades failures to {@code List.of()}, and caching a swallowed failure
-     * would pin an outage in memory for 30 minutes.
+     * entry, and {@code limit} + {@code page} are part of the key — the same query at a different
+     * page/limit is a different result set and must not collide. {@code unless} keeps empty results
+     * out of the cache: this class degrades failures to {@code List.of()}, and caching a swallowed
+     * failure would pin an outage in memory for 30 minutes.
      */
     @Override
     @Cacheable(
             cacheNames = "scorecardUniversities",
-            key = "(#query == null ? '' : #query.strip().toLowerCase()) + '|' + #limit",
+            key =
+                    "(#query == null ? '' : #query.strip().toLowerCase()) + '|' + #limit + '|' +"
+                            + " #page",
             unless = "#result.isEmpty()")
-    public List<Option> searchSchools(String query, int limit) {
+    public List<Option> searchSchools(String query, int limit, int page) {
         if (query == null || query.isBlank()) return List.of();
-        return api.searchSchools(query, limit);
+        return api.searchSchools(query, limit, Math.max(page, 0));
     }
 
     /**

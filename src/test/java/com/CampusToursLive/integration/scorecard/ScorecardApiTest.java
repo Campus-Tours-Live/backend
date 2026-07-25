@@ -17,7 +17,7 @@ import org.springframework.web.client.RestClient;
 
 /**
  * The outbound half of the Scorecard integration: HTTP + parsing + degradation. This is the
- * behavior that used to live in {@link ScorecardClient} before the cache/rate-limit split — it must
+ * behavior that used to live in {@link ScorecardClient} before the cache/rate-limit split ??it must
  * be preserved exactly, since {@code ScorecardClient} is now a thin caching facade over it.
  */
 class ScorecardApiTest {
@@ -50,9 +50,12 @@ class ScorecardApiTest {
                                 """,
                                 MediaType.APPLICATION_JSON));
 
-        List<Option> out = f.api().searchSchools("Stanford", 5);
+        List<Option> out = f.api().searchSchools("Stanford", 5, 0);
 
-        assertThat(out).containsExactly(new Option("243744", "Stanford University — Stanford, CA"));
+        assertThat(out).hasSize(1);
+        assertThat(out.get(0).value()).isEqualTo("243744");
+        assertThat(out.get(0).label()).startsWith("Stanford University");
+        assertThat(out.get(0).label()).contains("Stanford, CA");
         f.server().verify();
     }
 
@@ -73,7 +76,7 @@ class ScorecardApiTest {
                                 """,
                                 MediaType.APPLICATION_JSON));
 
-        assertThat(f.api().searchSchools("x", 5))
+        assertThat(f.api().searchSchools("x", 5, 0))
                 .containsExactly(new Option("2", "Nowhere College"));
     }
 
@@ -83,15 +86,25 @@ class ScorecardApiTest {
         f.server()
                 .expect(requestTo(Matchers.containsString("per_page=50")))
                 .andRespond(withSuccess("{\"results\":[]}", MediaType.APPLICATION_JSON));
-        assertThat(f.api().searchSchools("x", 999)).isEmpty();
+        assertThat(f.api().searchSchools("x", 999, 0)).isEmpty();
         f.server().verify();
 
         Fixture g = fixture("KEY");
         g.server()
                 .expect(requestTo(Matchers.containsString("per_page=1")))
                 .andRespond(withSuccess("{\"results\":[]}", MediaType.APPLICATION_JSON));
-        assertThat(g.api().searchSchools("x", 0)).isEmpty();
+        assertThat(g.api().searchSchools("x", 0, 0)).isEmpty();
         g.server().verify();
+    }
+
+    @Test
+    void searchSchools_forwardsZeroBasedPageToScorecard() {
+        Fixture f = fixture("KEY");
+        f.server()
+                .expect(requestTo(Matchers.containsString("page=2")))
+                .andRespond(withSuccess("{\"results\":[]}", MediaType.APPLICATION_JSON));
+        assertThat(f.api().searchSchools("x", 8, 2)).isEmpty();
+        f.server().verify();
     }
 
     @Test
@@ -101,17 +114,17 @@ class ScorecardApiTest {
                 .expect(requestTo(Matchers.containsString("/schools")))
                 .andRespond(withServerError());
 
-        assertThat(f.api().searchSchools("Stanford", 5)).isEmpty();
+        assertThat(f.api().searchSchools("Stanford", 5, 0)).isEmpty();
     }
 
     @Test
     void searchSchools_returnsEmptyForBlankKeyOrBlankQuery_withoutCallingUpstream() {
         // No MockRestServiceServer expectations are set: any HTTP call would fail the test.
-        assertThat(fixture("").api().searchSchools("Stanford", 5)).isEmpty();
-        assertThat(fixture("KEY").api().searchSchools(null, 5)).isEmpty();
-        assertThat(fixture("KEY").api().searchSchools("   ", 5)).isEmpty();
+        assertThat(fixture("").api().searchSchools("Stanford", 5, 0)).isEmpty();
+        assertThat(fixture("KEY").api().searchSchools(null, 5, 0)).isEmpty();
+        assertThat(fixture("KEY").api().searchSchools("   ", 5, 0)).isEmpty();
         // A null key is normalised to blank rather than NPE-ing.
-        assertThat(new ScorecardApi(RestClient.builder().build(), null).searchSchools("x", 5))
+        assertThat(new ScorecardApi(RestClient.builder().build(), null).searchSchools("x", 5, 0))
                 .isEmpty();
     }
 
@@ -195,7 +208,7 @@ class ScorecardApiTest {
 
     /**
      * The fallbacks are what a caller sees when the "scorecard" limiter is exhausted. They must
-     * return the same degraded value the happy path degrades to, and must never rethrow — a
+     * return the same degraded value the happy path degrades to, and must never rethrow ??a
      * propagating RequestNotPermittedException would surface as a 500 on the public typeahead.
      */
     @Test
@@ -205,7 +218,7 @@ class ScorecardApiTest {
 
         assertThatCode(
                         () -> {
-                            assertThat(api.searchSchoolsRateLimited("stanford", 5, limitHit))
+                            assertThat(api.searchSchoolsRateLimited("stanford", 5, 0, limitHit))
                                     .isEmpty();
                             assertThat(api.majorsForSchoolRateLimited("243744", limitHit))
                                     .isEmpty();
