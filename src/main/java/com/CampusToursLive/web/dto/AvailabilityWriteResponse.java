@@ -18,9 +18,8 @@ import java.util.List;
  * the write endpoint already returned (e.g. {@code AvailabilityRuleResponse}, or the remaining-list
  * on delete) — {@code affectedBookings} is a NEW sibling field, not a rewrap of {@code data}, so
  * any existing consumer reading {@code $.data.*} is unaffected; a consumer that also wants the
- * warning reads the new {@code $.affectedBookings} array (CTL-54 Task 7, "(A) allow + notify" — the
- * write always succeeds and the flagged booking is never mutated, this is advisory-only for the
- * guide UI).
+ * warning reads the new {@code $.affectedBookings} array allow + notify" — the write always
+ * succeeds and the flagged booking is never mutated, this is advisory-only for the guide UI).
  */
 @Schema(
         name = "AvailabilityWriteResponse",

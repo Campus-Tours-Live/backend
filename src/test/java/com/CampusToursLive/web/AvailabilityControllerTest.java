@@ -97,7 +97,7 @@ class AvailabilityControllerTest {
     }
 
     // ---------------------------------------------------------------------
-    // Resolved availability (CTL-54 Task 5b).
+    // Resolved availability.
     // ---------------------------------------------------------------------
 
     @Test
@@ -197,7 +197,7 @@ class AvailabilityControllerTest {
     }
 
     // ---------------------------------------------------------------------
-    // Date-specific override dry-run preview (CTL-54 v2.1 Task 4).
+    // Date-specific override dry-run preview.
     // ---------------------------------------------------------------------
 
     @Test
@@ -633,7 +633,7 @@ class AvailabilityControllerTest {
     }
 
     // ---------------------------------------------------------------------
-    // Override replace (CTL-54 v2.1 remediation B2).
+    // Override replace.
     // ---------------------------------------------------------------------
 
     @Test
@@ -697,7 +697,7 @@ class AvailabilityControllerTest {
     }
 
     // ---------------------------------------------------------------------
-    // Rules replace (CTL-54 v2.1 remediation B2, Task 5).
+    // Rules replace.
     // ---------------------------------------------------------------------
 
     @Test

@@ -756,7 +756,7 @@ class BookingServiceTest {
                                                 ctx.offeringId().toString(), tooFar, null)));
     }
 
-    // ── createBooking: guide-configured notice/advance/buffers (CTL-54 design-gap fix) ─────────
+    // ── createBooking: guide-configured notice/advance/buffers ─────────
 
     @Test
     void createBooking_customMaxAdvanceDays_acceptsBookingBeyondDefaultThirtyDayLimit() {
@@ -1354,9 +1354,8 @@ class BookingServiceTest {
         assertEquals(9000L, resp.get(0).priceCents());
     }
 
-    // ── checkout: guide-configured notice/advance/buffers (CTL-54 design-gap fix — parity with
-    // buildDraftBooking / createBooking, since the guide's settings can tighten OR loosen while an
-    // item sits in the cart) ─────────────────────────────────────────────────────────────────
+    // ── checkout: guide-configured notice/advance/buffers
+    // ─────────────────────────────────────────────────────────────────
 
     @Test
     void checkout_customMinNoticeMin_rejectsItemInsideGuidesStricterWindow() {
@@ -1574,7 +1573,7 @@ class BookingServiceTest {
         u.setStatus(UniversityStatus.ACTIVE);
         when(universities.findById(universityId)).thenReturn(Optional.of(u));
 
-        // Default: the scheduled interval IS covered by availability (CTL-54 Task 6) — lenient
+        // Default: the scheduled interval IS covered by availability — lenient
         // because several tests fail earlier (own-tour, blank/malformed start, notice/advance
         // window) and never reach this check.
         lenient()
@@ -1667,7 +1666,7 @@ class BookingServiceTest {
             UniversityEntity u = university(b.getUniversityId(), "Test University");
             u.setStatus(UniversityStatus.ACTIVE);
             when(universities.findById(b.getUniversityId())).thenReturn(Optional.of(u));
-            // Default: still within availability at checkout re-validation time (CTL-54 Task 6) —
+            // Default: still within availability at checkout re-validation time —
             // lenient because some tests reject the item earlier (stale/notice-window, offering no
             // longer ACTIVE) and never reach this re-check.
             lenient()

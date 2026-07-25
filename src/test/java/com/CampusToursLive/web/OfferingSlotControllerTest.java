@@ -25,11 +25,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * Web-layer slice test for {@link OfferingSlotController} (CTL-54 Task 8): real routing, the {data,
- * meta} envelope, and that domain exceptions map to RFC 7807 problem+json via {@code
- * GlobalExceptionHandler}. Mirrors {@code AvailabilityControllerTest}: {@link
- * SlotGenerationService} is mocked, so this test only exercises the controller/role/HTTP-status
- * wiring, never real slicing/subtraction (covered by {@code SlotGenerationServiceIntegrationTest}).
+ * Web-layer slice test for {@link OfferingSlotController}: real routing, the {data, meta} envelope,
+ * and that domain exceptions map to RFC 7807 problem+json via {@code GlobalExceptionHandler}.
+ * Mirrors {@code AvailabilityControllerTest}: {@link SlotGenerationService} is mocked, so this test
+ * only exercises the controller/role/HTTP-status wiring, never real slicing/subtraction (covered by
+ * {@code SlotGenerationServiceIntegrationTest}).
  */
 @WebMvcTest(
         controllers = OfferingSlotController.class,

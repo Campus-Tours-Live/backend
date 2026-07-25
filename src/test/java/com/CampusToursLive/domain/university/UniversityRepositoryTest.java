@@ -50,7 +50,11 @@ class UniversityRepositoryTest {
 
     @Test
     void search_isCaseInsensitive_onShortName() {
-        assertThat(universities.search("mit", PageRequest.of(0, 10)))
-                .anySatisfy(u -> assertThat(u.getShortName()).isEqualTo("MIT"));
+        // Lowercase query matches the capitalized seeded short name → case-insensitive on
+        // short_name.
+        // (Uses "Berkeley", which the V2 seed still contains — the old "MIT" fixture was removed in
+        // 6b5aad7.)
+        assertThat(universities.search("berkeley", PageRequest.of(0, 10)))
+                .anySatisfy(u -> assertThat(u.getShortName()).isEqualTo("Berkeley"));
     }
 }

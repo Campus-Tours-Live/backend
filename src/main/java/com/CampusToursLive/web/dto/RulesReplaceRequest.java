@@ -5,11 +5,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
- * Request body for {@code POST /availability/rules/replace} (CTL-54 v2.1 remediation B2): an ATOMIC
- * replace of ONE weekday's recurring availability rules. The guide's existing ACTIVE rules for
- * {@code dayOfWeek} are dropped and replaced by exactly {@code windows} in one transaction; other
- * weekdays' rules are left untouched. An EMPTY {@code windows} list is allowed and means "clear
- * this weekday's rules".
+ * Request body for {@code POST /availability/rules/replace}: an ATOMIC replace of ONE weekday's
+ * recurring availability rules. The guide's existing ACTIVE rules for {@code dayOfWeek} are dropped
+ * and replaced by exactly {@code windows} in one transaction; other weekdays' rules are left
+ * untouched. An EMPTY {@code windows} list is allowed and means "clear this weekday's rules".
  *
  * <p>The weekly counterpart to {@link OverrideReplaceRequest} (which replaces a single date's
  * exceptions): this carries a {@code dayOfWeek} (0=Sunday .. 6=Saturday) plus a {@code windows}

@@ -1,6 +1,7 @@
 package com.CampusToursLive.domain.university;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -8,6 +9,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface UniversityRepository extends JpaRepository<UniversityEntity, UUID> {
+
+    /** Look up a university by its stable slug (used to dedupe live-directory upserts). */
+    Optional<UniversityEntity> findBySlug(String slug);
 
     /**
      * Active-only catalog search by name / short name (case-insensitive). Empty q → all (paged).

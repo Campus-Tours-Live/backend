@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.CampusToursLive.domain.participant.ParticipantProfileEntity;
 import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
 import com.CampusToursLive.domain.participant.ParticipantType;
+import com.CampusToursLive.domain.university.CampusImageUrls;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.user.RoleGrantService;
@@ -20,6 +21,7 @@ import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -29,6 +31,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -47,6 +50,8 @@ class GuideServiceTest {
     @Mock ParticipantProfileRepository participants;
     @Mock UserRepository users;
     @Mock RoleGrantService roleGrant;
+    @Mock SchoolDirectory schools;
+    private final CampusImageUrls campusImages = new CampusImageUrls("https://r2.example/");
 
     private GuideService service() {
         return new GuideService(
@@ -56,6 +61,8 @@ class GuideServiceTest {
                 participants,
                 users,
                 roleGrant,
+                schools,
+                campusImages,
                 new ObjectMapper());
     }
 
@@ -115,6 +122,52 @@ class GuideServiceTest {
                                                 user(UUID.randomUUID()),
                                                 req("not-a-uuid", "CS", null, null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
+    }
+
+    @Test
+    void update_upsertsLiveDirectorySchool_whenUniversityIdIsNotLocalUuid() {
+        UUID uid = UUID.randomUUID();
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(universities.findBySlug("sc-243744")).thenReturn(Optional.empty());
+        when(schools.getSchool("243744"))
+                .thenReturn(
+                        new SchoolDirectory.SchoolRef(
+                                "243744", "Stanford University", "Stanford", "CA"));
+        when(universities.save(org.mockito.ArgumentMatchers.any(UniversityEntity.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(
+                () ->
+                        service()
+                                .updateProfile(
+                                        user(uid), req("243744", "CS", null, null, null, false)));
+
+        ArgumentCaptor<UniversityEntity> saved = ArgumentCaptor.forClass(UniversityEntity.class);
+        verify(universities).save(saved.capture());
+        assertEquals("sc-243744", saved.getValue().getSlug());
+        assertEquals("Stanford University", saved.getValue().getName());
+        assertEquals("America/Los_Angeles", saved.getValue().getTimezone()); // CA → Pacific
+    }
+
+    @Test
+    void upsertFromDirectory_setsDerivedImageUrl() {
+        when(universities.findBySlug("sc-166027")).thenReturn(Optional.empty());
+        when(schools.getSchool("166027"))
+                .thenReturn(
+                        new SchoolDirectory.SchoolRef(
+                                "166027", "Harvard University", "Cambridge", "MA"));
+        ArgumentCaptor<UniversityEntity> saved = ArgumentCaptor.forClass(UniversityEntity.class);
+        when(universities.save(saved.capture())).thenAnswer(i -> i.getArgument(0));
+
+        service().resolveUniversityForTest("166027");
+
+        // BOTH image_url write paths must produce the same URL for the same campus.
+        // This is the CREATE path (a university first seen via Scorecard). The BACKFILL path is
+        // TourOfferingServiceTest#backfillsCampusImageOnFirstOffering (search:
+        // Harvard%20University),
+        // which asserts this identical value. They agree because both go through
+        // CampusImageUrls#forName with that university's name -- keep the two expectations in step.
+        assertEquals("https://r2.example/Harvard%20University.png", saved.getValue().getImageUrl());
     }
 
     @Test
@@ -728,6 +781,8 @@ class GuideServiceTest {
                         participants,
                         users,
                         roleGrant,
+                        schools,
+                        campusImages,
                         badMapper);
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
@@ -767,6 +822,8 @@ class GuideServiceTest {
                         participants,
                         users,
                         roleGrant,
+                        schools,
+                        campusImages,
                         badMapper);
         GuideProfileEntity profile = new GuideProfileEntity();
         profile.setLanguages("[\"en-US\"]"); // non-blank → readValue invoked → throws → []

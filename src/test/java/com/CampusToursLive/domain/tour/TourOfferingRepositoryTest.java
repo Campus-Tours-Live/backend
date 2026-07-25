@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -104,15 +105,53 @@ class TourOfferingRepositoryTest {
 
     @Test
     void findDiscoverable_succeedsWithNullOptionalFilters() {
-        assertThat(offerings.findDiscoverable(null, null, "", PageRequest.of(0, 20))).isNotNull();
+        assertThat(
+                        offerings.findDiscoverable(
+                                null,
+                                false,
+                                List.of(TourTopic.values()[0]),
+                                "",
+                                PageRequest.of(0, 20)))
+                .isNotNull();
     }
 
     @Test
     void findDiscoverable_excludesNonVisibleOfferings() {
         List<TourOfferingEntity> results =
-                offerings.findDiscoverable(null, null, searchMarker, PageRequest.of(0, 20));
+                offerings
+                        .findDiscoverable(
+                                null,
+                                false,
+                                List.of(TourTopic.values()[0]),
+                                searchMarker,
+                                PageRequest.of(0, 20))
+                        .getContent();
 
         assertThat(results).extracting(TourOfferingEntity::getId).containsExactly(discoverableId);
+    }
+
+    /**
+     * The count query and the list query must agree.
+     *
+     * <p>They are one @Query with the FROM/WHERE written twice, so a filter edited on one side and
+     * not the other silently desynchronises them: the page reports a total the results cannot
+     * account for, and pagination shows empty or unreachable pages. This pins the invariant against
+     * a filter that actually excludes rows, so the two clauses have something to disagree about.
+     */
+    @Test
+    void findDiscoverable_totalMatchesTheRowsItReturns() {
+        Page<TourOfferingEntity> page =
+                offerings.findDiscoverable(
+                        null,
+                        false,
+                        List.of(TourTopic.values()[0]),
+                        searchMarker,
+                        PageRequest.of(0, 20));
+
+        assertThat(page.getTotalElements()).isEqualTo(page.getContent().size());
+        assertThat(page.getContent())
+                .extracting(TourOfferingEntity::getId)
+                .containsExactly(discoverableId);
     }
 
     @Test
@@ -144,7 +183,15 @@ class TourOfferingRepositoryTest {
         entityManager.flush();
         entityManager.clear();
 
-        assertThat(offerings.findDiscoverable(null, null, token, PageRequest.of(0, 20)))
+        assertThat(
+                        offerings
+                                .findDiscoverable(
+                                        null,
+                                        false,
+                                        List.of(TourTopic.values()[0]),
+                                        token,
+                                        PageRequest.of(0, 20))
+                                .getContent())
                 .extracting(TourOfferingEntity::getId)
                 .containsExactly(id);
     }
@@ -166,7 +213,15 @@ class TourOfferingRepositoryTest {
         entityManager.flush();
         entityManager.clear();
 
-        assertThat(offerings.findDiscoverable(null, null, token, PageRequest.of(0, 20)))
+        assertThat(
+                        offerings
+                                .findDiscoverable(
+                                        null,
+                                        false,
+                                        List.of(TourTopic.values()[0]),
+                                        token,
+                                        PageRequest.of(0, 20))
+                                .getContent())
                 .extracting(TourOfferingEntity::getId)
                 .containsExactly(id);
     }
@@ -210,7 +265,11 @@ class TourOfferingRepositoryTest {
 
         assertThat(
                         offerings.findDiscoverable(
-                                targetUni, TourTopic.DORM_HOUSING, token, PageRequest.of(0, 20)))
+                                targetUni,
+                                true,
+                                List.of(TourTopic.DORM_HOUSING),
+                                token,
+                                PageRequest.of(0, 20)))
                 .extracting(TourOfferingEntity::getId)
                 .containsExactly(match);
     }
@@ -218,7 +277,16 @@ class TourOfferingRepositoryTest {
     @Test
     void findDiscoverable_excludesRowsNotMatchingQuery() {
         String absent = "absent-" + UUID.randomUUID().toString().substring(0, 8);
-        assertThat(offerings.findDiscoverable(null, null, absent, PageRequest.of(0, 20))).isEmpty();
+        assertThat(
+                        offerings
+                                .findDiscoverable(
+                                        null,
+                                        false,
+                                        List.of(TourTopic.values()[0]),
+                                        absent,
+                                        PageRequest.of(0, 20))
+                                .getContent())
+                .isEmpty();
     }
 
     @Test
@@ -237,7 +305,15 @@ class TourOfferingRepositoryTest {
         entityManager.clear();
 
         // Escaped "%" ("!%") matches a literal "%" via `escape '!'`; the title contains "50%".
-        assertThat(offerings.findDiscoverable(null, null, "50!%", PageRequest.of(0, 20)))
+        assertThat(
+                        offerings
+                                .findDiscoverable(
+                                        null,
+                                        false,
+                                        List.of(TourTopic.values()[0]),
+                                        "50!%",
+                                        PageRequest.of(0, 20))
+                                .getContent())
                 .extracting(TourOfferingEntity::getId)
                 .contains(id);
     }

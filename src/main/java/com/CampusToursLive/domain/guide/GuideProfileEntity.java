@@ -40,6 +40,14 @@ public class GuideProfileEntity {
     @Column(name = "class_year")
     private String classYear;
 
+    /** Degree level shown on the public tour card, e.g. "BS" | "MS" | "PhD". Nullable. */
+    @Column(name = "degree")
+    private String degree;
+
+    /** Year the guide entered the university, e.g. 2023. Nullable. */
+    @Column(name = "entry_year")
+    private Integer entryYear;
+
     @Column(name = "bio")
     private String bio;
 

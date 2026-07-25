@@ -38,11 +38,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Guide-facing availability WRITE API (CTL-54 Task 5): create/update/delete rules and exceptions,
- * plus read/update booking settings. This is deliberately a SEPARATE service from {@link
- * AvailabilityService} (which owns the pure "recompute + wholesale-replace occurrences" persistence
- * step, Task 3) — this class owns CRUD + validation + the guide-id / IDOR resolution, and calls
- * {@link AvailabilityService#rematerialize(UUID)} at the end of every write so the materialized
+ * Guide-facing availability WRITE API: create/update/delete rules and exceptions, plus read/update
+ * booking settings. This is deliberately a SEPARATE service from {@link AvailabilityService} (which
+ * owns the pure "recompute + wholesale-replace occurrences" persistence step, Task 3) — this class
+ * owns CRUD + validation + the guide-id / IDOR resolution, and calls {@link
+ * AvailabilityService#rematerialize(UUID)} at the end of every write so the materialized
  * occurrences never lag the rules/exceptions/settings the guide just edited.
  *
  * <p><b>guideId</b> here is always {@code guide_profiles.id} (looked up from the authenticated
@@ -267,10 +267,10 @@ public class AvailabilityWriteService {
     }
 
     /**
-     * Creates a date-specific override (CTL-54 v2.1 Task 3): either a single {@code exceptionDate}
-     * or a {@code dateFrom}/{@code dateTo} multi-day range, applied per-date. Every date's stored
-     * same-date exceptions end up NON-OVERLAPPING (newest-wins trim/replace, symmetric across
-     * {@code UNAVAILABLE}/{@code ADDITIONAL}) — see {@link #computeTrimmedSet}.
+     * Creates a date-specific override: either a single {@code exceptionDate} or a {@code
+     * dateFrom}/{@code dateTo} multi-day range, applied per-date. Every date's stored same-date
+     * exceptions end up NON-OVERLAPPING (newest-wins trim/replace, symmetric across {@code
+     * UNAVAILABLE}/{@code ADDITIONAL}) — see {@link #computeTrimmedSet}.
      *
      * <p><b>Auto-flush safety.</b> {@link #requireOverrideValid} runs, and every date's trim PLAN
      * is computed (read-only — no delete/insert), BEFORE any date's plan is applied. This class has
@@ -319,11 +319,11 @@ public class AvailabilityWriteService {
     }
 
     /**
-     * Edits an existing exception's time/kind/date (CTL-54 v2.1 Task 3): the old row is deleted and
-     * the new override re-applied via the SAME {@link #computeTrimmedSet} trim used by {@link
-     * #createException}, trimming overlapping SIBLINGS on the (possibly new) date while
-     * SELF-EXCLUDING the edited row (it never trims against its own new span). Single-date only —
-     * multi-day only applies to create.
+     * Edits an existing exception's time/kind/date: the old row is deleted and the new override
+     * re-applied via the SAME {@link #computeTrimmedSet} trim used by {@link #createException},
+     * trimming overlapping SIBLINGS on the (possibly new) date while SELF-EXCLUDING the edited row
+     * (it never trims against its own new span). Single-date only — multi-day only applies to
+     * create.
      */
     @Transactional
     public AvailabilityExceptionResponse updateException(
@@ -371,11 +371,11 @@ public class AvailabilityWriteService {
     }
 
     /**
-     * ATOMIC single-day override replace (CTL-54 v2.1 remediation B2): replaces the guide's
-     * same-{@code kind} exceptions on {@code date} with exactly {@code windows}, in ONE transaction
-     * under the per-guide advisory lock. An EMPTY {@code windows} list is allowed and CLEARS that
-     * kind for the day; other-kind exceptions on the date are preserved (trimmed only where a new
-     * window overlaps them, newest-wins). Returns the date's resulting stored exceptions.
+     * ATOMIC single-day override replace: replaces the guide's same-{@code kind} exceptions on
+     * {@code date} with exactly {@code windows}, in ONE transaction under the per-guide advisory
+     * lock. An EMPTY {@code windows} list is allowed and CLEARS that kind for the day; other-kind
+     * exceptions on the date are preserved (trimmed only where a new window overlaps them,
+     * newest-wins). Returns the date's resulting stored exceptions.
      *
      * <p><b>Entry guard BEFORE any mutation (B2 data-loss guard).</b> The date range guard ({@link
      * #requireOverrideRange}) and every present window's same-day guard ({@link
@@ -425,7 +425,7 @@ public class AvailabilityWriteService {
             spans.add(IntervalMath.spanOf(startLocal, w.windowMin()));
         }
 
-        // Per-guide advisory lock (CTL-54 B5) — held across delete + insert + rematerialize, all in
+        // Per-guide advisory lock — held across delete + insert + rematerialize, all in
         // this one transaction. rematerialize re-acquires the same xact-scoped key (re-entrant).
         lockGuide(guideId);
 
@@ -485,14 +485,13 @@ public class AvailabilityWriteService {
     }
 
     /**
-     * ATOMIC weekly-rule replace (CTL-54 v2.1 remediation B2, Task 5): replaces the guide's ACTIVE
-     * recurring rules for {@code dayOfWeek} with exactly {@code windows}, in ONE transaction under
-     * the per-guide advisory lock. This is the weekly counterpart to {@link #replaceOverrides} (the
-     * single-day exception replace). An EMPTY {@code windows} list is allowed and CLEARS that
-     * weekday's rules; every other weekday — and any INACTIVE (soft-deleted) rule on this weekday —
-     * is left untouched. Every inserted rule takes the guide's settings timezone (the read-only-tz
-     * invariant), an open-ended effective range starting today, and is active. Returns the
-     * weekday's resulting ACTIVE rules.
+     * ATOMIC weekly-rule replace: replaces the guide's ACTIVE recurring rules for {@code dayOfWeek}
+     * with exactly {@code windows}, in ONE transaction under the per-guide advisory lock. This is
+     * the weekly counterpart to {@link #replaceOverrides} (the single-day exception replace). An
+     * EMPTY {@code windows} list is allowed and CLEARS that weekday's rules; every other weekday —
+     * and any INACTIVE (soft-deleted) rule on this weekday — is left untouched. Every inserted rule
+     * takes the guide's settings timezone (the read-only-tz invariant), an open-ended effective
+     * range starting today, and is active. Returns the weekday's resulting ACTIVE rules.
      *
      * <p><b>Entry guard BEFORE any mutation (B2 data-loss guard).</b> Every present window's same-
      * day guard ({@link #validateSameDay}) runs FIRST, before a single row is deleted — so an
@@ -501,23 +500,22 @@ public class AvailabilityWriteService {
      * genuinely invalid span, NOT a self-overlap — coalescing cannot rescue it, so it still
      * rejects.
      *
-     * <p><b>Self-overlap COALESCES, it is not rejected (CTL-54 accept-and-resolve).</b> Two request
-     * windows that overlap OR touch (e.g. {@code 09:00-11:00} + {@code 10:00-12:00}, or {@code
-     * 09:00-10:00} + {@code 10:00-11:00}) are accepted and MERGED into one stored rule, via the
-     * SAME {@link #coalesceActiveGroup} sweep {@code createRule}/{@code updateRule} run — not the
-     * old strict 422 reject. This makes every availability write path "accept-and-resolve" and
-     * consistent: {@code createRule} already merges same-group overlap AND touch, {@code
-     * replaceOverrides} (exceptions) accepts self-overlap and trims it (newest-wins), and the
-     * occurrence projection layer coalesces to disjoint intervals regardless — so {@code
-     * [09:00-11:00, 10:00-12:00]} and a single {@code [09:00-12:00]} yield IDENTICAL net
-     * availability, and rejecting bought zero correctness, only friction. The "stored == exact
-     * input" rationale the earlier reject claimed held nowhere else in this layer (create merges,
-     * exceptions trim), so it was a local choice, not a system invariant. Concretely, the FE
-     * DayHoursModal has only per-row {@code from < to} validation and NO cross-row overlap guard,
-     * so it WILL send overlapping windows; the exceptions modal already accepts them silently,
-     * while this weekly path used to 422 for the same harmless action — coalescing removes that
-     * two-outcome inconsistency, and also fixes the older overlap-vs-touch split (overlap→422 but
-     * touch→two rows).
+     * <p><b>Self-overlap COALESCES, it is not rejected.</b> Two request windows that overlap OR
+     * touch (e.g. {@code 09:00-11:00} + {@code 10:00-12:00}, or {@code 09:00-10:00} + {@code
+     * 10:00-11:00}) are accepted and MERGED into one stored rule, via the SAME {@link
+     * #coalesceActiveGroup} sweep {@code createRule}/{@code updateRule} run — not the old strict
+     * 422 reject. This makes every availability write path "accept-and-resolve" and consistent:
+     * {@code createRule} already merges same-group overlap AND touch, {@code replaceOverrides}
+     * (exceptions) accepts self-overlap and trims it (newest-wins), and the occurrence projection
+     * layer coalesces to disjoint intervals regardless — so {@code [09:00-11:00, 10:00-12:00]} and
+     * a single {@code [09:00-12:00]} yield IDENTICAL net availability, and rejecting bought zero
+     * correctness, only friction. The "stored == exact input" rationale the earlier reject claimed
+     * held nowhere else in this layer (create merges, exceptions trim), so it was a local choice,
+     * not a system invariant. Concretely, the FE DayHoursModal has only per-row {@code from < to}
+     * validation and NO cross-row overlap guard, so it WILL send overlapping windows; the
+     * exceptions modal already accepts them silently, while this weekly path used to 422 for the
+     * same harmless action — coalescing removes that two-outcome inconsistency, and also fixes the
+     * older overlap-vs-touch split (overlap→422 but touch→two rows).
      *
      * <p><b>One transaction under the advisory lock.</b> {@link #lockGuide} is taken before the
      * delete/insert, and {@link AvailabilityService#rematerialize} runs at Spring {@code REQUIRED}
@@ -553,7 +551,7 @@ public class AvailabilityWriteService {
             spans.add(IntervalMath.spanOf(startLocal, w.windowMin()));
         }
 
-        // Per-guide advisory lock (CTL-54 B5) — held across delete + insert + rematerialize, all in
+        // Per-guide advisory lock — held across delete + insert + rematerialize, all in
         // this one transaction. rematerialize re-acquires the same xact-scoped key (re-entrant).
         lockGuide(guideId);
 
@@ -595,8 +593,8 @@ public class AvailabilityWriteService {
     }
 
     /**
-     * Acquires the per-guide, TRANSACTION-scoped PostgreSQL advisory lock (CTL-54 B5) — the SAME
-     * key derivation {@link AvailabilityService#rematerialize} and the horizon job use ({@code
+     * Acquires the per-guide, TRANSACTION-scoped PostgreSQL advisory lock — the SAME key derivation
+     * {@link AvailabilityService#rematerialize} and the horizon job use ({@code
      * hashtextextended(guideId::text, 0)}) — so the atomic replace's delete/insert are serialized
      * against a concurrent rematerialize for the same guide. Transaction-scoped: auto-releases on
      * commit/rollback, and re-acquiring the same key inside {@code rematerialize} later in this
@@ -666,7 +664,7 @@ public class AvailabilityWriteService {
     public List<AffectedBookingResponse> findFutureBookingsOutsideAvailability(UUID guideId) {
         Instant now = clock.instant();
         // Load the guide's materialized occurrences ONCE (a single query) and test containment in
-        // memory, instead of one existsContaining round-trip PER future booking (CTL-54 #N+1). The
+        // memory, instead of one existsContaining round-trip PER future booking. The
         // occurrences are already coalesced + disjoint and per-guide row counts are small, so the
         // in-memory scan is trivial. Containment mirrors existsContaining's SQL exactly: the
         // booking's SCHEDULED interval [schedStart, schedEnd) must sit fully inside some occurrence
@@ -732,7 +730,7 @@ public class AvailabilityWriteService {
         if (existing.isPresent()) {
             return existing.get();
         }
-        // First write: provision the defaults via an idempotent UPSERT (CTL-54 #settings-race).
+        // First write: provision the defaults via an idempotent UPSERT.
         // A plain insert-after-empty-find is not safe under concurrency -- two first-writes for the
         // same guide (e.g. a rule create racing a settings read) both see the empty find and both
         // INSERT, so the loser trips the guide_id PK and 500s. `ON CONFLICT (guide_id) DO NOTHING`
@@ -1070,15 +1068,15 @@ public class AvailabilityWriteService {
     }
 
     /**
-     * Shared entry guard (CTL-54 v2.1 Task 3) for create/edit exception AND (Task 4) the dry-run
-     * preview — called at the very entry, BEFORE any {@link IntervalMath.Span} is constructed, so
-     * an out-of-range value never reaches {@code IntervalMath} as a raw {@link
-     * IllegalArgumentException}: (a) same-day — the override cannot cross midnight ({@code
-     * windowMin} bringing it to exactly {@code 1440}, i.e. ending at midnight, is allowed); (b)
-     * operation-size — the multi-day range is capped at, at most, 366 INCLUSIVE dates ({@code
-     * dateTo - dateFrom + 1 <= 366}, i.e. one leap year's worth of dates counting both endpoints;
-     * this bounds the write's row-count, NOT date-reach: a far-future override beyond the
-     * materialization horizon is legal and stays inert until the roll-forward job reaches it).
+     * Shared entry guard for create/edit exception AND (Task 4) the dry-run preview — called at the
+     * very entry, BEFORE any {@link IntervalMath.Span} is constructed, so an out-of-range value
+     * never reaches {@code IntervalMath} as a raw {@link IllegalArgumentException}: (a) same-day —
+     * the override cannot cross midnight ({@code windowMin} bringing it to exactly {@code 1440},
+     * i.e. ending at midnight, is allowed); (b) operation-size — the multi-day range is capped at,
+     * at most, 366 INCLUSIVE dates ({@code dateTo - dateFrom + 1 <= 366}, i.e. one leap year's
+     * worth of dates counting both endpoints; this bounds the write's row-count, NOT date-reach: a
+     * far-future override beyond the materialization horizon is legal and stays inert until the
+     * roll-forward job reaches it).
      */
     static void requireOverrideValid(
             LocalTime startLocal, int windowMin, LocalDate dateFrom, LocalDate dateTo) {
@@ -1089,11 +1087,11 @@ public class AvailabilityWriteService {
     }
 
     /**
-     * The WINDOW-INDEPENDENT half of {@link #requireOverrideValid} (CTL-54 v2.1 remediation B7/A3):
-     * the operation-size cap only — {@code dateTo >= dateFrom} and the 366 INCLUSIVE-date range
-     * ({@code dateTo - dateFrom + 1 <= 366}). Because it needs no window, it is callable at handler
-     * ENTRY — before the empty-windows branch and before any per-window loop — so a huge range is
-     * rejected up front even when there are ZERO windows to iterate (the case that let {@link
+     * The WINDOW-INDEPENDENT half of {@link #requireOverrideValid}: the operation-size cap only —
+     * {@code dateTo >= dateFrom} and the 366 INCLUSIVE-date range ({@code dateTo - dateFrom + 1 <=
+     * 366}). Because it needs no window, it is callable at handler ENTRY — before the empty-windows
+     * branch and before any per-window loop — so a huge range is rejected up front even when there
+     * are ZERO windows to iterate (the case that let {@link
      * AvailabilityPreviewService#previewMulti} skip the per-window {@link #requireOverrideValid}
      * and fall through to a full-range day-iteration query storm). Present windows are still
      * validated for same-day via {@link #requireOverrideValid}.
@@ -1108,7 +1106,7 @@ public class AvailabilityWriteService {
     }
 
     // ---------------------------------------------------------------------
-    // Date-specific newest-wins trim/replace (CTL-54 v2.1 Task 3) -- shared with Task 4's dry-run.
+    // Date-specific newest-wins trim/replace -- shared with Task 4's dry-run.
     // ---------------------------------------------------------------------
 
     /**
@@ -1182,14 +1180,14 @@ public class AvailabilityWriteService {
     }
 
     /**
-     * The SHARED "compute replaced set" projection (CTL-54 v2.1 remediation B2) used by BOTH the
-     * {@code replaceExisting} dry-run preview ({@link AvailabilityPreviewService#previewMulti}) and
-     * the atomic single-day save ({@link #replaceOverrides}) — so preview and save can never drift.
-     * Replace semantics: DROP every same-kind ({@code newKind}) existing exception (they are being
-     * replaced by exactly {@code spans}), KEEP the other-kind ones, then fold {@code spans} on top
-     * newest-wins via {@link #foldWindowsOverSeed} (later windows trim earlier ones; new windows
-     * trim overlapping other-kind siblings). With EMPTY {@code spans} the result is just the kept
-     * other-kind exceptions — i.e. "clear this kind for the day". Pure — no DB, no Spring.
+     * The SHARED "compute replaced set" projection used by BOTH the {@code replaceExisting} dry-run
+     * preview ({@link AvailabilityPreviewService#previewMulti}) and the atomic single-day save
+     * ({@link #replaceOverrides}) — so preview and save can never drift. Replace semantics: DROP
+     * every same-kind ({@code newKind}) existing exception (they are being replaced by exactly
+     * {@code spans}), KEEP the other-kind ones, then fold {@code spans} on top newest-wins via
+     * {@link #foldWindowsOverSeed} (later windows trim earlier ones; new windows trim overlapping
+     * other-kind siblings). With EMPTY {@code spans} the result is just the kept other-kind
+     * exceptions — i.e. "clear this kind for the day". Pure — no DB, no Spring.
      */
     static List<TrimmedException> computeReplacedSet(
             List<ExistingException> existing,
@@ -1371,7 +1369,7 @@ public class AvailabilityWriteService {
         } catch (DateTimeParseException ex) {
             throw new ValidationException("Invalid startLocal (expected e.g. \"09:00\"): " + raw);
         }
-        // Reject sub-minute (seconds/nanos) precision (CTL-54 #7): validation truncates to the
+        // Reject sub-minute (seconds/nanos) precision: validation truncates to the
         // minute (toSecondOfDay()/60) but AvailabilityProjection.resolveWindow materializes the
         // FULL-precision LocalTime, so a value like "23:30:40" + windowMin=30 would pass the
         // same-day check (23:30 + 30 = 24:00) yet materialize to 00:00:40 the NEXT day. Rejecting
