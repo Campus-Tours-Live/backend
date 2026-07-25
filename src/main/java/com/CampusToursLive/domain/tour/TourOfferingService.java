@@ -105,7 +105,7 @@ public class TourOfferingService {
         o.setDurationMin(duration);
         o.setPriceCents(price);
         if (req.languages() != null) {
-            List<String> langs = validateLanguages(req.languages());
+            List<String> langs = SupportedLanguages.requireSupported(req.languages());
             if (!langs.isEmpty()) o.setLanguages(writeJson(langs));
         }
         if (req.features() != null) {
@@ -212,23 +212,6 @@ public class TourOfferingService {
         if (out.size() > TourFeature.MAX_PER_OFFERING) {
             throw new ValidationException(
                     "At most " + TourFeature.MAX_PER_OFFERING + " features may be selected");
-        }
-        return List.copyOf(out);
-    }
-
-    /**
-     * Validate client-supplied language tags against {@link SupportedLanguages}. Duplicates and
-     * blanks are dropped; unknown tags fail the request.
-     */
-    private List<String> validateLanguages(List<String> raw) {
-        LinkedHashSet<String> out = new LinkedHashSet<>();
-        for (String s : raw) {
-            if (s == null || s.isBlank()) continue;
-            String tag = s.trim();
-            if (!SupportedLanguages.isSupported(tag)) {
-                throw new ValidationException("Unsupported language: " + tag);
-            }
-            out.add(tag);
         }
         return List.copyOf(out);
     }

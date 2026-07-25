@@ -123,7 +123,7 @@ public interface ApiExamples {
                     + "\"universityShortName\":\"NCU\",\"major\":\"Marine Biology\","
                     + "\"classYear\":\"Junior\",\"bio\":\"Third-year student and campus tour"
                     + " lead.\","
-                    + "\"languages\":[\"en-US\",\"zh-CN\"],\"specialties\":[\"DORM_HOUSING\"],"
+                    + "\"languages\":[\"en-US\",\"zh\"],\"specialties\":[\"DORM_HOUSING\"],"
                     + "\"basePriceCents\":4200,\"currency\":\"USD\","
                     + "\"applicationStatus\":\"APPROVED\",\"verificationStatus\":\"VERIFIED\"},"
                     + META
@@ -227,6 +227,7 @@ public interface ApiExamples {
                     + "\"topic\":\"GENERAL_CAMPUS\","
                     + "\"description\":\"A guided walk through the north campus.\","
                     + "\"languages\":[\"en-US\"],"
+                    + "\"features\":[\"Q_AND_A\"],"
                     + "\"universityId\":\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"universityName\":\"North Coast University\","
                     + "\"universityImageUrl\":\"https://pub-3225b84a9a0b4728b11f261ee52251ba.r2"
