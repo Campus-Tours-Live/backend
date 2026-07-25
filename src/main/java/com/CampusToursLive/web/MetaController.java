@@ -1,5 +1,6 @@
 package com.CampusToursLive.web;
 
+import com.CampusToursLive.domain.tour.SupportedLanguages;
 import com.CampusToursLive.domain.tour.TourFeatureCatalog;
 import com.CampusToursLive.domain.tour.TourTopic;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
@@ -13,7 +14,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -111,10 +111,6 @@ public class MetaController {
         return ApiEnvelope.of(byTopic);
     }
 
-    /** Curated set of languages a guide may offer a tour / list on their profile in. */
-    private static final List<String> SUPPORTED_LANGUAGES =
-            List.of("en-US", "es", "zh", "fr", "de", "ja", "ko", "ar", "hi", "pt");
-
     @Operation(
             summary = "List supported languages",
             description =
@@ -131,15 +127,10 @@ public class MetaController {
     @GetMapping("/languages")
     public ApiEnvelope<List<Option>> languages() {
         List<Option> options =
-                SUPPORTED_LANGUAGES.stream()
-                        .map(tag -> new Option(tag, languageName(tag)))
+                SupportedLanguages.TAGS.stream()
+                        .map(tag -> new Option(tag, SupportedLanguages.displayName(tag)))
                         .toList();
         return ApiEnvelope.of(options);
-    }
-
-    private static String languageName(String tag) {
-        String name = Locale.forLanguageTag(tag).getDisplayLanguage(Locale.ENGLISH);
-        return name == null || name.isBlank() ? tag : name;
     }
 
     @Operation(

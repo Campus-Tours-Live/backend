@@ -152,8 +152,21 @@ class TourOfferingServiceTest {
                         null,
                         List.of("en-US"),
                         List.of("Q_AND_A", "HIDDEN_SPOTS"));
-        service().create(user(uid), req);
+        TourOfferingResponse res = service().create(user(uid), req);
         assertEquals("[\"Q_AND_A\",\"HIDDEN_SPOTS\"]", saved.get().getFeatures());
+        assertEquals(List.of("Q_AND_A", "HIDDEN_SPOTS"), res.features());
+        assertEquals(List.of("en-US"), res.languages());
+    }
+
+    @Test
+    void create_throws422_whenLanguageUnsupported() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubCreateReady(uid, gid);
+        CreateOfferingRequest req =
+                new CreateOfferingRequest(
+                        "Walk", UNI, "GENERAL_CAMPUS", 60, 5000L, null, List.of("xx-YY"));
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
     }
 
     @Test

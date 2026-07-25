@@ -245,6 +245,7 @@ public class TourDiscoveryService {
                 o.getTopic() != null ? o.getTopic().name() : null,
                 o.getDescription(),
                 readStringArray(o.getLanguages()),
+                readStringArray(o.getFeatures()),
                 university.getId().toString(),
                 university.getName(),
                 university.getImageUrl(),
