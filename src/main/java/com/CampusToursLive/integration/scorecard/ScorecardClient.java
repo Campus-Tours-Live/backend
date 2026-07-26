@@ -75,6 +75,21 @@ public class ScorecardClient implements SchoolDirectory {
     }
 
     /**
+     * Cached for 24 hours — a school's degree levels come from the same near-static program list as
+     * majors. Key null-short-circuits as above; {@code unless} keeps degraded empty results
+     * uncached.
+     */
+    @Override
+    @Cacheable(
+            cacheNames = "scorecardDegrees",
+            key = "(#schoolId == null ? '' : #schoolId.strip())",
+            unless = "#result.isEmpty()")
+    public List<Option> degreesForSchool(String schoolId) {
+        if (schoolId == null || schoolId.isBlank()) return List.of();
+        return api.degreesForSchool(schoolId);
+    }
+
+    /**
      * Cached for 24 hours — a school looked up by id is near-static, and this shares the single
      * 800/h outbound budget with the anonymous typeahead, so every hit here is a permit the search
      * path keeps.

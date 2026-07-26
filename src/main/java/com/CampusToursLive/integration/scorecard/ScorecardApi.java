@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -145,6 +146,50 @@ public class ScorecardApi {
         }
     }
 
+    /**
+     * The distinct degree levels a school awards, as { value = label = credential title }, ordered
+     * lowest → highest credential level. Derived from the same CIP-4 program list as majors,
+     * reading each program's {@code credential.level} (1–8) and {@code credential.title}. Empty on
+     * blank/failure.
+     */
+    @RateLimiter(name = "scorecard", fallbackMethod = "degreesForSchoolRateLimited")
+    public List<Option> degreesForSchool(String schoolId) {
+        if (apiKey.isBlank() || schoolId == null || schoolId.isBlank()) return List.of();
+        try {
+            JsonNode root =
+                    http.get()
+                            .uri(
+                                    uri ->
+                                            uri.path("/schools")
+                                                    .queryParam("id", schoolId.trim())
+                                                    .queryParam(
+                                                            "fields",
+                                                            "latest.programs.cip_4_digit.credential.level,latest.programs.cip_4_digit.credential.title")
+                                                    .queryParam("per_page", 1)
+                                                    .queryParam("api_key", apiKey)
+                                                    .build())
+                            .retrieve()
+                            .body(JsonNode.class);
+            JsonNode school = root.path("results").path(0);
+            JsonNode programs = school.path("latest.programs.cip_4_digit");
+            // One canonical title per credential level (1–8); a TreeMap keeps them ordered
+            // lowest → highest (Certificate < Associate < Bachelor's < … < Doctoral).
+            Map<Integer, String> byLevel = new TreeMap<>();
+            for (JsonNode p : programs) {
+                JsonNode credential = p.path("credential");
+                int level = credential.path("level").asInt(0);
+                String title = cleanTitle(credential.path("title").asText(""));
+                if (level > 0 && !title.isEmpty()) byLevel.putIfAbsent(level, title);
+            }
+            List<Option> out = new ArrayList<>();
+            for (String title : byLevel.values()) out.add(new Option(title, title));
+            return out;
+        } catch (Exception ex) {
+            log.warn("Scorecard degrees lookup failed for id '{}': {}", schoolId, ex.toString());
+            return List.of();
+        }
+    }
+
     /** One school's identity by id; {@code null} on blank key/id, not-found, or any failure. */
     @RateLimiter(name = "scorecard", fallbackMethod = "getSchoolRateLimited")
     public SchoolRef getSchool(String schoolId) {
@@ -191,6 +236,11 @@ public class ScorecardApi {
 
     List<Option> majorsForSchoolRateLimited(String schoolId, Throwable t) {
         log.warn("Scorecard outbound rate limit hit; degrading majors lookup: {}", t.toString());
+        return List.of();
+    }
+
+    List<Option> degreesForSchoolRateLimited(String schoolId, Throwable t) {
+        log.warn("Scorecard outbound rate limit hit; degrading degrees lookup: {}", t.toString());
         return List.of();
     }
 

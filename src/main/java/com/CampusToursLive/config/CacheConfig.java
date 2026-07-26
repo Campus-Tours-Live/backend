@@ -22,6 +22,8 @@ import org.springframework.context.annotation.Configuration;
  *       stick around. 5000 entries covers the long tail of popular queries at a few MB.
  *   <li>{@code scorecardMajors} — a school's CIP-4 program list, which is near-static (IPEDS
  *       updates annually), so 24h.
+ *   <li>{@code scorecardDegrees} — the distinct credential levels a school awards, derived from the
+ *       same near-static program list, so 24h.
  *   <li>{@code scorecardSchools} — a single school looked up by id (onboarding upsert). Also
  *       near-static, so 24h.
  * </ul>
@@ -32,6 +34,7 @@ public class CacheConfig {
 
     public static final String SCORECARD_UNIVERSITIES = "scorecardUniversities";
     public static final String SCORECARD_MAJORS = "scorecardMajors";
+    public static final String SCORECARD_DEGREES = "scorecardDegrees";
     public static final String SCORECARD_SCHOOLS = "scorecardSchools";
 
     @Bean
@@ -42,7 +45,12 @@ public class CacheConfig {
         // seen — so a typo'd @Cacheable(cacheNames=...) would silently get a memory leak instead
         // of failing. setCacheNames installs defaults and disables dynamic creation;
         // registerCustomCache below then replaces those defaults with the tuned specs.
-        manager.setCacheNames(List.of(SCORECARD_UNIVERSITIES, SCORECARD_MAJORS, SCORECARD_SCHOOLS));
+        manager.setCacheNames(
+                List.of(
+                        SCORECARD_UNIVERSITIES,
+                        SCORECARD_MAJORS,
+                        SCORECARD_DEGREES,
+                        SCORECARD_SCHOOLS));
         manager.registerCustomCache(
                 SCORECARD_UNIVERSITIES,
                 Caffeine.newBuilder()
@@ -51,6 +59,12 @@ public class CacheConfig {
                         .build());
         manager.registerCustomCache(
                 SCORECARD_MAJORS,
+                Caffeine.newBuilder()
+                        .maximumSize(5000)
+                        .expireAfterWrite(Duration.ofHours(24))
+                        .build());
+        manager.registerCustomCache(
+                SCORECARD_DEGREES,
                 Caffeine.newBuilder()
                         .maximumSize(5000)
                         .expireAfterWrite(Duration.ofHours(24))
