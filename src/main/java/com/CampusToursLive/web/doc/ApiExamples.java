@@ -188,13 +188,6 @@ public interface ApiExamples {
                     + META
                     + "}";
 
-    String UNIVERSITY_LIST =
-            "{\"data\":[{\"id\":\"u1a2c3d4-0000-4000-8000-000000000003\","
-                    + "\"slug\":\"north-coast\",\"name\":\"North Coast University\","
-                    + "\"shortName\":\"NCU\",\"city\":\"Arcata\",\"region\":\"CA\"}],"
-                    + META
-                    + "}";
-
     String TOUR_OFFERING =
             "{\"data\":{\"id\":\"o1a2c3d4-0000-4000-8000-000000000002\","
                     + "\"title\":\"North Campus highlights\",\"slug\":\"north-campus-highlights\","
