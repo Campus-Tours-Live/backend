@@ -92,4 +92,12 @@ public record GuideProfileUpdateRequest(
                                         + " grant the GUIDE role, move status to PENDING_REVIEW).",
                         example = "true",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                Boolean submit) {}
+                Boolean submit,
+        @Schema(
+                        description =
+                                "Degree level the guide is pursuing / holds, as returned by GET"
+                                        + " /v1/meta/degrees for the selected university (the College"
+                                        + " Scorecard credential title).",
+                        example = "Bachelor's Degree",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String degree) {}

@@ -7,6 +7,7 @@ import com.CampusToursLive.domain.university.CampusImageUrls;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.university.UniversityStatus;
+import com.CampusToursLive.domain.user.NameRules;
 import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
@@ -18,6 +19,7 @@ import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Year;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -78,6 +80,8 @@ public class GuideService {
         boolean submit = Boolean.TRUE.equals(req.submit());
 
         // users-table fields + synced display name.
+        NameRules.validate("firstName", req.firstName());
+        NameRules.validate("lastName", req.lastName());
         if (req.firstName() != null) user.setFirstName(req.firstName());
         if (req.lastName() != null) user.setLastName(req.lastName());
         if (req.firstName() != null || req.lastName() != null) {
@@ -97,6 +101,11 @@ public class GuideService {
         if (major == null || major.isEmpty()) {
             throw new ValidationException("major is required");
         }
+        String degree = req.degree() == null ? null : req.degree().trim();
+        if (degree == null || degree.isEmpty()) {
+            throw new ValidationException("degree is required");
+        }
+        validateClassYear(req.classYear(), degree);
 
         GuideProfileEntity profile =
                 guides.findByUserId(user.getId())
@@ -111,6 +120,7 @@ public class GuideService {
         profile.setUniversityId(universityId);
         profile.setMajor(major);
         if (req.classYear() != null) profile.setClassYear(req.classYear().trim());
+        profile.setDegree(degree);
         if (req.bio() != null) profile.setBio(req.bio().trim());
         if (req.languages() != null) {
             List<String> langs =
@@ -149,6 +159,17 @@ public class GuideService {
             if (email == null || !email.contains("@")) {
                 throw new ValidationException(
                         "A valid school email (verificationEmail) is required to submit your application");
+            }
+            // bio + at least one specialty are required to submit a complete application
+            // (server-side
+            // defense mirroring the client; the required university/major/degree are enforced
+            // above).
+            if (profile.getBio() == null || profile.getBio().isBlank()) {
+                throw new ValidationException("A short bio is required to submit your application");
+            }
+            if (readArray(profile.getSpecialties()).isEmpty()) {
+                throw new ValidationException(
+                        "At least one tour specialty is required to submit your application");
             }
             profile.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
             profile.setVerificationStatus(GuideVerificationStatus.PENDING);
@@ -265,6 +286,41 @@ public class GuideService {
     }
 
     /**
+     * Class year (expected graduation year) must, when present, be a 4-digit year inside a bounded
+     * window: 10 years back (recent alumni can guide) up to this year plus a per-degree buffer (a
+     * current student's remaining program length). Mirrors the client-side rule — defense in depth,
+     * since a direct API call bypasses the browser. Year granularity keeps term/quarter timing from
+     * ever making a year invalid.
+     */
+    private static void validateClassYear(String classYear, String degree) {
+        if (classYear == null || classYear.isBlank()) return;
+        String cy = classYear.trim();
+        if (!cy.matches("\\d{4}")) {
+            throw new ValidationException("classYear must be a 4-digit year");
+        }
+        int year = Integer.parseInt(cy);
+        int current = Year.now().getValue();
+        int min = current - 10;
+        int max = current + gradYearBufferForDegree(degree);
+        if (year < min || year > max) {
+            throw new ValidationException("classYear must be between " + min + " and " + max);
+        }
+    }
+
+    /**
+     * Upper-bound buffer (years past this year) for an expected graduation year, by degree level.
+     * Package-private so each per-level branch is unit-tested directly (see GuideServiceTest).
+     */
+    static int gradYearBufferForDegree(String degree) {
+        String t = degree == null ? "" : degree.toLowerCase();
+        if (t.contains("doctor") || t.contains("first professional")) return 9;
+        if (t.contains("master") || t.contains("post-baccalaureate")) return 3;
+        if (t.contains("bachelor")) return 6;
+        if (t.contains("associate") || t.contains("certificate") || t.contains("diploma")) return 3;
+        return 8;
+    }
+
+    /**
      * Admin review of a guide application (called by AdminController after requireRole(ADMIN)).
      * Sets the guide's application_status; approving also marks the verification VERIFIED. This is
      * what makes APPROVED reachable, so the live-action gate on offerings
@@ -334,7 +390,8 @@ public class GuideService {
                         ? null
                         : (profile.getVerificationStatus() != null
                                 ? profile.getVerificationStatus().name()
-                                : null));
+                                : null),
+                profile == null ? null : profile.getDegree());
     }
 
     private List<String> readArray(String json) {
