@@ -177,4 +177,23 @@ public class MetaController {
     public ApiEnvelope<List<Option>> majors(@RequestParam("schoolId") String schoolId) {
         return ApiEnvelope.of(schools.majorsForSchool(schoolId));
     }
+
+    @Operation(
+            summary = "List a school's degree levels (live)",
+            description =
+                    "The distinct credential levels a school awards (from its College Scorecard"
+                            + " programs), as { value = label = credential title, e.g. \"Bachelor's"
+                            + " Degree\" }, ordered lowest → highest. Backs the onboarding degree picker"
+                            + " for the selected university.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The school's degree levels (live Scorecard).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.DEGREES_LIVE)))
+    @GetMapping("/degrees")
+    public ApiEnvelope<List<Option>> degrees(@RequestParam("schoolId") String schoolId) {
+        return ApiEnvelope.of(schools.degreesForSchool(schoolId));
+    }
 }

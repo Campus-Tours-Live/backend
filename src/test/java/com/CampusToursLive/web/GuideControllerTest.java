@@ -34,7 +34,7 @@ class GuideControllerTest {
     private static GuideProfileResponse profileResponse() {
         return new GuideProfileResponse(
                 "uid", null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null);
+                null, null, null, null, null);
     }
 
     private static GuideDashboardStatsResponse statsResponse() {
@@ -56,7 +56,7 @@ class GuideControllerTest {
         UserEntity u = new UserEntity();
         GuideProfileUpdateRequest req =
                 new GuideProfileUpdateRequest(
-                        null, null, null, null, null, null, null, null, null, null, null);
+                        null, null, null, null, null, null, null, null, null, null, null, null);
         GuideProfileResponse resp = profileResponse();
         when(currentUser.require()).thenReturn(u);
         when(guideService.updateProfile(u, req)).thenReturn(resp);

@@ -132,7 +132,8 @@ public interface ApiExamples {
                     + " lead.\","
                     + "\"languages\":[\"en-US\",\"zh-CN\"],\"specialties\":[\"DORM_HOUSING\"],"
                     + "\"basePriceCents\":4200,\"currency\":\"USD\","
-                    + "\"applicationStatus\":\"APPROVED\",\"verificationStatus\":\"VERIFIED\"},"
+                    + "\"applicationStatus\":\"APPROVED\",\"verificationStatus\":\"VERIFIED\","
+                    + "\"degree\":\"Bachelor's Degree\"},"
                     + META
                     + "}";
 
@@ -143,7 +144,7 @@ public interface ApiExamples {
                     + "\"timezone\":\"America/New_York\",\"participantType\":\"PROSPECTIVE_STUDENT\","
                     + "\"gradeLevel\":\"HIGH_SCHOOL_SENIOR\",\"intendedMajor\":\"Computer Science\","
                     + "\"guardianRequired\":false,\"topicsOfInterest\":[\"DORM_HOUSING\"],"
-                    + "\"universitiesOfInterest\":[\"u1a2c3d4-0000-4000-8000-000000000003\"],"
+                    + "\"universitiesOfInterest\":[\"166683\"],"
                     + "\"accessibilityPreferences\":null},"
                     + META
                     + "}";
@@ -184,6 +185,13 @@ public interface ApiExamples {
 
     String MAJORS_LIVE =
             "{\"data\":[{\"value\":\"Computer Science\",\"label\":\"Computer Science\"}],"
+                    + META
+                    + "}";
+
+    String DEGREES_LIVE =
+            "{\"data\":[{\"value\":\"Associate's Degree\",\"label\":\"Associate's Degree\"},"
+                    + "{\"value\":\"Bachelor's Degree\",\"label\":\"Bachelor's Degree\"},"
+                    + "{\"value\":\"Master's Degree\",\"label\":\"Master's Degree\"}],"
                     + META
                     + "}";
 

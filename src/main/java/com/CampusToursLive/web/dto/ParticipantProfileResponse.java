@@ -79,8 +79,8 @@ public record ParticipantProfileResponse(
         @Schema(
                         description =
                                 "Free-form interests blob: universities of interest (array of"
-                                        + " ids).",
-                        example = "[\"u1a2c3d4-0000-4000-8000-000000000003\"]",
+                                        + " College Scorecard school ids).",
+                        example = "[\"166683\"]",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 Object universitiesOfInterest,
         @Schema(
