@@ -61,6 +61,7 @@ class TourOfferingServiceTest {
         GuideProfileEntity g = new GuideProfileEntity();
         g.setId(id);
         g.setApplicationStatus(status);
+        g.setUniversityId(UUID.fromString(UNI)); // create() validates req.universityId against this
         return g;
     }
 
@@ -102,14 +103,13 @@ class TourOfferingServiceTest {
         UUID gid = UUID.randomUUID();
         when(guides.findByUserId(uid))
                 .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING_REVIEW)));
-        when(universities.existsById(any())).thenReturn(true);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         CreateOfferingRequest req =
                 new CreateOfferingRequest(
                         "Campus highlights walk",
-                        UUID.randomUUID().toString(),
+                        UNI,
                         "GENERAL_CAMPUS",
                         60,
                         5000L,
@@ -120,11 +120,47 @@ class TourOfferingServiceTest {
         assertEquals("DRAFT", res.status());
     }
 
+    @Test
+    void create_storesTheUniversity_whenItIsTheGuidesVerifiedSchool() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
+        when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        // validReq(...) sends universityId = UNI (the guide's own school)
+        service().create(user(uid), validReq("Campus highlights walk"));
+
+        ArgumentCaptor<TourOfferingEntity> saved =
+                ArgumentCaptor.forClass(TourOfferingEntity.class);
+        verify(offerings).save(saved.capture());
+        assertEquals(UUID.fromString(UNI), saved.getValue().getUniversityId());
+    }
+
+    @Test
+    void create_throws422_whenUniversityIsNotTheGuidesVerifiedSchool() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+
+        CreateOfferingRequest req =
+                new CreateOfferingRequest(
+                        "Someone else's campus",
+                        UUID.randomUUID()
+                                .toString(), // a valid uuid, but NOT the guide's university
+                        "GENERAL_CAMPUS",
+                        60,
+                        5000L,
+                        null,
+                        List.of("en-US"));
+
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
+    }
+
     // ---------- create: feature validation ----------
 
     private void stubCreateReady(UUID uid, UUID gid) {
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
     }
 
@@ -271,21 +307,10 @@ class TourOfferingServiceTest {
     }
 
     @Test
-    void create_throws422_whenUniversityUnknown() {
-        UUID uid = UUID.randomUUID();
-        UUID gid = UUID.randomUUID();
-        stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(false);
-        assertThrows(
-                ValidationException.class, () -> service().create(user(uid), validReq("Walk")));
-    }
-
-    @Test
     void create_throws422_whenTitleBlank() {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         CreateOfferingRequest req =
                 new CreateOfferingRequest("   ", UNI, "GENERAL_CAMPUS", 60, 5000L, null, null);
         assertThrows(ValidationException.class, () -> service().create(user(uid), req));
@@ -296,7 +321,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         CreateOfferingRequest req =
                 new CreateOfferingRequest("Walk", UNI, "NOT_A_TOPIC", 60, 5000L, null, null);
         assertThrows(ValidationException.class, () -> service().create(user(uid), req));
@@ -307,7 +331,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         CreateOfferingRequest req =
                 new CreateOfferingRequest("Walk", UNI, "GENERAL_CAMPUS", 25, 5000L, null, null);
         assertThrows(ValidationException.class, () -> service().create(user(uid), req));
@@ -318,7 +341,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         // Below the 2000 floor.
         CreateOfferingRequest low =
                 new CreateOfferingRequest("Walk", UNI, "GENERAL_CAMPUS", 60, 100L, null, null);
@@ -334,7 +356,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(true);
         assertThrows(
                 ValidationException.class, () -> service().create(user(uid), validReq("Walk")));
@@ -345,7 +366,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -375,7 +395,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -391,7 +410,6 @@ class TourOfferingServiceTest {
         UUID gid = UUID.randomUUID();
         UUID uniId = UUID.fromString(UNI);
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -416,7 +434,6 @@ class TourOfferingServiceTest {
         UUID gid = UUID.randomUUID();
         UUID uniId = UUID.fromString(UNI);
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -527,7 +544,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         CreateOfferingRequest req =
                 new CreateOfferingRequest(null, UNI, "GENERAL_CAMPUS", 60, 5000L, null, null);
         assertThrows(ValidationException.class, () -> service().create(user(uid), req));
@@ -538,7 +554,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         CreateOfferingRequest req =
                 new CreateOfferingRequest("Walk", UNI, "GENERAL_CAMPUS", null, 5000L, null, null);
         assertThrows(ValidationException.class, () -> service().create(user(uid), req));
@@ -549,7 +564,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         CreateOfferingRequest req =
                 new CreateOfferingRequest("Walk", UNI, "GENERAL_CAMPUS", 60, null, null, null);
         assertThrows(ValidationException.class, () -> service().create(user(uid), req));
@@ -560,7 +574,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
         // languages present but all blank → filtered to empty → setLanguages skipped.
@@ -583,7 +596,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
         // languages == null → the setLanguages block is skipped (the `!= null` false arm).
@@ -607,7 +619,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         CreateOfferingRequest req =
                 new CreateOfferingRequest("Walk", UNI, null, 60, 5000L, null, null);
         assertThrows(ValidationException.class, () -> service().create(user(uid), req));
@@ -618,7 +629,6 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         // Non-null but blank topic → covers the isBlank() arm of parseTopic's guard.
         CreateOfferingRequest req =
                 new CreateOfferingRequest("Walk", UNI, "   ", 60, 5000L, null, null);
@@ -633,7 +643,6 @@ class TourOfferingServiceTest {
         when(mapper.writeValueAsString(any())).thenThrow(new RuntimeException("boom"));
         var svc = new TourOfferingService(offerings, guides, universities, campusImages, mapper);
         stubPendingGuide(uid, gid);
-        when(universities.existsById(any())).thenReturn(true);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
         // Non-empty languages → writeJson(...) runs and its catch swallows the mapper error.

@@ -62,7 +62,10 @@ public class TourOfferingService {
     public TourOfferingResponse create(UserEntity user, CreateOfferingRequest req) {
         GuideProfileEntity guide = requireGuideProfile(user);
 
-        UUID universityId = parseUniversity(req.universityId());
+        UUID universityId = parseUuid(req.universityId());
+        if (!isGuidesVerifiedUniversity(guide, universityId)) {
+            throw new ValidationException("universityId must be a university you are verified for");
+        }
         // Backfill the campus image on first use if the university has none yet (idempotent).
         universities
                 .findById(universityId)
@@ -149,20 +152,23 @@ public class TourOfferingService {
                                         "No guide profile — complete guide onboarding first"));
     }
 
-    private UUID parseUniversity(String raw) {
+    private static UUID parseUuid(String raw) {
         if (raw == null || raw.isBlank()) {
             throw new ValidationException("universityId is required");
         }
-        UUID id;
         try {
-            id = UUID.fromString(raw.trim());
+            return UUID.fromString(raw.trim());
         } catch (IllegalArgumentException ex) {
             throw new ValidationException("Invalid universityId: " + raw);
         }
-        if (!universities.existsById(id)) {
-            throw new ValidationException("Unknown universityId: " + raw);
-        }
-        return id;
+    }
+
+    /**
+     * Whether {@code id} is a university the guide is verified for. Today a guide has exactly one
+     * verified school (guide.universityId); multi-school later swaps this for set membership.
+     */
+    private static boolean isGuidesVerifiedUniversity(GuideProfileEntity guide, UUID id) {
+        return id.equals(guide.getUniversityId());
     }
 
     private TourTopic parseTopic(String raw) {
