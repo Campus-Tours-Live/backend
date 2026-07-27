@@ -8,13 +8,13 @@ import java.util.List;
 /**
  * Current principal (GET /users/me, POST /session). Deliberately NOT named {@code MeResponse} to
  * avoid a Core-vs-bff name collision — the bff owns a distinct, session-scoped {@code /userinfo}
- * that additionally carries {@code activeRole}. Core knows nothing about active/session role.
+ * that additionally carries {@code currentRole}. Core knows nothing about current/session role.
  */
 @Schema(
         name = "CurrentUserResponse",
         description =
                 "The authenticated principal: account identity and the authoritative role set. No"
-                        + " session/active-role context — that is owned by the BFF session, not"
+                        + " session/current-role context — that is owned by the BFF session, not"
                         + " Core.")
 public record CurrentUserResponse(
         @Schema(

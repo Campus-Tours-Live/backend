@@ -27,8 +27,8 @@ import org.springframework.web.server.ResponseStatusException;
  * SessionController.me / resolveSession / roleEligibility — the principal view
  * (CurrentUserResponse) and the role-eligibility passthrough. Verifies the enrichment in {@code
  * currentUser()}: identity nested under {@code user} and the authoritative role set in FIXED enum
- * order (PARTICIPANT, GUIDE, ADMIN, SUPPORT), not insertion order. There is no {@code activeRole}
- * field and no /session/active-role endpoint any more — active-role/session context is bff-owned.
+ * order (PARTICIPANT, GUIDE, ADMIN, SUPPORT), not insertion order. There is no {@code currentRole}
+ * field and no /session/current-role endpoint any more — current-role/session context is bff-owned.
  */
 @ExtendWith(MockitoExtension.class)
 class SessionControllerTest {

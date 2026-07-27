@@ -103,7 +103,7 @@ public class ParticipantService {
         profiles.save(profile);
 
         // Onboarding complete → grant the PARTICIPANT role (idempotent; re-edits
-        // won't re-grant or change the active role).
+        // won't re-grant or change the current role).
         roleGrant.grant(user, UserRole.PARTICIPANT);
         users.save(user); // persist user-field updates + the grant's role change, once
         return toResponse(user, profile);

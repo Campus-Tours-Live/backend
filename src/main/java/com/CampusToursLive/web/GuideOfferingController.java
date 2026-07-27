@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Guide supply-side: tour offerings (BFF maps /v1/guide/offerings → here). Every action requires
- * the GUIDE role (authorization reads user_roles, never the active role). Going live additionally
+ * the GUIDE role (authorization reads user_roles, never the current role). Going live additionally
  * requires a VERIFIED application — enforced in the service.
  */
 @RestController

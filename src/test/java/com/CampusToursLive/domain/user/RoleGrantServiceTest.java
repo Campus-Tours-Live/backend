@@ -14,7 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * RoleGrantService.grant — idempotent role acquisition. Writing the user_roles row IS the grant.
- * Active-role/session context is owned by the BFF session, not Core, so grant() never touches
+ * Current-role/session context is owned by the BFF session, not Core, so grant() never touches
  * {@code user}. Re-granting an already-held role is a no-op.
  */
 @ExtendWith(MockitoExtension.class)

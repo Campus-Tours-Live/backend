@@ -60,7 +60,7 @@ class OpenApiDocsExportTest {
     }
 
     /**
-     * CTL-97: /userinfo and /session/active-role are removed (Core no longer owns active-role);
+     * CTL-97: /userinfo and /session/current-role are removed (Core no longer owns current-role);
      * /users/me and /users/me/role-eligibility replace them. Asserted against the generated spec's
      * path keys rather than by firing an unauthenticated request — an unauthenticated request to a
      * removed, authenticated path 401s at the security chain before Spring Web would even 404 it,
@@ -72,7 +72,7 @@ class OpenApiDocsExportTest {
         String body = resp.getBody();
 
         assertThat(body).doesNotContain("\"/userinfo\"");
-        assertThat(body).doesNotContain("\"/session/active-role\"");
+        assertThat(body).doesNotContain("\"/session/current-role\"");
         assertThat(body).contains("\"/users/me\"");
         assertThat(body).contains("\"/users/me/role-eligibility\"");
     }

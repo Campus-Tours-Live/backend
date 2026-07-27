@@ -7,7 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
  * Central, idempotent role acquisition. Called when a role's onboarding completes (guide submit /
  * participant save). Writing the {@code user_roles} row IS the "role granted" signal.
  *
- * <p>Active-role/session context is owned by the BFF session, not Core — this service only inserts
+ * <p>Current-role/session context is owned by the BFF session, not Core — this service only inserts
  * the {@code user_roles} row and never touches {@code user}. Kept as a no-arg-mutation service (not
  * a static helper) so it stays the single place role acquisition is defined.
  */

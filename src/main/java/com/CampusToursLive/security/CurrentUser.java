@@ -49,7 +49,7 @@ public class CurrentUser {
      * Authorize a role-scoped action against the authoritative role set in {@code user_roles}. Used
      * by future supply-/demand-side endpoints (e.g. guide listings → GUIDE); onboarding endpoints
      * that GRANT a role must NOT call this (they'd 403 the very first acquisition). Authorization
-     * always reads {@code user_roles}, never the active role.
+     * always reads {@code user_roles}, never the current role.
      */
     public UserEntity requireRole(UserRole role) {
         UserEntity user = require();

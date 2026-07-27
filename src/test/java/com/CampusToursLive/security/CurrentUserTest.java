@@ -29,7 +29,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 
 /**
  * CurrentUser.requireRole — the role gate behind every role-scoped endpoint. Authorization reads
- * user_roles, never the active role.
+ * user_roles, never the current role.
  */
 @ExtendWith(MockitoExtension.class)
 class CurrentUserTest {

@@ -31,16 +31,16 @@ import org.springframework.web.server.ResponseStatusException;
  * Session / identity endpoints. Paths are bare (no /v1) — the BFF strips the /v1 prefix before
  * calling Core, and calls /session directly at login time.
  *
- * <p>Core owns account facts only (identity, held roles). Active-role / session context — "which
+ * <p>Core owns account facts only (identity, held roles). Current-role / session context — "which
  * role this browser session is currently using" — is owned entirely by the bff's server-side
- * session, never by Core: there is no active-role column, endpoint, or field here.
+ * session, never by Core: there is no current-role column, endpoint, or field here.
  */
 @RestController
 @Tag(
         name = "Session",
         description =
                 "Session / identity. Resolves a login and returns the current principal (identity"
-                        + " + held roles). Active-role/session context is bff-owned, not Core's.")
+                        + " + held roles). Current-role/session context is bff-owned, not Core's.")
 public class SessionController {
 
     private final CurrentUser currentUser;
@@ -66,7 +66,7 @@ public class SessionController {
                     "Returns the current authenticated principal (identity and the authoritative"
                             + " role set). Read-only — the account must already be provisioned;"
                             + " it is never created here (use POST /session for that). No"
-                            + " session/active-role context is returned — that is bff-owned.")
+                            + " session/current-role context is returned — that is bff-owned.")
     @ApiResponse(
             responseCode = "200",
             description = "The current principal.",
