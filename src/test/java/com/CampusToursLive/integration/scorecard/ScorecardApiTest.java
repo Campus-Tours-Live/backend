@@ -153,6 +153,45 @@ class ScorecardApiTest {
         assertThat(fixture("KEY").api().majorsForSchool(" ")).isEmpty();
     }
 
+    // --- degreesForSchool -------------------------------------------------------------------
+
+    @Test
+    void degreesForSchool_dedupesByLevelAndOrdersLowestToHighest() {
+        Fixture f = fixture("KEY");
+        f.server()
+                .expect(requestTo(Matchers.containsString("id=243744")))
+                .andRespond(
+                        withSuccess(
+                                """
+                                {"results":[{"latest.programs.cip_4_digit":[
+                                  {"credential":{"level":5,"title":"Master's Degree."}},
+                                  {"credential":{"level":3,"title":"Bachelor's Degree"}},
+                                  {"credential":{"level":3,"title":"Bachelor's Degree"}},
+                                  {"credential":{"level":2,"title":"Associate's Degree"}},
+                                  {"credential":{"level":0,"title":"skip: no level"}},
+                                  {"credential":{"level":6,"title":"   "}}
+                                ]}]}
+                                """,
+                                MediaType.APPLICATION_JSON));
+
+        assertThat(f.api().degreesForSchool("243744"))
+                .extracting(Option::label)
+                .containsExactly("Associate's Degree", "Bachelor's Degree", "Master's Degree");
+    }
+
+    @Test
+    void degreesForSchool_degradesToEmptyOnFailureOrBlankInput() {
+        Fixture f = fixture("KEY");
+        f.server()
+                .expect(requestTo(Matchers.containsString("/schools")))
+                .andRespond(withServerError());
+        assertThat(f.api().degreesForSchool("243744")).isEmpty();
+
+        assertThat(fixture("").api().degreesForSchool("243744")).isEmpty();
+        assertThat(fixture("KEY").api().degreesForSchool(null)).isEmpty();
+        assertThat(fixture("KEY").api().degreesForSchool(" ")).isEmpty();
+    }
+
     // --- getSchool --------------------------------------------------------------------------
 
     @Test
@@ -208,6 +247,8 @@ class ScorecardApiTest {
                             assertThat(api.searchSchoolsRateLimited("stanford", 5, limitHit))
                                     .isEmpty();
                             assertThat(api.majorsForSchoolRateLimited("243744", limitHit))
+                                    .isEmpty();
+                            assertThat(api.degreesForSchoolRateLimited("243744", limitHit))
                                     .isEmpty();
                             assertThat(api.getSchoolRateLimited("243744", limitHit)).isNull();
                         })

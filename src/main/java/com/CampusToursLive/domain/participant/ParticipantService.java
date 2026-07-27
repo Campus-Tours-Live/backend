@@ -1,5 +1,6 @@
 package com.CampusToursLive.domain.participant;
 
+import com.CampusToursLive.domain.user.NameRules;
 import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
@@ -50,6 +51,8 @@ public class ParticipantService {
     public ParticipantProfileResponse updateProfile(
             UserEntity user, ParticipantProfileUpdateRequest req) {
         // users-table fields
+        NameRules.validate("firstName", req.firstName());
+        NameRules.validate("lastName", req.lastName());
         if (req.firstName() != null) user.setFirstName(req.firstName());
         if (req.lastName() != null) user.setLastName(req.lastName());
         // Keep display_name (canonical display string) synced from first/last.
