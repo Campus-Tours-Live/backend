@@ -285,17 +285,14 @@ The full set of variables (optional for local dev unless marked otherwise; some 
 - **Flyway owns the schema** (`spring.jpa.hibernate.ddl-auto=none`); Hibernate never alters it.
 - Migrations live in `src/main/resources/db/migration/`:
 
-  | File                                    | Purpose                                                                                     |
-  | --------------------------------------- | ------------------------------------------------------------------------------------------- |
-  | `V1__schema.sql`                        | The complete baseline schema (tables, enums, constraints, indexes).                         |
-  | `V2__seed_universities.sql`             | Seeds the university catalog (~1,900 rows, idempotent). **Frozen.**                         |
-  | `V3__seed_demo_data.sql`                | Seeds demo guides + tour offerings for the marketplace.                                     |
-  | `V4__backfill_university_image_url.sql` | Forward-only backfill of `image_url`/`name` for rows V2's `ON CONFLICT DO NOTHING` skipped. |
+  | File                     | Purpose                                                                                                       |
+  | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+  | `V1__schema.sql`         | The complete baseline schema (tables, enums, constraints, indexes — includes the availability engine, `guide_universities`, etc.). |
+  | `V2__seed_demo_data.sql` | Seeds the university catalog (~1,900 rows) plus demo guides + tour offerings for the marketplace/local MVP.  |
 
 - **Conventions:** `V<n>__<snake_case>.sql`, applied in ascending order. Migrations are
   **immutable history** — once a version is applied anywhere you do **not** edit or delete it
-  (this includes reformatting or adding data to it); you add a new `V<n+1>`. `V2` carries an
-  `APPLIED MIGRATION — do not edit` header for exactly this reason.
+  (this includes reformatting or adding data to it); you add a new `V<n+1>`.
 - **Reset a local DB** (after a schema change, or a Flyway checksum error):
 
   ```bash
@@ -311,9 +308,9 @@ The full set of variables (optional for local dev unless marked otherwise; some 
     migration for the data.** Be aware of the boundary: **`flyway:repair` only re-aligns the
     `flyway_schema_history` checksum — it does NOT re-run the migration**, so a drifted DB never
     receives any data the edit added (e.g. the `image_url`/`name` values). Repair fixes the
-    _checksum_, not the _data_; a new forward migration (like `V4`, an idempotent `UPDATE` keyed
-    by the stable `slug`) is what reconciles the data. Never set `spring.flyway.validate-on-migrate=false`
-    to paper over a mismatch.
+    _checksum_, not the _data_; a new forward migration (an idempotent `UPDATE` keyed by a stable
+    unique column, e.g. `slug`) is what reconciles the data. Never set
+    `spring.flyway.validate-on-migrate=false` to paper over a mismatch.
 
 ---
 
