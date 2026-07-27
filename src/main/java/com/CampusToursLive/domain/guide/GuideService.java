@@ -27,12 +27,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Guide application / onboarding. Upserts {@code guide_profiles}, records a student-verification
- * submission, and (on submit) grants the GUIDE role (user_roles) and sets the guide's own
- * application_status to PENDING. Verification (the stubbed email-verify flow) is what later flips
- * application_status to VERIFIED — admin review has been retired. Account-wide accountStatus is NOT
- * touched — guide approval is a role-level state, kept on the guide profile rather than the
- * account.
+ * Guide application / onboarding. Upserts {@code guide_profiles} and its per-university {@code
+ * guide_universities} row, and (on submit) grants the GUIDE role (user_roles) and sets the guide's
+ * own application_status to PENDING. Verification (the stubbed email-verify flow, tracked on
+ * guide_universities.verification_status) is what later flips application_status to VERIFIED —
+ * admin review has been retired. Account-wide accountStatus is NOT touched — guide approval is a
+ * role-level state, kept on the guide profile rather than the account.
  */
 @Service
 public class GuideService {
@@ -41,7 +41,6 @@ public class GuideService {
     private static final long MAX_PRICE_CENTS = 20000L; // $200
 
     private final GuideProfileRepository guides;
-    private final GuideVerificationRepository verifications;
     private final GuideUniversityRepository guideUniversities;
     private final UniversityRepository universities;
     private final ParticipantProfileRepository participants;
@@ -53,7 +52,6 @@ public class GuideService {
 
     public GuideService(
             GuideProfileRepository guides,
-            GuideVerificationRepository verifications,
             GuideUniversityRepository guideUniversities,
             UniversityRepository universities,
             ParticipantProfileRepository participants,
@@ -63,7 +61,6 @@ public class GuideService {
             CampusImageUrls campusImages,
             ObjectMapper mapper) {
         this.guides = guides;
-        this.verifications = verifications;
         this.guideUniversities = guideUniversities;
         this.universities = universities;
         this.participants = participants;
@@ -96,8 +93,8 @@ public class GuideService {
             if (!full.isEmpty()) user.setDisplayName(full);
         }
 
-        // guide_profiles requires university_id + major (NOT NULL), so enforce them
-        // whenever we create/persist the row.
+        // A guide always needs a university + major (enforced here even though they now live on
+        // the per-university guide_universities row, not on guide_profiles itself).
         UUID universityId = parseUniversity(req.universityId());
         String major = req.major() == null ? null : req.major().trim();
         if (universityId == null) {
@@ -122,10 +119,6 @@ public class GuideService {
                                     return p;
                                 });
 
-        profile.setUniversityId(universityId);
-        profile.setMajor(major);
-        if (req.classYear() != null) profile.setClassYear(req.classYear().trim());
-        profile.setDegree(degree);
         if (req.bio() != null) profile.setBio(req.bio().trim());
         if (req.languages() != null) {
             List<String> langs =
@@ -177,20 +170,13 @@ public class GuideService {
                         "At least one tour specialty is required to submit your application");
             }
             profile.setApplicationStatus(GuideApplicationStatus.PENDING);
-            profile.setVerificationStatus(GuideVerificationStatus.PENDING);
             guides.save(profile);
 
-            GuideVerificationEntity v = new GuideVerificationEntity();
-            v.setId(UUID.randomUUID());
-            v.setGuideId(profile.getId());
-            v.setMethod("UNIVERSITY_EMAIL");
-            v.setUniversityEmail(email);
-            v.setStatus(GuideVerificationStatus.PENDING);
-            verifications.save(v);
-
-            // Mirror the submission onto guide_universities (the per-university row):
-            // school_email + verification_status=PENDING alongside the flat guide_profiles columns.
-            GuideUniversityEntity guideUniversity = syncGuideUniversity(profile);
+            // Submission lives entirely on guide_universities (the per-university row):
+            // school_email + verification_status=PENDING, keyed off the request's
+            // university/major/degree/classYear.
+            GuideUniversityEntity guideUniversity =
+                    writeGuideUniversity(profile, universityId, major, degree, req.classYear());
             guideUniversity.setSchoolEmail(email);
             guideUniversity.setVerificationStatus(GuideVerificationStatus.PENDING);
             guideUniversities.save(guideUniversity);
@@ -200,7 +186,8 @@ public class GuideService {
             roleGrant.grant(user, UserRole.GUIDE);
         } else {
             guides.save(profile);
-            guideUniversities.save(syncGuideUniversity(profile));
+            guideUniversities.save(
+                    writeGuideUniversity(profile, universityId, major, degree, req.classYear()));
         }
 
         users.save(user);
@@ -208,27 +195,33 @@ public class GuideService {
     }
 
     /**
-     * Upsert the {@code guide_universities} row for this profile's current university (keyed by
-     * {@code (guide_profile_id, university_id)}, single school today) so major/degree/classYear
-     * stay in sync with the flat {@code guide_profiles} columns. Does NOT save — callers persist it
-     * (after possibly layering on submit-only fields like {@code schoolEmail}).
+     * Upsert the {@code guide_universities} row for {@code universityId} (keyed by {@code
+     * (guide_profile_id, university_id)}, single school today), writing major/degree/classYear
+     * directly from the request — {@code guide_profiles} no longer carries these flat columns. Does
+     * NOT save — callers persist it (after possibly layering on submit-only fields like {@code
+     * schoolEmail}).
      */
-    private GuideUniversityEntity syncGuideUniversity(GuideProfileEntity profile) {
+    private GuideUniversityEntity writeGuideUniversity(
+            GuideProfileEntity profile,
+            UUID universityId,
+            String major,
+            String degree,
+            String classYear) {
         GuideUniversityEntity entry =
                 guideUniversities.findByGuideProfileId(profile.getId()).stream()
-                        .filter(g -> profile.getUniversityId().equals(g.getUniversityId()))
+                        .filter(g -> universityId.equals(g.getUniversityId()))
                         .findFirst()
                         .orElseGet(
                                 () -> {
                                     GuideUniversityEntity g = new GuideUniversityEntity();
                                     g.setId(UUID.randomUUID());
                                     g.setGuideProfileId(profile.getId());
-                                    g.setUniversityId(profile.getUniversityId());
+                                    g.setUniversityId(universityId);
                                     return g;
                                 });
-        entry.setMajor(profile.getMajor());
-        entry.setDegree(profile.getDegree());
-        entry.setClassYear(profile.getClassYear());
+        entry.setMajor(major);
+        entry.setDegree(degree);
+        if (classYear != null) entry.setClassYear(classYear.trim());
         return entry;
     }
 

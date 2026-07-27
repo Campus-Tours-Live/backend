@@ -7,9 +7,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
-import com.CampusToursLive.domain.university.UniversityEntity;
-import com.CampusToursLive.domain.university.UniversityRepository;
-import com.CampusToursLive.domain.university.UniversityStatus;
 import com.CampusToursLive.domain.user.AccountStatus;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
@@ -79,7 +76,6 @@ class GuideBookingSettingsUpsertConcurrencyIntegrationTest {
     @Autowired private GuideBookingSettingsRepository settingsRepo;
     @Autowired private GuideProfileRepository guides;
     @Autowired private UserRepository users;
-    @Autowired private UniversityRepository universities;
     @Autowired private DataSource dataSource;
 
     @Test
@@ -155,12 +151,6 @@ class GuideBookingSettingsUpsertConcurrencyIntegrationTest {
     }
 
     private UUID seedGuideWithoutSettings() {
-        UniversityEntity university =
-                universities.findAll().stream()
-                        .filter(u -> u.getStatus() == UniversityStatus.ACTIVE)
-                        .findFirst()
-                        .orElseThrow();
-
         UserEntity guideUser = new UserEntity();
         guideUser.setId(UUID.randomUUID());
         guideUser.setOidcSubject("gset-" + UUID.randomUUID());
@@ -174,8 +164,6 @@ class GuideBookingSettingsUpsertConcurrencyIntegrationTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setUniversityId(university.getId());
-        guide.setMajor("Computer Science");
         guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guides.save(guide);
 

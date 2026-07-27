@@ -31,19 +31,6 @@ public class GuideProfileEntity {
     @Column(name = "user_id", nullable = false, unique = true)
     private UUID userId;
 
-    @Column(name = "university_id", nullable = false)
-    private UUID universityId;
-
-    @Column(name = "major", nullable = false)
-    private String major;
-
-    @Column(name = "class_year")
-    private String classYear;
-
-    /** Degree level shown on the public tour card, e.g. "BS" | "MS" | "PhD". Nullable. */
-    @Column(name = "degree")
-    private String degree;
-
     /** Year the guide entered the university, e.g. 2023. Nullable. */
     @Column(name = "entry_year")
     private Integer entryYear;
@@ -67,13 +54,6 @@ public class GuideProfileEntity {
             columnDefinition = "guide_application_status",
             nullable = false)
     private GuideApplicationStatus applicationStatus = GuideApplicationStatus.PENDING;
-
-    @Enumerated(EnumType.STRING)
-    @Column(
-            name = "verification_status",
-            columnDefinition = "guide_verification_status",
-            nullable = false)
-    private GuideVerificationStatus verificationStatus = GuideVerificationStatus.NOT_SUBMITTED;
 
     @Column(name = "base_price_cents", nullable = false)
     private long basePriceCents = 2800L;

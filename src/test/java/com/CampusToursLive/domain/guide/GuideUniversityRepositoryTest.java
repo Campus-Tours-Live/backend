@@ -63,8 +63,6 @@ class GuideUniversityRepositoryTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setUniversityId(universityId);
-        guide.setMajor("Computer Science");
         guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guides.save(guide);
 
@@ -91,5 +89,68 @@ class GuideUniversityRepositoryTest {
                 .isEqualTo(GuideVerificationStatus.NOT_SUBMITTED);
         assertThat(found.get(0).getUniversityId()).isEqualTo(universityId);
         assertThat(found.get(0).getSchoolEmail()).isEqualTo("jane@school.edu");
+    }
+
+    @Test
+    void findByGuideProfileIdIn_batchLoadsAcrossMultipleGuides_excludingUnrequestedOnes() {
+        GuideUniversityEntity row = new GuideUniversityEntity();
+        row.setId(UUID.randomUUID());
+        row.setGuideProfileId(guideProfileId);
+        row.setUniversityId(universityId);
+        guideUniversities.save(row);
+
+        UserEntity otherUser = new UserEntity();
+        otherUser.setId(UUID.randomUUID());
+        otherUser.setOidcSubject("it-" + UUID.randomUUID());
+        otherUser.setEmail("it-" + UUID.randomUUID() + "@example.com");
+        otherUser.setDisplayName("Other Guide");
+        otherUser.setAccountStatus(AccountStatus.ACTIVE);
+        otherUser.setPreferredLanguage("en-US");
+        otherUser.setTimezone("America/Los_Angeles");
+        users.save(otherUser);
+
+        GuideProfileEntity otherGuide = new GuideProfileEntity();
+        otherGuide.setId(UUID.randomUUID());
+        otherGuide.setUserId(otherUser.getId());
+        otherGuide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
+        guides.save(otherGuide);
+
+        GuideUniversityEntity otherRow = new GuideUniversityEntity();
+        otherRow.setId(UUID.randomUUID());
+        otherRow.setGuideProfileId(otherGuide.getId());
+        otherRow.setUniversityId(universityId);
+        guideUniversities.save(otherRow);
+
+        // A third guide profile, deliberately NOT in the requested id set — must be excluded.
+        UserEntity excludedUser = new UserEntity();
+        excludedUser.setId(UUID.randomUUID());
+        excludedUser.setOidcSubject("it-" + UUID.randomUUID());
+        excludedUser.setEmail("it-" + UUID.randomUUID() + "@example.com");
+        excludedUser.setDisplayName("Excluded Guide");
+        excludedUser.setAccountStatus(AccountStatus.ACTIVE);
+        excludedUser.setPreferredLanguage("en-US");
+        excludedUser.setTimezone("America/Los_Angeles");
+        users.save(excludedUser);
+
+        GuideProfileEntity excludedGuide = new GuideProfileEntity();
+        excludedGuide.setId(UUID.randomUUID());
+        excludedGuide.setUserId(excludedUser.getId());
+        excludedGuide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
+        guides.save(excludedGuide);
+
+        GuideUniversityEntity excludedRow = new GuideUniversityEntity();
+        excludedRow.setId(UUID.randomUUID());
+        excludedRow.setGuideProfileId(excludedGuide.getId());
+        excludedRow.setUniversityId(universityId);
+        guideUniversities.save(excludedRow);
+
+        List<GuideUniversityEntity> found =
+                guideUniversities.findByGuideProfileIdIn(
+                        List.of(guideProfileId, otherGuide.getId()));
+
+        assertThat(found).hasSize(2);
+        assertThat(found)
+                .extracting(GuideUniversityEntity::getGuideProfileId)
+                .containsExactlyInAnyOrder(guideProfileId, otherGuide.getId());
     }
 }

@@ -352,18 +352,22 @@ class TourOfferingRepositoryTest {
         return insertGuideWithUser(universityId, userId, applicationStatus);
     }
 
+    /**
+     * {@code universityId} is unused here (guide_profiles no longer carries a flat university_id
+     * column — that lives on guide_universities instead, which this repository's queries don't
+     * consult), kept only so callers don't need touching: they already have the id in hand for
+     * {@link #insertOffering}.
+     */
     private UUID insertGuideWithUser(UUID universityId, UUID userId, String applicationStatus) {
         UUID guideId = UUID.randomUUID();
         entityManager
                 .createNativeQuery(
                         """
-                        INSERT INTO guide_profiles (id, user_id, university_id, major, application_status)
-                        VALUES (:id, :userId, :universityId, 'Computer Science',
-                                CAST(:applicationStatus AS guide_application_status))
+                        INSERT INTO guide_profiles (id, user_id, application_status)
+                        VALUES (:id, :userId, CAST(:applicationStatus AS guide_application_status))
                         """)
                 .setParameter("id", guideId)
                 .setParameter("userId", userId)
-                .setParameter("universityId", universityId)
                 .setParameter("applicationStatus", applicationStatus)
                 .executeUpdate();
         return guideId;

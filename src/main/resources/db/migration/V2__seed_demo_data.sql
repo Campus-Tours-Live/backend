@@ -2971,16 +2971,23 @@ INSERT INTO user_roles (user_id, role) VALUES
   ('10000000-0000-0000-0000-0000000001f4', 'GUIDE')
 ON CONFLICT (user_id, role) DO NOTHING;
 
-INSERT INTO guide_profiles (
-  user_id, university_id, major, class_year, degree, entry_year, bio, languages,
-  specialties, application_status, verification_status, base_price_cents, currency, approved_at
-)
-SELECT
-  seed.user_id, university.id, seed.major, seed.class_year, seed.degree, seed.entry_year, seed.bio,
-  seed.languages::jsonb, seed.specialties::jsonb,
-  'VERIFIED'::guide_application_status, 'VERIFIED'::guide_verification_status,
-  seed.base_price_cents, 'USD', now()
-FROM (
+-- Seed source for each demo guide's university enrollment (major/degree/classYear/school) —
+-- shared by the guide_profiles insert below and the guide_universities mirror insert that
+-- follows it, so both stay in sync without duplicating this ~150-row VALUES list.
+CREATE TEMP TABLE guide_university_seed (
+  user_id uuid,
+  university_slug text,
+  major text,
+  class_year text,
+  degree text,
+  entry_year smallint,
+  bio text,
+  languages text,
+  specialties text,
+  base_price_cents bigint
+) ON COMMIT DROP;
+
+INSERT INTO guide_university_seed
   VALUES
     ('10000000-0000-0000-0000-000000000001'::uuid, 'berkeley', 'Computer Science', '2022', 'MA', 2018, 'Berkeley Computer Science student (class of 2022) who loves showing visitors around campus.', '["en-US"]', '["GENERAL_CAMPUS","INTERNATIONAL_STUDENT"]', 2500::bigint),
     ('10000000-0000-0000-0000-000000000002'::uuid, 'michigan', 'Data Science', '2023', 'PhD', 2019, 'Michigan Data Science student (class of 2023) who loves showing visitors around campus.', '["en-US","ja"]', '["DORM_HOUSING","MAJOR_SPECIFIC"]', 3000::bigint),
@@ -3481,17 +3488,30 @@ FROM (
     ('10000000-0000-0000-0000-0000000001f1'::uuid, 'rochester', 'Computer Science', '2022', 'PhD', 2018, 'Rochester Computer Science student (class of 2022) who loves showing visitors around campus.', '["en-US","it"]', '["GENERAL_CAMPUS","INTERNATIONAL_STUDENT"]', 3000::bigint),
     ('10000000-0000-0000-0000-0000000001f2'::uuid, 'case', 'Data Science', '2023', 'MS', 2019, 'Case Western Data Science student (class of 2023) who loves showing visitors around campus.', '["en-US","ko","it"]', '["DORM_HOUSING","MAJOR_SPECIFIC"]', 3500::bigint),
     ('10000000-0000-0000-0000-0000000001f3'::uuid, 'tulane', 'Software Engineering', '2024', 'PhD', 2020, 'Tulane Software Engineering student (class of 2024) who loves showing visitors around campus.', '["en-US"]', '["DINING_STUDENT_LIFE","PARENT_FOCUSED"]', 4000::bigint),
-    ('10000000-0000-0000-0000-0000000001f4'::uuid, 'miami', 'Cybersecurity', '2025', 'MS', 2021, 'Miami Cybersecurity student (class of 2025) who loves showing visitors around campus.', '["en-US","ja"]', '["INTERNATIONAL_STUDENT","FRESHMAN"]', 4500::bigint)
-) AS seed(user_id, university_slug, major, class_year, degree, entry_year, bio, languages, specialties, base_price_cents)
+    ('10000000-0000-0000-0000-0000000001f4'::uuid, 'miami', 'Cybersecurity', '2025', 'MS', 2021, 'Miami Cybersecurity student (class of 2025) who loves showing visitors around campus.', '["en-US","ja"]', '["INTERNATIONAL_STUDENT","FRESHMAN"]', 4500::bigint);
+
+INSERT INTO guide_profiles (
+  user_id, entry_year, bio, languages,
+  specialties, application_status, base_price_cents, currency, approved_at
+)
+SELECT
+  seed.user_id, seed.entry_year, seed.bio,
+  seed.languages::jsonb, seed.specialties::jsonb,
+  'VERIFIED'::guide_application_status,
+  seed.base_price_cents, 'USD', now()
+FROM guide_university_seed seed
 JOIN universities university ON university.slug = seed.university_slug
 ON CONFLICT (user_id) DO NOTHING;
 
 -- Mirror each seeded demo guide onto guide_universities (the per-university row) so their
 -- /guide/profile universities[] is non-empty and Phase-4 offering rules (which read the
--- guide_universities row) have something to validate against.
+-- guide_universities row) have something to validate against. university/major/degree/classYear
+-- come from the seed VALUES (guide_profiles no longer carries flat university columns).
 INSERT INTO guide_universities (id, guide_profile_id, university_id, major, degree, class_year, verification_status)
-SELECT gen_random_uuid(), gp.id, gp.university_id, gp.major, gp.degree, gp.class_year, 'VERIFIED'::guide_verification_status
-FROM guide_profiles gp WHERE gp.university_id IS NOT NULL
+SELECT gen_random_uuid(), gp.id, university.id, seed.major, seed.degree, seed.class_year, 'VERIFIED'::guide_verification_status
+FROM guide_university_seed seed
+JOIN guide_profiles gp ON gp.user_id = seed.user_id
+JOIN universities university ON university.slug = seed.university_slug
 ON CONFLICT (guide_profile_id, university_id) DO NOTHING;
 
 INSERT INTO tour_offerings (

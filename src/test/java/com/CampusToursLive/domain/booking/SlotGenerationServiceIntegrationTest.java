@@ -85,8 +85,6 @@ class SlotGenerationServiceIntegrationTest {
         GuideProfileEntity g = new GuideProfileEntity();
         g.setId(UUID.randomUUID());
         g.setUserId(guideUser.getId());
-        g.setUniversityId(universityId);
-        g.setMajor("Computer Science");
         g.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guide = guides.save(g);
 
@@ -197,8 +195,6 @@ class SlotGenerationServiceIntegrationTest {
         GuideProfileEntity otherGuide = new GuideProfileEntity();
         otherGuide.setId(UUID.randomUUID());
         otherGuide.setUserId(otherGuideUser.getId());
-        otherGuide.setUniversityId(universityId);
-        otherGuide.setMajor("Biology");
         otherGuide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guides.save(otherGuide);
 

@@ -14,6 +14,9 @@ import static org.mockito.Mockito.when;
 import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideUniversityEntity;
+import com.CampusToursLive.domain.guide.GuideUniversityRepository;
+import com.CampusToursLive.domain.guide.GuideVerificationStatus;
 import com.CampusToursLive.domain.university.CampusImageUrls;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
@@ -42,13 +45,19 @@ class TourOfferingServiceTest {
 
     @Mock TourOfferingRepository offerings;
     @Mock GuideProfileRepository guides;
+    @Mock GuideUniversityRepository guideUniversities;
     @Mock UniversityRepository universities;
 
     private final CampusImageUrls campusImages = new CampusImageUrls("https://r2.example/");
 
     private TourOfferingService service() {
         return new TourOfferingService(
-                offerings, guides, universities, campusImages, new ObjectMapper());
+                offerings,
+                guides,
+                guideUniversities,
+                universities,
+                campusImages,
+                new ObjectMapper());
     }
 
     private static UserEntity user(UUID id) {
@@ -61,8 +70,26 @@ class TourOfferingServiceTest {
         GuideProfileEntity g = new GuideProfileEntity();
         g.setId(id);
         g.setApplicationStatus(status);
-        g.setUniversityId(UUID.fromString(UNI)); // create() validates req.universityId against this
         return g;
+    }
+
+    /**
+     * create() validates req.universityId against a VERIFIED {@code guide_universities} row for
+     * that guide (not a flat guide_profiles column anymore). Registers exactly that row for {@code
+     * gid} scoped to {@link #UNI}. {@code lenient()} because several callers (activate tests via
+     * stubApprovedGuide, and create tests whose universityId fails to parse before the membership
+     * check even runs) never actually invoke this stub — strict stubbing would otherwise flag it as
+     * unnecessary.
+     */
+    private void stubVerifiedMembership(UUID gid) {
+        GuideUniversityEntity row = new GuideUniversityEntity();
+        row.setId(UUID.randomUUID());
+        row.setGuideProfileId(gid);
+        row.setUniversityId(UUID.fromString(UNI));
+        row.setVerificationStatus(GuideVerificationStatus.VERIFIED);
+        org.mockito.Mockito.lenient()
+                .when(guideUniversities.findByGuideProfileId(gid))
+                .thenReturn(List.of(row));
     }
 
     @Test
@@ -103,6 +130,7 @@ class TourOfferingServiceTest {
         UUID gid = UUID.randomUUID();
         when(guides.findByUserId(uid))
                 .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING)));
+        stubVerifiedMembership(gid);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -155,6 +183,30 @@ class TourOfferingServiceTest {
                         List.of("en-US"));
 
         assertThrows(ValidationException.class, () -> service().create(user(uid), req));
+    }
+
+    @Test
+    void create_throws422_whenUniversityMembershipExistsButIsNotVerified() {
+        // A guide_universities row for the requested school exists (they applied) but its
+        // verification_status hasn't reached VERIFIED yet — membership must NOT count until it
+        // does.
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        when(guides.findByUserId(uid))
+                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING)));
+        GuideUniversityEntity pendingRow = new GuideUniversityEntity();
+        pendingRow.setId(UUID.randomUUID());
+        pendingRow.setGuideProfileId(gid);
+        pendingRow.setUniversityId(UUID.fromString(UNI));
+        pendingRow.setVerificationStatus(GuideVerificationStatus.PENDING);
+        when(guideUniversities.findByGuideProfileId(gid)).thenReturn(List.of(pendingRow));
+
+        var ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().create(user(uid), validReq("Campus highlights walk")));
+        assertTrue(ex.getMessage().toLowerCase().contains("verif"));
+        verifyNoInteractions(offerings);
     }
 
     // ---------- create: feature validation ----------
@@ -259,11 +311,13 @@ class TourOfferingServiceTest {
     private void stubPendingGuide(UUID uid, UUID gid) {
         when(guides.findByUserId(uid))
                 .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING)));
+        stubVerifiedMembership(gid);
     }
 
     private void stubApprovedGuide(UUID uid, UUID gid) {
         when(guides.findByUserId(uid))
                 .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.VERIFIED)));
+        stubVerifiedMembership(gid);
     }
 
     private static TourOfferingEntity offering(UUID id, UUID gid, TourStatus status) {
@@ -641,7 +695,9 @@ class TourOfferingServiceTest {
         UUID gid = UUID.randomUUID();
         var mapper = org.mockito.Mockito.mock(ObjectMapper.class);
         when(mapper.writeValueAsString(any())).thenThrow(new RuntimeException("boom"));
-        var svc = new TourOfferingService(offerings, guides, universities, campusImages, mapper);
+        var svc =
+                new TourOfferingService(
+                        offerings, guides, guideUniversities, universities, campusImages, mapper);
         stubPendingGuide(uid, gid);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));

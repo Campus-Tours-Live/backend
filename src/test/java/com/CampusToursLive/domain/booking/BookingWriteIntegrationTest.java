@@ -86,8 +86,6 @@ class BookingWriteIntegrationTest {
         GuideProfileEntity g = new GuideProfileEntity();
         g.setId(UUID.randomUUID());
         g.setUserId(guideUser.getId());
-        g.setUniversityId(university.getId());
-        g.setMajor("Computer Science");
         g.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guide = guides.save(g);
 

@@ -7,9 +7,9 @@ import java.util.List;
 /**
  * PATCH /guide/profile body — guide application / onboarding.
  *
- * <p>Maps to: users (firstName, lastName, displayName) + guide_profiles (universityId, major,
- * classYear, bio, languages, specialties, basePriceCents, degree) + guide_verifications (method
- * UNIVERSITY_EMAIL, verificationEmail).
+ * <p>Maps to: users (firstName, lastName, displayName) + guide_profiles (bio, languages,
+ * specialties, basePriceCents) + guide_universities (universityId, major, classYear, degree,
+ * schoolEmail from verificationEmail, method UNIVERSITY_EMAIL implied).
  *
  * <p>When {@code submit} is true the application is finalized: required fields (university, major,
  * verification email) are enforced, a verification row is created, the GUIDE role is granted

@@ -48,7 +48,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class GuideServiceTest {
 
     @Mock GuideProfileRepository guides;
-    @Mock GuideVerificationRepository verifications;
     @Mock GuideUniversityRepository guideUniversities;
     @Mock UniversityRepository universities;
     @Mock ParticipantProfileRepository participants;
@@ -60,7 +59,6 @@ class GuideServiceTest {
     private GuideService service() {
         return new GuideService(
                 guides,
-                verifications,
                 guideUniversities,
                 universities,
                 participants,
@@ -381,7 +379,7 @@ class GuideServiceTest {
 
         verify(guides).save(any());
         verify(users).save(any());
-        verifyNoInteractions(roleGrant, verifications); // draft: no role, no verification record
+        verifyNoInteractions(roleGrant); // draft: no role granted
     }
 
     @Test
@@ -449,7 +447,6 @@ class GuideServiceTest {
                                         List.of("GENERAL_CAMPUS")));
 
         assertEquals("PENDING", res.applicationStatus());
-        verify(verifications).save(any()); // a UNIVERSITY_EMAIL verification record is created
         verify(roleGrant).grant(u, UserRole.GUIDE);
         verify(users).save(u);
     }
@@ -651,15 +648,11 @@ class GuideServiceTest {
         u.setAccountStatus(com.CampusToursLive.domain.user.AccountStatus.ACTIVE);
         GuideProfileEntity profile = new GuideProfileEntity();
         profile.setId(profileId);
-        profile.setUniversityId(uni);
-        profile.setMajor("CS");
-        profile.setClassYear("2026");
         profile.setBio("hi");
         profile.setLanguages("[\"en-US\"]");
         profile.setSpecialties("[\"GENERAL_CAMPUS\"]");
         profile.setBasePriceCents(5000L);
         profile.setApplicationStatus(GuideApplicationStatus.VERIFIED);
-        profile.setVerificationStatus(GuideVerificationStatus.VERIFIED);
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
         UniversityEntity university = new UniversityEntity();
         university.setId(uni);
@@ -709,10 +702,9 @@ class GuideServiceTest {
     void getProfile_profilePresentButNullEnumsAndArrays() {
         UUID uid = UUID.randomUUID();
         UserEntity u = user(uid);
-        // applicationStatus null, verificationStatus null, null arrays.
+        // applicationStatus null, null arrays.
         GuideProfileEntity profile = new GuideProfileEntity();
         profile.setApplicationStatus(null);
-        profile.setVerificationStatus(null);
         profile.setLanguages(null);
         profile.setSpecialties("   ");
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
@@ -737,8 +729,6 @@ class GuideServiceTest {
         UserEntity u = user(uid);
         GuideProfileEntity profile = new GuideProfileEntity();
         profile.setId(profileId);
-        profile.setUniversityId(uni);
-        profile.setMajor("CS");
         profile.setApplicationStatus(GuideApplicationStatus.PENDING);
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
         when(universities.findById(uni)).thenReturn(Optional.empty());
@@ -863,7 +853,7 @@ class GuideServiceTest {
         assertEquals("Ada Lovelace", u.getDisplayName());
         verify(guides).save(any());
         verify(users).save(u);
-        verifyNoInteractions(roleGrant, verifications);
+        verifyNoInteractions(roleGrant);
     }
 
     @Test
@@ -1229,7 +1219,7 @@ class GuideServiceTest {
         service().updateProfile(user(uid), req(uni.toString(), "CS", null, null, null, null));
 
         verify(guides).save(any());
-        verifyNoInteractions(roleGrant, verifications);
+        verifyNoInteractions(roleGrant);
     }
 
     @Test
@@ -1308,7 +1298,6 @@ class GuideServiceTest {
         GuideService svc =
                 new GuideService(
                         guides,
-                        verifications,
                         guideUniversities,
                         universities,
                         participants,
@@ -1351,7 +1340,6 @@ class GuideServiceTest {
         GuideService svc =
                 new GuideService(
                         guides,
-                        verifications,
                         guideUniversities,
                         universities,
                         participants,

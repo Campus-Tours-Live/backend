@@ -2,6 +2,8 @@ package com.CampusToursLive.domain.tour;
 
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideUniversityEntity;
+import com.CampusToursLive.domain.guide.GuideUniversityRepository;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.user.UserEntity;
@@ -15,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +48,7 @@ public class TourDiscoveryService {
 
     private final TourOfferingRepository offerings;
     private final GuideProfileRepository guides;
+    private final GuideUniversityRepository guideUniversities;
     private final UniversityRepository universities;
     private final UserRepository users;
     private final ObjectMapper mapper;
@@ -52,11 +56,13 @@ public class TourDiscoveryService {
     public TourDiscoveryService(
             TourOfferingRepository offerings,
             GuideProfileRepository guides,
+            GuideUniversityRepository guideUniversities,
             UniversityRepository universities,
             UserRepository users,
             ObjectMapper mapper) {
         this.offerings = offerings;
         this.guides = guides;
+        this.guideUniversities = guideUniversities;
         this.universities = universities;
         this.users = users;
         this.mapper = mapper;
@@ -194,7 +200,14 @@ public class TourDiscoveryService {
             universityById.put(u.getId(), u);
         }
 
-        return new Lookup(guideById, userById, universityById);
+        Map<UUID, List<GuideUniversityEntity>> guideUniversitiesByGuideId = new HashMap<>();
+        for (GuideUniversityEntity gu : guideUniversities.findByGuideProfileIdIn(guideIds)) {
+            guideUniversitiesByGuideId
+                    .computeIfAbsent(gu.getGuideProfileId(), k -> new ArrayList<>())
+                    .add(gu);
+        }
+
+        return new Lookup(guideById, userById, universityById, guideUniversitiesByGuideId);
     }
 
     private TourSummaryResponse toSummary(TourOfferingEntity o, Lookup lookup) {
@@ -202,6 +215,8 @@ public class TourDiscoveryService {
         UniversityEntity university = requireUniversity(o, lookup);
         UserEntity user = lookup.userById().get(guide.getUserId());
         String guideName = user != null ? user.getDisplayName() : "Guide";
+        GuideUniversityEntity guideUniversity =
+                findGuideUniversity(guide, o.getUniversityId(), lookup);
 
         return new TourSummaryResponse(
                 o.getId().toString(),
@@ -213,8 +228,8 @@ public class TourDiscoveryService {
                 university.getImageUrl(),
                 guide.getId().toString(),
                 guideName,
-                guide.getMajor(),
-                guide.getDegree(),
+                guideUniversity != null ? guideUniversity.getMajor() : null,
+                guideUniversity != null ? guideUniversity.getDegree() : null,
                 guide.getEntryYear(),
                 o.getDurationMin(),
                 o.getPriceCents(),
@@ -224,6 +239,20 @@ public class TourDiscoveryService {
                 readStringArray(o.getLanguages()),
                 readStringArray(o.getFeatures()),
                 isNew(o));
+    }
+
+    /**
+     * The guide's {@code guide_universities} row for the offering's own university (major/degree
+     * are now tracked per-university, not on the flat {@code guide_profiles} row). Batch-loaded in
+     * {@link #loadLookup} to avoid N+1 queries; {@code null} if the guide has no row for that
+     * school (shouldn't happen for a discoverable offering, but the card degrades gracefully).
+     */
+    private static GuideUniversityEntity findGuideUniversity(
+            GuideProfileEntity guide, UUID offeringUniversityId, Lookup lookup) {
+        return lookup.guideUniversitiesByGuideId().getOrDefault(guide.getId(), List.of()).stream()
+                .filter(g -> offeringUniversityId.equals(g.getUniversityId()))
+                .findFirst()
+                .orElse(null);
     }
 
     private static boolean isNew(TourOfferingEntity o) {
@@ -298,10 +327,11 @@ public class TourDiscoveryService {
     private record Lookup(
             Map<UUID, GuideProfileEntity> guideById,
             Map<UUID, UserEntity> userById,
-            Map<UUID, UniversityEntity> universityById) {
+            Map<UUID, UniversityEntity> universityById,
+            Map<UUID, List<GuideUniversityEntity>> guideUniversitiesByGuideId) {
 
         static Lookup empty() {
-            return new Lookup(Map.of(), Map.of(), Map.of());
+            return new Lookup(Map.of(), Map.of(), Map.of(), Map.of());
         }
     }
 }

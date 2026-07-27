@@ -710,8 +710,6 @@ class AvailabilityPreviewServiceIntegrationTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setUniversityId(universityId);
-        guide.setMajor("Computer Science");
         guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         return guides.save(guide);
     }

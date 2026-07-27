@@ -3,6 +3,8 @@ package com.CampusToursLive.domain.tour;
 import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideUniversityRepository;
+import com.CampusToursLive.domain.guide.GuideVerificationStatus;
 import com.CampusToursLive.domain.university.CampusImageUrls;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.user.UserEntity;
@@ -35,6 +37,7 @@ public class TourOfferingService {
 
     private final TourOfferingRepository offerings;
     private final GuideProfileRepository guides;
+    private final GuideUniversityRepository guideUniversities;
     private final UniversityRepository universities;
     private final CampusImageUrls campusImages;
     private final ObjectMapper mapper;
@@ -42,11 +45,13 @@ public class TourOfferingService {
     public TourOfferingService(
             TourOfferingRepository offerings,
             GuideProfileRepository guides,
+            GuideUniversityRepository guideUniversities,
             UniversityRepository universities,
             CampusImageUrls campusImages,
             ObjectMapper mapper) {
         this.offerings = offerings;
         this.guides = guides;
+        this.guideUniversities = guideUniversities;
         this.universities = universities;
         this.campusImages = campusImages;
         this.mapper = mapper;
@@ -64,7 +69,9 @@ public class TourOfferingService {
 
         UUID universityId = parseUuid(req.universityId());
         if (!isGuidesVerifiedUniversity(guide, universityId)) {
-            throw new ValidationException("universityId must be a university you are verified for");
+            throw new ValidationException(
+                    "universityId must be a university you are verified for (verification_status"
+                            + " must be VERIFIED)");
         }
         // Backfill the campus image on first use if the university has none yet (idempotent).
         universities
@@ -164,11 +171,17 @@ public class TourOfferingService {
     }
 
     /**
-     * Whether {@code id} is a university the guide is verified for. Today a guide has exactly one
-     * verified school (guide.universityId); multi-school later swaps this for set membership.
+     * Whether {@code id} is a university the guide is verified for: a {@code guide_universities}
+     * row exists for {@code (guide.id, id)} with {@code verification_status == VERIFIED}. A guide
+     * may hold several schools; only a VERIFIED membership counts.
      */
-    private static boolean isGuidesVerifiedUniversity(GuideProfileEntity guide, UUID id) {
-        return id.equals(guide.getUniversityId());
+    private boolean isGuidesVerifiedUniversity(GuideProfileEntity guide, UUID id) {
+        return guideUniversities.findByGuideProfileId(guide.getId()).stream()
+                .anyMatch(
+                        g ->
+                                id.equals(g.getUniversityId())
+                                        && g.getVerificationStatus()
+                                                == GuideVerificationStatus.VERIFIED);
     }
 
     private TourTopic parseTopic(String raw) {

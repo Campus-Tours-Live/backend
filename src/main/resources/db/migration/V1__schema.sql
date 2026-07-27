@@ -649,17 +649,12 @@ CREATE TABLE public.guide_booking_settings (
 CREATE TABLE public.guide_profiles (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     user_id uuid NOT NULL,
-    university_id uuid NOT NULL,
-    major text NOT NULL,
-    class_year text,
-    degree text,
     entry_year smallint,
     bio text,
     languages jsonb DEFAULT '["en-US"]'::jsonb NOT NULL,
     specialties jsonb DEFAULT '[]'::jsonb NOT NULL,
     favorite_spots jsonb DEFAULT '[]'::jsonb NOT NULL,
     application_status public.guide_application_status DEFAULT 'PENDING'::public.guide_application_status NOT NULL,
-    verification_status public.guide_verification_status DEFAULT 'NOT_SUBMITTED'::public.guide_verification_status NOT NULL,
     base_price_cents bigint DEFAULT 2800 NOT NULL,
     currency character(3) DEFAULT 'USD'::bpchar NOT NULL,
     avg_rating numeric(3,2) DEFAULT 0 NOT NULL,
@@ -671,25 +666,6 @@ CREATE TABLE public.guide_profiles (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT guide_profiles_base_price_cents_check CHECK (((base_price_cents >= 2000) AND (base_price_cents <= 20000)))
-);
-
-
---
--- Name: guide_verifications; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.guide_verifications (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    guide_id uuid NOT NULL,
-    method text NOT NULL,
-    university_email public.citext,
-    document_key text,
-    status public.guide_verification_status DEFAULT 'PENDING'::public.guide_verification_status NOT NULL,
-    reviewed_by uuid,
-    reviewed_at timestamp with time zone,
-    rejection_reason text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1183,14 +1159,6 @@ ALTER TABLE ONLY public.guide_profiles
 
 
 --
--- Name: guide_verifications guide_verifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.guide_verifications
-    ADD CONSTRAINT guide_verifications_pkey PRIMARY KEY (id);
-
-
---
 -- Name: idempotency_keys idempotency_keys_operation_idempotency_key_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1499,20 +1467,6 @@ CREATE INDEX ix_guide_app_status ON public.guide_profiles USING btree (applicati
 
 
 --
--- Name: ix_guide_univ; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX ix_guide_univ ON public.guide_profiles USING btree (university_id);
-
-
---
--- Name: ix_gverif_guide; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX ix_gverif_guide ON public.guide_verifications USING btree (guide_id);
-
-
---
 -- Name: ix_idem_expires; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1643,13 +1597,6 @@ CREATE TRIGGER trg_guardians_updated BEFORE UPDATE ON public.guardians FOR EACH 
 --
 
 CREATE TRIGGER trg_guide_updated BEFORE UPDATE ON public.guide_profiles FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-
-
---
--- Name: guide_verifications trg_gverif_updated; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_gverif_updated BEFORE UPDATE ON public.guide_verifications FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -1859,35 +1806,11 @@ ALTER TABLE ONLY public.guide_booking_settings
 
 
 --
--- Name: guide_profiles guide_profiles_university_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.guide_profiles
-    ADD CONSTRAINT guide_profiles_university_id_fkey FOREIGN KEY (university_id) REFERENCES public.universities(id);
-
-
---
 -- Name: guide_profiles guide_profiles_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.guide_profiles
     ADD CONSTRAINT guide_profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
-
---
--- Name: guide_verifications guide_verifications_guide_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.guide_verifications
-    ADD CONSTRAINT guide_verifications_guide_id_fkey FOREIGN KEY (guide_id) REFERENCES public.guide_profiles(id) ON DELETE CASCADE;
-
-
---
--- Name: guide_verifications guide_verifications_reviewed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.guide_verifications
-    ADD CONSTRAINT guide_verifications_reviewed_by_fkey FOREIGN KEY (reviewed_by) REFERENCES public.users(id);
 
 
 --

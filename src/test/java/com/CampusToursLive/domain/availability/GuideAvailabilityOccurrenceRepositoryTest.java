@@ -69,8 +69,6 @@ class GuideAvailabilityOccurrenceRepositoryTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setUniversityId(university.getId());
-        guide.setMajor("Computer Science");
         guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guides.save(guide);
 
@@ -123,13 +121,6 @@ class GuideAvailabilityOccurrenceRepositoryTest {
         GuideProfileEntity otherGuide = new GuideProfileEntity();
         otherGuide.setId(UUID.randomUUID());
         otherGuide.setUserId(otherGuideUser.getId());
-        otherGuide.setUniversityId(
-                universities.findAll().stream()
-                        .filter(u -> u.getStatus() == UniversityStatus.ACTIVE)
-                        .findFirst()
-                        .orElseThrow()
-                        .getId());
-        otherGuide.setMajor("Biology");
         otherGuide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guides.save(otherGuide);
 

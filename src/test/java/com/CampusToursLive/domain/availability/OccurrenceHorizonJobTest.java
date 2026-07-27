@@ -252,8 +252,6 @@ class OccurrenceHorizonJobTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setUniversityId(universityId);
-        guide.setMajor("Computer Science");
         guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guides.save(guide);
         UUID guideId = guide.getId();
