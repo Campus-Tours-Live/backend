@@ -143,12 +143,11 @@ public interface ApiExamples {
                     + "}";
 
     String ME =
-            "{\"data\":{\"id\":\"22222222-0000-4000-8000-000000000001\","
-                    + "\"roles\":[\"PARTICIPANT\"],\"activeRole\":\"PARTICIPANT\","
-                    + "\"participantType\":\"PROSPECTIVE_STUDENT\",\"guideStatus\":null,"
+            "{\"data\":{\"user\":{\"id\":\"22222222-0000-4000-8000-000000000001\","
                     + "\"firstName\":\"Sam\",\"lastName\":\"Rivera\",\"displayName\":\"Sam Rivera\","
                     + "\"email\":\"sam.rivera@example.com\",\"accountStatus\":\"ACTIVE\","
                     + "\"ageBand\":\"ADULT\",\"createdAt\":\"2026-01-15T09:30:00Z\"},"
+                    + "\"roles\":[\"PARTICIPANT\"],\"activeRole\":\"PARTICIPANT\"},"
                     + META
                     + "}";
 

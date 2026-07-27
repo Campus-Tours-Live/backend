@@ -1,7 +1,5 @@
 package com.CampusToursLive.web;
 
-import com.CampusToursLive.domain.guide.GuideProfileRepository;
-import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
 import com.CampusToursLive.domain.user.ActiveRoleService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRoleRepository;
@@ -39,20 +37,12 @@ public class SessionController {
 
     private final CurrentUser currentUser;
     private final UserRoleRepository userRoles;
-    private final ParticipantProfileRepository participants;
-    private final GuideProfileRepository guides;
     private final ActiveRoleService activeRole;
 
     public SessionController(
-            CurrentUser currentUser,
-            UserRoleRepository userRoles,
-            ParticipantProfileRepository participants,
-            GuideProfileRepository guides,
-            ActiveRoleService activeRole) {
+            CurrentUser currentUser, UserRoleRepository userRoles, ActiveRoleService activeRole) {
         this.currentUser = currentUser;
         this.userRoles = userRoles;
-        this.participants = participants;
-        this.guides = guides;
         this.activeRole = activeRole;
     }
 
@@ -60,8 +50,8 @@ public class SessionController {
     @Operation(
             summary = "Current principal",
             description =
-                    "Returns the current authenticated principal (identity, roles, per-role"
-                            + " status). The account must already be provisioned.")
+                    "Returns the current authenticated principal (identity and roles). The"
+                            + " account must already be provisioned.")
     @ApiResponse(
             responseCode = "200",
             description = "The current principal.",
@@ -168,30 +158,13 @@ public class SessionController {
         return ApiEnvelope.of(me(user));
     }
 
-    /** Build the principal view, enriched with the authoritative role set + per-role status. */
+    /** Build the principal view, enriched with the authoritative role set. */
     private MeResponse me(UserEntity user) {
         List<String> roles =
                 userRoles.findByUserId(user.getId()).stream()
                         .map(ur -> ur.getRole().name())
                         .sorted()
                         .toList();
-        String participantType =
-                participants
-                        .findByUserId(user.getId())
-                        .map(
-                                p ->
-                                        p.getParticipantType() != null
-                                                ? p.getParticipantType().name()
-                                                : null)
-                        .orElse(null);
-        String guideStatus =
-                guides.findByUserId(user.getId())
-                        .map(
-                                g ->
-                                        g.getApplicationStatus() != null
-                                                ? g.getApplicationStatus().name()
-                                                : null)
-                        .orElse(null);
-        return MeResponse.of(user, roles, participantType, guideStatus);
+        return MeResponse.of(user, roles);
     }
 }
