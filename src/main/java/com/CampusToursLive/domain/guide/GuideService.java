@@ -261,6 +261,21 @@ public class GuideService {
                             if (s == null) {
                                 throw new ValidationException("Unknown university: " + scorecardId);
                             }
+                            // Reuse-by-name absorption: a legacy seed row (human slug) sharing this
+                            // Scorecard school's exact name gets re-keyed into the sc-<id>
+                            // namespace
+                            // instead of creating a duplicate row. This converges the catalog to
+                            // Scorecard-keyed rows over time. city/region/imageUrl are left as-is —
+                            // only the slug (always) and shortName (when Scorecard has one) change.
+                            UniversityEntity existing =
+                                    universities.findFirstByName(s.name()).orElse(null);
+                            if (existing != null) {
+                                existing.setSlug(slug);
+                                if (s.shortName() != null && !s.shortName().isBlank()) {
+                                    existing.setShortName(s.shortName());
+                                }
+                                return universities.save(existing).getId();
+                            }
                             UniversityEntity u = new UniversityEntity();
                             u.setId(UUID.randomUUID());
                             u.setSlug(slug);

@@ -16,6 +16,7 @@ import com.CampusToursLive.domain.participant.ParticipantType;
 import com.CampusToursLive.domain.university.CampusImageUrls;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
+import com.CampusToursLive.domain.university.UniversityStatus;
 import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
@@ -196,6 +197,91 @@ class GuideServiceTest {
         // which asserts this identical value. They agree because both go through
         // CampusImageUrls#forName with that university's name -- keep the two expectations in step.
         assertEquals("https://r2.example/Harvard%20University.png", saved.getValue().getImageUrl());
+    }
+
+    @Test
+    void upsertFromDirectory_absorbsExistingUniversityByName_reKeyingSlugAndShortName() {
+        // A legacy seed row ("foo" slug, null shortName) shares the Scorecard school's name.
+        // Absorption must REUSE that row (re-key its slug into the sc-<id> namespace and fill in
+        // the Scorecard shortName) instead of inserting a brand-new sc-X row.
+        UUID existingId = UUID.randomUUID();
+        UniversityEntity existing = new UniversityEntity();
+        existing.setId(existingId);
+        existing.setSlug("foo");
+        existing.setName("University of Foo");
+        existing.setShortName(null);
+        existing.setCity("Foo City");
+        existing.setRegion("CA");
+        existing.setTimezone("America/Los_Angeles");
+        existing.setStatus(UniversityStatus.ACTIVE);
+        existing.setImageUrl("https://existing.example/foo.png");
+
+        when(universities.findBySlug("sc-X")).thenReturn(Optional.empty());
+        when(schools.getSchool("X"))
+                .thenReturn(
+                        new SchoolDirectory.SchoolRef(
+                                "X", "University of Foo", "Foo", "Foo City", "CA"));
+        when(universities.findFirstByName("University of Foo")).thenReturn(Optional.of(existing));
+        when(universities.save(org.mockito.ArgumentMatchers.any(UniversityEntity.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        UUID result = service().resolveUniversityForTest("X");
+
+        assertEquals(existingId, result);
+        assertEquals("sc-X", existing.getSlug());
+        assertEquals("Foo", existing.getShortName());
+        // Absorption must not overwrite the existing row's city/region/imageUrl.
+        assertEquals("Foo City", existing.getCity());
+        assertEquals("CA", existing.getRegion());
+        assertEquals("https://existing.example/foo.png", existing.getImageUrl());
+        verify(universities).save(existing);
+    }
+
+    @Test
+    void upsertFromDirectory_absorb_doesNotWipeExistingShortName_whenScorecardAliasIsNull() {
+        UUID existingId = UUID.randomUUID();
+        UniversityEntity existing = new UniversityEntity();
+        existing.setId(existingId);
+        existing.setSlug("foo");
+        existing.setName("University of Foo");
+        existing.setShortName("Legacy");
+        existing.setCity("Foo City");
+        existing.setRegion("CA");
+        existing.setTimezone("America/Los_Angeles");
+        existing.setStatus(UniversityStatus.ACTIVE);
+
+        when(universities.findBySlug("sc-X")).thenReturn(Optional.empty());
+        when(schools.getSchool("X"))
+                .thenReturn(
+                        new SchoolDirectory.SchoolRef(
+                                "X", "University of Foo", null, "Foo City", "CA"));
+        when(universities.findFirstByName("University of Foo")).thenReturn(Optional.of(existing));
+        when(universities.save(org.mockito.ArgumentMatchers.any(UniversityEntity.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        UUID result = service().resolveUniversityForTest("X");
+
+        assertEquals(existingId, result);
+        assertEquals("sc-X", existing.getSlug());
+        assertEquals("Legacy", existing.getShortName()); // not wiped by a null Scorecard alias
+    }
+
+    @Test
+    void upsertFromDirectory_noNameMatch_createsNewRow() {
+        when(universities.findBySlug("sc-Y")).thenReturn(Optional.empty());
+        when(schools.getSchool("Y"))
+                .thenReturn(
+                        new SchoolDirectory.SchoolRef(
+                                "Y", "Brand New University", "BNU", "Nowhere", "TX"));
+        when(universities.findFirstByName("Brand New University")).thenReturn(Optional.empty());
+        ArgumentCaptor<UniversityEntity> saved = ArgumentCaptor.forClass(UniversityEntity.class);
+        when(universities.save(saved.capture())).thenAnswer(i -> i.getArgument(0));
+
+        service().resolveUniversityForTest("Y");
+
+        assertEquals("sc-Y", saved.getValue().getSlug());
+        assertEquals("Brand New University", saved.getValue().getName());
+        assertEquals("BNU", saved.getValue().getShortName());
     }
 
     @Test
