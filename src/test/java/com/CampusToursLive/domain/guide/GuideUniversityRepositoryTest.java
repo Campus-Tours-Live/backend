@@ -22,7 +22,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * Repository integration test against a REAL PostgreSQL (Testcontainers) — {@code
- * guide_universities} (V6__guide_universities.sql) requires valid {@code guide_profiles} and {@code
+ * guide_universities} (V1__schema.sql) requires valid {@code guide_profiles} and {@code
  * universities} FK parents, plus its {@code guide_verification_status} PG enum column.
  */
 @DataJpaTest

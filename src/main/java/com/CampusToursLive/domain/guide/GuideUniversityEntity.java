@@ -12,9 +12,9 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * Maps the {@code guide_universities} table (V6__guide_universities.sql) — a guide's per-university
- * offering (major/degree/class year) plus its own school-email verification lifecycle, independent
- * of the guide's primary {@code guide_profiles} university.
+ * Maps the {@code guide_universities} table (V1__schema.sql) — a guide's per-university offering
+ * (major/degree/class year) plus its own school-email verification lifecycle, independent of the
+ * guide's primary {@code guide_profiles} university.
  */
 @Getter
 @Setter

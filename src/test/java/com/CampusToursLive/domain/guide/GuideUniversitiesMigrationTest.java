@@ -15,9 +15,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Migration integration test against a REAL PostgreSQL (Testcontainers) proving that V6 creates the
+ * Migration integration test against a REAL PostgreSQL (Testcontainers) proving that V1 creates the
  * {@code guide_universities} join table introduced by Profile Contract v2 Phase 2 (CTL-97). Flyway
- * runs V1 → V6 on a clean container. Asserts the table's columns (including the {@code citext
+ * runs V1 → V2 on a clean container. Asserts the table's columns (including the {@code citext
  * school_email} PII column and the {@code guide_verification_status} enum default), the unique
  * {@code (guide_profile_id, university_id)} constraint, and the {@code
  * ix_guide_universities_profile} index all exist. Requires a running Docker daemon.

@@ -1040,7 +1040,6 @@ CREATE TABLE public.users (
     oidc_subject text,
     email public.citext,
     email_verified boolean DEFAULT false NOT NULL,
-    last_active_role public.user_role,
     account_status public.account_status DEFAULT 'PENDING_VERIFICATION'::public.account_status NOT NULL,
     date_of_birth date,
     age_band public.age_band,
@@ -2075,6 +2074,28 @@ ALTER TABLE ONLY public.tour_offerings
 
 ALTER TABLE ONLY public.user_roles
     ADD CONSTRAINT user_roles_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: guide_universities; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.guide_universities (
+  id                   uuid PRIMARY KEY,
+  guide_profile_id     uuid NOT NULL REFERENCES public.guide_profiles(id) ON DELETE CASCADE,
+  university_id        uuid NOT NULL REFERENCES public.universities(id),
+  major                text,
+  degree               text,
+  class_year           text,
+  school_email         public.citext,                          -- PII, never serialized
+  verification_status  public.guide_verification_status NOT NULL DEFAULT 'NOT_SUBMITTED',
+  verification_sent_at timestamptz,
+  verified_at          timestamptz,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  updated_at           timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (guide_profile_id, university_id)
+);
+CREATE INDEX ix_guide_universities_profile ON public.guide_universities (guide_profile_id);
 
 
 --

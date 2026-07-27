@@ -28,9 +28,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * Repository integration test against a REAL PostgreSQL (Testcontainers) — the only way to exercise
- * the {@code excl_guide_occurrence_no_overlap} GIST exclusion constraint
- * (V4__availability_engine_v2.sql), the invariant backstop asserting that a guide's materialized
- * availability occurrences are always disjoint. Mirrors {@code
+ * the {@code excl_guide_occurrence_no_overlap} GIST exclusion constraint (V1__schema.sql), the
+ * invariant backstop asserting that a guide's materialized availability occurrences are always
+ * disjoint. Mirrors {@code
  * BookingWriteIntegrationTest#overlappingGuideReservation_isRejectedByExclusionConstraint}.
  */
 @DataJpaTest

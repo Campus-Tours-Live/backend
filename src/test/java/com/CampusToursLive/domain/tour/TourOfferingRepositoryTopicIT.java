@@ -38,7 +38,7 @@ class TourOfferingRepositoryTopicIT {
 
     private final Map<TourTopic, Long> seededCounts = new HashMap<>();
 
-    // V3__seed_demo_data.sql pre-loads demo tour_offerings into every fresh Testcontainers
+    // V2__seed_demo_data.sql pre-loads demo tour_offerings into every fresh Testcontainers
     // Postgres this @DataJpaTest boots (Flyway runs on migrate). Scoping every query below to our
     // own freshly-inserted university isolates these assertions from that unrelated demo data,
     // since universityId is an equality filter (unlike the OR-based `q` match).
