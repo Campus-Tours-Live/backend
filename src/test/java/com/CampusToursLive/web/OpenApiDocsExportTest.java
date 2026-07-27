@@ -58,4 +58,22 @@ class OpenApiDocsExportTest {
         Files.writeString(OPENAPI_OUTPUT, body);
         assertThat(Files.size(OPENAPI_OUTPUT)).isGreaterThan(0L);
     }
+
+    /**
+     * CTL-97: /userinfo and /session/active-role are removed (Core no longer owns active-role);
+     * /users/me and /users/me/role-eligibility replace them. Asserted against the generated spec's
+     * path keys rather than by firing an unauthenticated request — an unauthenticated request to a
+     * removed, authenticated path 401s at the security chain before Spring Web would even 404 it,
+     * so a request-based check can't distinguish "removed" from "still there but needs a token".
+     */
+    @Test
+    void removedEndpoints_areAbsent_andReplacementsArePresent() throws Exception {
+        ResponseEntity<String> resp = rest.getForEntity("/v3/api-docs", String.class);
+        String body = resp.getBody();
+
+        assertThat(body).doesNotContain("\"/userinfo\"");
+        assertThat(body).doesNotContain("\"/session/active-role\"");
+        assertThat(body).contains("\"/users/me\"");
+        assertThat(body).contains("\"/users/me/role-eligibility\"");
+    }
 }

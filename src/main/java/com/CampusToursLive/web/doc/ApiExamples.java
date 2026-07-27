@@ -17,6 +17,10 @@ public interface ApiExamples {
 
     // --- Error bodies (RFC 7807 problem+json) ---
 
+    String PROBLEM_400 =
+            "{\"type\":\"about:blank\",\"title\":\"Validation failed\",\"status\":400,"
+                    + "\"detail\":\"Unknown role: BOGUS\"}";
+
     String PROBLEM_401 =
             "{\"type\":\"about:blank\",\"title\":\"No valid principal\",\"status\":401,"
                     + "\"detail\":\"Authentication is required.\"}";
@@ -24,6 +28,9 @@ public interface ApiExamples {
     String PROBLEM_403 =
             "{\"type\":\"about:blank\",\"title\":\"Missing required role\",\"status\":403,"
                     + "\"detail\":\"The caller does not hold the role this endpoint requires.\"}";
+
+    String PROBLEM_403_ACCOUNT_NOT_ACTIVE =
+            "{\"type\":\"about:blank\",\"title\":\"ACCOUNT_NOT_ACTIVE\",\"status\":403}";
 
     String PROBLEM_404 =
             "{\"type\":\"about:blank\",\"title\":\"Not found\",\"status\":404,"
@@ -138,12 +145,20 @@ public interface ApiExamples {
                     + META
                     + "}";
 
-    String ME =
+    String CURRENT_USER =
             "{\"data\":{\"user\":{\"id\":\"22222222-0000-4000-8000-000000000001\","
                     + "\"firstName\":\"Sam\",\"lastName\":\"Rivera\",\"displayName\":\"Sam Rivera\","
                     + "\"email\":\"sam.rivera@example.com\",\"accountStatus\":\"ACTIVE\","
                     + "\"ageBand\":\"ADULT\",\"createdAt\":\"2026-01-15T09:30:00Z\"},"
-                    + "\"roles\":[\"PARTICIPANT\"],\"activeRole\":\"PARTICIPANT\"},"
+                    + "\"roles\":[\"PARTICIPANT\"]},"
+                    + META
+                    + "}";
+
+    String ROLE_ELIGIBILITY_ELIGIBLE =
+            "{\"data\":{\"eligible\":true,\"reason\":null}," + META + "}";
+
+    String ROLE_ELIGIBILITY_INELIGIBLE =
+            "{\"data\":{\"eligible\":false,\"reason\":\"PARENT_CANNOT_BECOME_GUIDE\"},"
                     + META
                     + "}";
 

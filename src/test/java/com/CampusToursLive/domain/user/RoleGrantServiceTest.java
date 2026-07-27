@@ -1,7 +1,6 @@
 package com.CampusToursLive.domain.user;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -14,9 +13,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * RoleGrantService.grant — idempotent role acquisition. Writing the user_roles row IS the grant; a
- * SWITCHABLE role also becomes the active context on first acquisition, while staff roles are
- * granted but never auto-activated. Re-granting an already-held role is a no-op.
+ * RoleGrantService.grant — idempotent role acquisition. Writing the user_roles row IS the grant.
+ * Active-role/session context is owned by the BFF session, not Core, so grant() never touches
+ * {@code user}. Re-granting an already-held role is a no-op.
  */
 @ExtendWith(MockitoExtension.class)
 class RoleGrantServiceTest {
@@ -37,17 +36,15 @@ class RoleGrantServiceTest {
     void grant_isNoOp_whenRoleAlreadyHeld() {
         UUID uid = UUID.randomUUID();
         UserEntity u = user(uid);
-        u.setLastActiveRole(UserRole.PARTICIPANT);
         when(userRoles.existsByUserIdAndRole(uid, UserRole.GUIDE)).thenReturn(true);
 
         service().grant(u, UserRole.GUIDE);
 
         verify(userRoles, never()).save(org.mockito.ArgumentMatchers.any());
-        assertEquals(UserRole.PARTICIPANT, u.getLastActiveRole()); // unchanged
     }
 
     @Test
-    void grant_insertsRowAndActivates_forSwitchableRole() {
+    void grant_insertsRow_forSwitchableRole() {
         UUID uid = UUID.randomUUID();
         UserEntity u = user(uid);
         when(userRoles.existsByUserIdAndRole(uid, UserRole.GUIDE)).thenReturn(false);
@@ -57,19 +54,19 @@ class RoleGrantServiceTest {
         ArgumentCaptor<UserRoleEntity> saved = ArgumentCaptor.forClass(UserRoleEntity.class);
         verify(userRoles).save(saved.capture());
         assertEquals(UserRole.GUIDE, saved.getValue().getRole());
-        assertEquals(UserRole.GUIDE, u.getLastActiveRole()); // first acquisition → active
+        assertEquals(uid, saved.getValue().getUserId());
     }
 
     @Test
-    void grant_insertsRowButDoesNotActivate_forStaffRole() {
+    void grant_insertsRow_forStaffRole() {
         UUID uid = UUID.randomUUID();
         UserEntity u = user(uid);
         when(userRoles.existsByUserIdAndRole(uid, UserRole.ADMIN)).thenReturn(false);
 
         service().grant(u, UserRole.ADMIN);
 
-        verify(userRoles).save(org.mockito.ArgumentMatchers.any());
-        // Staff roles are granted but must NOT become the active /dashboard context.
-        assertNull(u.getLastActiveRole());
+        ArgumentCaptor<UserRoleEntity> saved = ArgumentCaptor.forClass(UserRoleEntity.class);
+        verify(userRoles).save(saved.capture());
+        assertEquals(UserRole.ADMIN, saved.getValue().getRole());
     }
 }

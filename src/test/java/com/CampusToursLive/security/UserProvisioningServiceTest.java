@@ -2,7 +2,6 @@ package com.CampusToursLive.security;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 
@@ -99,7 +98,6 @@ class UserProvisioningServiceTest {
         assertEquals("jordan@example.com", u.getEmail());
         assertEquals(AccountStatus.ACTIVE, u.getAccountStatus());
         assertEquals(AgeBand.ADULT, u.getAgeBand());
-        assertNull(u.getLastActiveRole()); // role acquired later, at onboarding
         verify(users).save(u);
     }
 

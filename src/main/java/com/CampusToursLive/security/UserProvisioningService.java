@@ -51,7 +51,8 @@ public class UserProvisioningService {
         user.setOidcSubject(jwt.getSubject());
         user.setEmail(email);
         user.setEmailVerified(Boolean.TRUE.equals(emailVerified));
-        // No role and no last_active_role yet — acquired at onboarding.
+        // No role yet — acquired at onboarding. Active/session role is BFF session state,
+        // not a Core column.
         user.setAccountStatus(AccountStatus.ACTIVE); // Google already verified the email
         user.setAgeBand(AgeBand.ADULT);
         user.setFirstName(firstName);

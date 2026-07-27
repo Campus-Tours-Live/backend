@@ -1,0 +1,16 @@
+-- =====================================================================
+-- V5 — Drop users.last_active_role.
+--
+-- Active role moves entirely out of Core: it is per-SESSION state (which role
+-- this browser session is currently using), owned by the bff server-side
+-- session, not a per-USER database column. Core stops participating in
+-- auth/authz/routing for it — RoleGrantService no longer sets it and the old
+-- ActiveRoleService/POST /session/active-role endpoint are removed in the
+-- same change. See docs/superpowers/specs/2026-07-27-profile-contract-v2-design.md
+-- ("Active role & session state").
+--
+-- No index or default is attached to this column (see V1__schema.sql), so a
+-- plain column drop is sufficient. FORWARD-ONLY, no down-migration: reset a
+-- disposable dev DB with `docker compose down -v` if needed.
+-- =====================================================================
+ALTER TABLE public.users DROP COLUMN last_active_role;
