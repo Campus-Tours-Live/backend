@@ -3,7 +3,7 @@ package com.CampusToursLive.web.dto;
 import com.CampusToursLive.domain.user.UserEntity;
 import io.swagger.v3.oas.annotations.media.Schema;
 
-/** Account-level identity (matches openapi MeResponse.user). No role-scoped fields. */
+/** Account-level identity (matches openapi CurrentUserResponse.user). No role-scoped fields. */
 @Schema(
         name = "UserSummary",
         description = "Account-level identity: the user's own record, independent of any role.")
