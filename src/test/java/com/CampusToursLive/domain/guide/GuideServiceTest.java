@@ -47,6 +47,7 @@ class GuideServiceTest {
 
     @Mock GuideProfileRepository guides;
     @Mock GuideVerificationRepository verifications;
+    @Mock GuideUniversityRepository guideUniversities;
     @Mock UniversityRepository universities;
     @Mock ParticipantProfileRepository participants;
     @Mock UserRepository users;
@@ -58,6 +59,7 @@ class GuideServiceTest {
         return new GuideService(
                 guides,
                 verifications,
+                guideUniversities,
                 universities,
                 participants,
                 users,
@@ -362,6 +364,106 @@ class GuideServiceTest {
         verify(verifications).save(any()); // a UNIVERSITY_EMAIL verification record is created
         verify(roleGrant).grant(u, UserRole.GUIDE);
         verify(users).save(u);
+    }
+
+    @Test
+    void update_submit_upsertsGuideUniversityRow_withSchoolEmailAndPendingStatus() {
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        UserEntity u = user(uid);
+        when(universities.existsById(uni)).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(participants.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
+
+        service()
+                .updateProfile(
+                        u,
+                        submitReq(
+                                uni.toString(),
+                                "I lead weekly campus tours for prospective students.",
+                                List.of("GENERAL_CAMPUS")));
+
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        GuideUniversityEntity saved = captor.getValue();
+        assertEquals(uni, saved.getUniversityId());
+        assertEquals("CS", saved.getMajor());
+        assertEquals("Bachelor's Degree", saved.getDegree());
+        assertEquals("me@school.edu", saved.getSchoolEmail());
+        assertEquals(GuideVerificationStatus.PENDING, saved.getVerificationStatus());
+        org.junit.jupiter.api.Assertions.assertNotNull(saved.getGuideProfileId());
+    }
+
+    @Test
+    void update_submit_updatesExistingGuideUniversityRow_matchingUniversityId() {
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        UUID profileId = UUID.randomUUID();
+        UserEntity u = user(uid);
+        GuideProfileEntity existing = new GuideProfileEntity();
+        existing.setId(profileId);
+        existing.setUserId(uid);
+        when(universities.existsById(uni)).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(existing));
+        when(participants.findByUserId(uid)).thenReturn(Optional.empty());
+
+        UUID rowId = UUID.randomUUID();
+        GuideUniversityEntity existingRow = new GuideUniversityEntity();
+        existingRow.setId(rowId);
+        existingRow.setGuideProfileId(profileId);
+        existingRow.setUniversityId(uni);
+        existingRow.setMajor("Old Major");
+        when(guideUniversities.findByGuideProfileId(profileId)).thenReturn(List.of(existingRow));
+
+        service()
+                .updateProfile(
+                        u,
+                        submitReq(
+                                uni.toString(),
+                                "I lead weekly campus tours for prospective students.",
+                                List.of("GENERAL_CAMPUS")));
+
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        GuideUniversityEntity saved = captor.getValue();
+        assertEquals(rowId, saved.getId()); // reused the existing row, not a new insert
+        assertEquals("CS", saved.getMajor());
+        assertEquals("me@school.edu", saved.getSchoolEmail());
+        assertEquals(GuideVerificationStatus.PENDING, saved.getVerificationStatus());
+    }
+
+    @Test
+    void update_draft_upsertsGuideUniversityRow_withoutSchoolEmail() {
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        when(universities.existsById(uni)).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
+
+        service().updateProfile(user(uid), req(uni.toString(), "CS", null, 5000L, null, false));
+
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        GuideUniversityEntity saved = captor.getValue();
+        assertEquals(uni, saved.getUniversityId());
+        assertEquals("CS", saved.getMajor());
+        org.junit.jupiter.api.Assertions.assertNull(saved.getSchoolEmail());
+        assertEquals(GuideVerificationStatus.NOT_SUBMITTED, saved.getVerificationStatus());
+    }
+
+    @Test
+    void getProfile_doesNotExposeSchoolEmail() {
+        // Regression guard: GET /guide/profile stays flat this task — schoolEmail (PII) lives only
+        // on guide_universities and must never leak through GuideProfileResponse.
+        List<String> fieldNames =
+                java.util.Arrays.stream(GuideProfileResponse.class.getRecordComponents())
+                        .map(java.lang.reflect.RecordComponent::getName)
+                        .toList();
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("schoolEmail"));
     }
 
     @Test
@@ -1128,6 +1230,7 @@ class GuideServiceTest {
                 new GuideService(
                         guides,
                         verifications,
+                        guideUniversities,
                         universities,
                         participants,
                         users,
@@ -1170,6 +1273,7 @@ class GuideServiceTest {
                 new GuideService(
                         guides,
                         verifications,
+                        guideUniversities,
                         universities,
                         participants,
                         users,

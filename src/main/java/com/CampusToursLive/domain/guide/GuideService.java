@@ -40,6 +40,7 @@ public class GuideService {
 
     private final GuideProfileRepository guides;
     private final GuideVerificationRepository verifications;
+    private final GuideUniversityRepository guideUniversities;
     private final UniversityRepository universities;
     private final ParticipantProfileRepository participants;
     private final UserRepository users;
@@ -51,6 +52,7 @@ public class GuideService {
     public GuideService(
             GuideProfileRepository guides,
             GuideVerificationRepository verifications,
+            GuideUniversityRepository guideUniversities,
             UniversityRepository universities,
             ParticipantProfileRepository participants,
             UserRepository users,
@@ -60,6 +62,7 @@ public class GuideService {
             ObjectMapper mapper) {
         this.guides = guides;
         this.verifications = verifications;
+        this.guideUniversities = guideUniversities;
         this.universities = universities;
         this.participants = participants;
         this.users = users;
@@ -183,15 +186,48 @@ public class GuideService {
             v.setStatus(GuideVerificationStatus.PENDING);
             verifications.save(v);
 
+            // Mirror the submission onto guide_universities (the per-university row):
+            // school_email + verification_status=PENDING alongside the flat guide_profiles columns.
+            GuideUniversityEntity guideUniversity = syncGuideUniversity(profile);
+            guideUniversity.setSchoolEmail(email);
+            guideUniversity.setVerificationStatus(GuideVerificationStatus.PENDING);
+            guideUniversities.save(guideUniversity);
+
             // Grant the GUIDE role (user_roles); approval is tracked on the guide
             // profile's application_status, NOT on the account-wide accountStatus.
             roleGrant.grant(user, UserRole.GUIDE);
         } else {
             guides.save(profile);
+            guideUniversities.save(syncGuideUniversity(profile));
         }
 
         users.save(user);
         return toResponse(profile);
+    }
+
+    /**
+     * Upsert the {@code guide_universities} row for this profile's current university (keyed by
+     * {@code (guide_profile_id, university_id)}, single school today) so major/degree/classYear
+     * stay in sync with the flat {@code guide_profiles} columns. Does NOT save — callers persist it
+     * (after possibly layering on submit-only fields like {@code schoolEmail}).
+     */
+    private GuideUniversityEntity syncGuideUniversity(GuideProfileEntity profile) {
+        GuideUniversityEntity entry =
+                guideUniversities.findByGuideProfileId(profile.getId()).stream()
+                        .filter(g -> profile.getUniversityId().equals(g.getUniversityId()))
+                        .findFirst()
+                        .orElseGet(
+                                () -> {
+                                    GuideUniversityEntity g = new GuideUniversityEntity();
+                                    g.setId(UUID.randomUUID());
+                                    g.setGuideProfileId(profile.getId());
+                                    g.setUniversityId(profile.getUniversityId());
+                                    return g;
+                                });
+        entry.setMajor(profile.getMajor());
+        entry.setDegree(profile.getDegree());
+        entry.setClassYear(profile.getClassYear());
+        return entry;
     }
 
     /**
