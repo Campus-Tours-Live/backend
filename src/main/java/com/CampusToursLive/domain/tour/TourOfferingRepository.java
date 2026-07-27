@@ -32,7 +32,7 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
             inner join GuideProfileEntity g on g.id = o.guideId
             inner join UniversityEntity u on u.id = o.universityId
             where o.status = com.CampusToursLive.domain.tour.TourStatus.ACTIVE
-              and g.applicationStatus = com.CampusToursLive.domain.guide.GuideApplicationStatus.APPROVED
+              and g.applicationStatus = com.CampusToursLive.domain.guide.GuideApplicationStatus.VERIFIED
               and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
               and o.universityId = coalesce(:universityId, o.universityId)
               and (:filterByTopic = false or o.topic in :topics)
@@ -68,7 +68,7 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
             inner join UniversityEntity u on u.id = o.universityId
             where o.id = :id
               and o.status = com.CampusToursLive.domain.tour.TourStatus.ACTIVE
-              and g.applicationStatus = com.CampusToursLive.domain.guide.GuideApplicationStatus.APPROVED
+              and g.applicationStatus = com.CampusToursLive.domain.guide.GuideApplicationStatus.VERIFIED
               and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
             """)
     Optional<TourOfferingEntity> findDiscoverableById(@Param("id") UUID id);

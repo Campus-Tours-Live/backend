@@ -140,7 +140,7 @@ class AvailabilityReplaceOverridesAtomicityIntegrationTest {
         guide.setUserId(guideUser.getId());
         guide.setUniversityId(university.getId());
         guide.setMajor("Computer Science");
-        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guides.save(guide);
 
         return guide.getId();

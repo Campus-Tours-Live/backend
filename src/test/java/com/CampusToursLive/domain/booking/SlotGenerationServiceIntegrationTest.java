@@ -87,7 +87,7 @@ class SlotGenerationServiceIntegrationTest {
         g.setUserId(guideUser.getId());
         g.setUniversityId(universityId);
         g.setMajor("Computer Science");
-        g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        g.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guide = guides.save(g);
 
         service =
@@ -199,7 +199,7 @@ class SlotGenerationServiceIntegrationTest {
         otherGuide.setUserId(otherGuideUser.getId());
         otherGuide.setUniversityId(universityId);
         otherGuide.setMajor("Biology");
-        otherGuide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        otherGuide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guides.save(otherGuide);
 
         BookingEntity elsewhere = new BookingEntity();

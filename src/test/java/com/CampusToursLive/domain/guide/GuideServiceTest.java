@@ -21,7 +21,6 @@ import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
-import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
@@ -39,10 +38,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * GuideService — guide onboarding (updateProfile) and admin review (reviewApplication). Covers
- * field validation (university, major, price, specialty topics), the draft-vs-submit split, the
- * bidirectional parent/guide exclusion, the GUIDE-role grant on submit, and the approve/reject
- * state machine that makes APPROVED reachable for the live-action gate.
+ * GuideService — guide onboarding (updateProfile). Covers field validation (university, major,
+ * price, specialty topics), the draft-vs-submit split, the bidirectional parent/guide exclusion,
+ * and the GUIDE-role grant on submit. applicationStatus is verification-driven — VERIFIED is set
+ * outside this service (the stubbed email-verify flow), so it's exercised here only via getProfile
+ * mapping the stored enum through to the response.
  */
 @ExtendWith(MockitoExtension.class)
 class GuideServiceTest {
@@ -431,7 +431,7 @@ class GuideServiceTest {
     }
 
     @Test
-    void update_submit_grantsGuideRoleAndSetsPendingReview() {
+    void update_submit_grantsGuideRoleAndSetsPending() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
         UserEntity u = user(uid);
@@ -448,7 +448,7 @@ class GuideServiceTest {
                                         "I lead weekly campus tours for prospective students.",
                                         List.of("GENERAL_CAMPUS")));
 
-        assertEquals("PENDING_REVIEW", res.applicationStatus());
+        assertEquals("PENDING", res.applicationStatus());
         verify(verifications).save(any()); // a UNIVERSITY_EMAIL verification record is created
         verify(roleGrant).grant(u, UserRole.GUIDE);
         verify(users).save(u);
@@ -639,84 +639,6 @@ class GuideServiceTest {
         verify(roleGrant, never()).grant(any(), any());
     }
 
-    // ---- reviewApplication ----------------------------------------------------------------
-
-    @Test
-    void review_approve_setsApprovedAndVerified() {
-        UUID guideUserId = UUID.randomUUID();
-        UUID profileId = UUID.randomUUID();
-        UUID uni = UUID.randomUUID();
-        GuideProfileEntity profile = new GuideProfileEntity();
-        profile.setId(profileId);
-        profile.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
-        when(guides.findByUserId(guideUserId)).thenReturn(Optional.of(profile));
-        when(users.findById(guideUserId)).thenReturn(Optional.of(user(guideUserId)));
-
-        GuideUniversityEntity row = new GuideUniversityEntity();
-        row.setId(UUID.randomUUID());
-        row.setGuideProfileId(profileId);
-        row.setUniversityId(uni);
-        row.setVerificationStatus(GuideVerificationStatus.PENDING);
-        when(guideUniversities.findByGuideProfileId(profileId)).thenReturn(List.of(row));
-
-        GuideProfileResponse res = service().reviewApplication(guideUserId, "approved");
-
-        assertEquals("APPROVED", res.applicationStatus());
-        assertEquals(GuideApplicationStatus.APPROVED, profile.getApplicationStatus());
-        assertEquals(GuideVerificationStatus.VERIFIED, profile.getVerificationStatus());
-        // Consistency fix: approve mirrors verificationStatus onto the guide_universities row(s)
-        // too, since the response reads per-school status from there, not the flat column.
-        assertEquals(GuideVerificationStatus.VERIFIED, row.getVerificationStatus());
-        verify(guideUniversities).save(row);
-        assertEquals("VERIFIED", res.universities().get(0).verificationStatus());
-    }
-
-    @Test
-    void review_reject_setsRejectedWithoutVerifying() {
-        UUID guideUserId = UUID.randomUUID();
-        GuideProfileEntity profile = new GuideProfileEntity();
-        profile.setId(UUID.randomUUID());
-        profile.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
-        profile.setVerificationStatus(GuideVerificationStatus.PENDING); // submitted, under review
-        when(guides.findByUserId(guideUserId)).thenReturn(Optional.of(profile));
-        when(users.findById(guideUserId)).thenReturn(Optional.of(user(guideUserId)));
-
-        service().reviewApplication(guideUserId, "REJECTED");
-
-        assertEquals(GuideApplicationStatus.REJECTED, profile.getApplicationStatus());
-        // reject must NOT flip the verification to VERIFIED — it stays where it was.
-        org.junit.jupiter.api.Assertions.assertEquals(
-                GuideVerificationStatus.PENDING, profile.getVerificationStatus());
-        // reject must NOT mirror onto guide_universities either — only approve does.
-        verify(guideUniversities, never()).save(any());
-    }
-
-    @Test
-    void review_422_whenDecisionNotApproveOrReject() {
-        var ex = badRequest(() -> service().reviewApplication(UUID.randomUUID(), "MAYBE"));
-        assertInstanceOf(ValidationException.class, ex);
-        verifyNoInteractions(guides, users);
-    }
-
-    @Test
-    void review_404_whenNoGuideApplication() {
-        UUID guideUserId = UUID.randomUUID();
-        when(guides.findByUserId(guideUserId)).thenReturn(Optional.empty());
-        var ex = badRequest(() -> service().reviewApplication(guideUserId, "APPROVED"));
-        assertInstanceOf(NotFoundException.class, ex);
-    }
-
-    @Test
-    void review_404_whenUserRowMissing() {
-        UUID guideUserId = UUID.randomUUID();
-        GuideProfileEntity profile = new GuideProfileEntity();
-        profile.setId(UUID.randomUUID());
-        when(guides.findByUserId(guideUserId)).thenReturn(Optional.of(profile));
-        when(users.findById(guideUserId)).thenReturn(Optional.empty());
-        var ex = badRequest(() -> service().reviewApplication(guideUserId, "APPROVED"));
-        assertInstanceOf(NotFoundException.class, ex);
-    }
-
     // ---- getProfile -----------------------------------------------------------------------
 
     @Test
@@ -736,7 +658,7 @@ class GuideServiceTest {
         profile.setLanguages("[\"en-US\"]");
         profile.setSpecialties("[\"GENERAL_CAMPUS\"]");
         profile.setBasePriceCents(5000L);
-        profile.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        profile.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         profile.setVerificationStatus(GuideVerificationStatus.VERIFIED);
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
         UniversityEntity university = new UniversityEntity();
@@ -757,7 +679,7 @@ class GuideServiceTest {
 
         GuideProfileResponse res = service().getProfile(u);
 
-        assertEquals("APPROVED", res.applicationStatus());
+        assertEquals("VERIFIED", res.applicationStatus());
         assertEquals(List.of("en-US"), res.languages());
         assertEquals(List.of("GENERAL_CAMPUS"), res.specialties());
         assertEquals(1, res.universities().size());
@@ -817,7 +739,7 @@ class GuideServiceTest {
         profile.setId(profileId);
         profile.setUniversityId(uni);
         profile.setMajor("CS");
-        profile.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
+        profile.setApplicationStatus(GuideApplicationStatus.PENDING);
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
         when(universities.findById(uni)).thenReturn(Optional.empty());
         GuideUniversityEntity row = new GuideUniversityEntity();
@@ -829,7 +751,7 @@ class GuideServiceTest {
 
         GuideProfileResponse res = service().getProfile(u);
 
-        assertEquals("PENDING_REVIEW", res.applicationStatus());
+        assertEquals("PENDING", res.applicationStatus());
         assertEquals(uni.toString(), res.universities().get(0).universityId());
         List<String> fieldNames =
                 java.util.Arrays.stream(GuideProfileResponse.class.getRecordComponents())
@@ -908,13 +830,6 @@ class GuideServiceTest {
                                                         null,
                                                         null,
                                                         false)));
-        assertInstanceOf(ValidationException.class, ex);
-    }
-
-    @Test
-    void review_422_whenDecisionNull() {
-        // decision null → L201 null branch.
-        var ex = badRequest(() -> service().reviewApplication(UUID.randomUUID(), null));
         assertInstanceOf(ValidationException.class, ex);
     }
 
@@ -1362,7 +1277,7 @@ class GuideServiceTest {
                                         "I lead weekly campus tours for prospective students.",
                                         List.of("GENERAL_CAMPUS")));
 
-        assertEquals("PENDING_REVIEW", res.applicationStatus());
+        assertEquals("PENDING", res.applicationStatus());
         verify(roleGrant).grant(u, UserRole.GUIDE);
     }
 

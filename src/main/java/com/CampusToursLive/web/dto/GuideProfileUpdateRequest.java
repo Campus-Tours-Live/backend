@@ -13,8 +13,8 @@ import java.util.List;
  *
  * <p>When {@code submit} is true the application is finalized: required fields (university, major,
  * verification email) are enforced, a verification row is created, the GUIDE role is granted
- * (user_roles) and the guide's own application_status moves to PENDING_REVIEW. The account-level
- * status is unchanged — role lifecycle lives on the profile, not the account.
+ * (user_roles) and the guide's own application_status moves to PENDING. The account-level status is
+ * unchanged — role lifecycle lives on the profile, not the account.
  */
 @Schema(
         name = "GuideProfileUpdateRequest",
@@ -89,7 +89,7 @@ public record GuideProfileUpdateRequest(
         @Schema(
                         description =
                                 "When true, finalize the application (enforce required fields,"
-                                        + " grant the GUIDE role, move status to PENDING_REVIEW).",
+                                        + " grant the GUIDE role, move status to PENDING).",
                         example = "true",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 Boolean submit,

@@ -43,7 +43,7 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
-/** Public marketplace discovery — only ACTIVE offerings from APPROVED guides are visible. */
+/** Public marketplace discovery — only ACTIVE offerings from VERIFIED guides are visible. */
 @ExtendWith(MockitoExtension.class)
 class TourDiscoveryServiceTest {
 
@@ -259,7 +259,7 @@ class TourDiscoveryServiceTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(gid);
         guide.setUserId(uid);
-        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guide.setBio("Bio text");
         when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
 

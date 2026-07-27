@@ -646,7 +646,7 @@ class BookingServiceTest {
         o.setGuideId(guideProfileId);
         when(offerings.findById(offeringId)).thenReturn(Optional.of(o));
         GuideProfileEntity g = guideProfile(guideProfileId, UUID.randomUUID());
-        g.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
+        g.setApplicationStatus(GuideApplicationStatus.PENDING);
         when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
 
         assertThrows(
@@ -671,7 +671,7 @@ class BookingServiceTest {
         o.setUniversityId(universityId);
         when(offerings.findById(offeringId)).thenReturn(Optional.of(o));
         GuideProfileEntity g = guideProfile(guideProfileId, UUID.randomUUID());
-        g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        g.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
         UniversityEntity u = university(universityId, "Paused U");
         u.setStatus(UniversityStatus.PAUSED);
@@ -1484,7 +1484,7 @@ class BookingServiceTest {
         o.setUniversityId(item.getUniversityId());
         when(offerings.findById(item.getTourOfferingId())).thenReturn(Optional.of(o));
         GuideProfileEntity g = guideProfile(item.getGuideId(), UUID.randomUUID());
-        g.setApplicationStatus(GuideApplicationStatus.SUSPENDED);
+        g.setApplicationStatus(GuideApplicationStatus.REJECTED);
         when(guides.findById(item.getGuideId())).thenReturn(Optional.of(g));
 
         ValidationException ex =
@@ -1549,7 +1549,7 @@ class BookingServiceTest {
     }
 
     /**
-     * Stubs an ACTIVE 60-min $50 offering by an APPROVED guide (owned by {@code guideUserId}) at an
+     * Stubs an ACTIVE 60-min $50 offering by a VERIFIED guide (owned by {@code guideUserId}) at an
      * ACTIVE university.
      */
     private Bookable stubBookableOffering(UUID guideUserId) {
@@ -1566,7 +1566,7 @@ class BookingServiceTest {
         when(offerings.findById(offeringId)).thenReturn(Optional.of(o));
 
         GuideProfileEntity g = guideProfile(guideProfileId, guideUserId);
-        g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        g.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
 
         UniversityEntity u = university(universityId, "Test University");
@@ -1641,7 +1641,7 @@ class BookingServiceTest {
 
     /**
      * Stubs the offering lookup (in the given status, wired to the item's guide/university ids)
-     * plus, for ACTIVE offerings, an APPROVED guide and an ACTIVE university. Returns the guide's
+     * plus, for ACTIVE offerings, a VERIFIED guide and an ACTIVE university. Returns the guide's
      * user id so happy-path tests can stub the display-name lookup.
      */
     private UUID stubCheckoutLookups(BookingEntity b, TourStatus offeringStatus) {
@@ -1661,7 +1661,7 @@ class BookingServiceTest {
         UUID guideUserId = UUID.randomUUID();
         if (offeringStatus == TourStatus.ACTIVE) {
             GuideProfileEntity g = guideProfile(b.getGuideId(), guideUserId);
-            g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+            g.setApplicationStatus(GuideApplicationStatus.VERIFIED);
             when(guides.findById(b.getGuideId())).thenReturn(Optional.of(g));
             UniversityEntity u = university(b.getUniversityId(), "Test University");
             u.setStatus(UniversityStatus.ACTIVE);

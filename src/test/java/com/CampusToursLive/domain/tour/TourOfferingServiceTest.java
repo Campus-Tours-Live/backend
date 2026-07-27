@@ -35,7 +35,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * TourOfferingService — the first endpoint set that exercises the live-action gate: a pending guide
- * may PREPARE a draft, but going live (activate) requires application_status == APPROVED.
+ * may PREPARE a draft, but going live (activate) requires application_status == VERIFIED.
  */
 @ExtendWith(MockitoExtension.class)
 class TourOfferingServiceTest {
@@ -70,7 +70,7 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         when(guides.findByUserId(uid))
-                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING_REVIEW)));
+                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING)));
 
         assertThrows(
                 ForbiddenException.class, () -> service().activate(user(uid), UUID.randomUUID()));
@@ -88,7 +88,7 @@ class TourOfferingServiceTest {
         draft.setGuideId(gid);
         draft.setStatus(TourStatus.DRAFT);
         when(guides.findByUserId(uid))
-                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.APPROVED)));
+                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.VERIFIED)));
         when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(draft));
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -102,7 +102,7 @@ class TourOfferingServiceTest {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
         when(guides.findByUserId(uid))
-                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING_REVIEW)));
+                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING)));
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -258,12 +258,12 @@ class TourOfferingServiceTest {
 
     private void stubPendingGuide(UUID uid, UUID gid) {
         when(guides.findByUserId(uid))
-                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING_REVIEW)));
+                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING)));
     }
 
     private void stubApprovedGuide(UUID uid, UUID gid) {
         when(guides.findByUserId(uid))
-                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.APPROVED)));
+                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.VERIFIED)));
     }
 
     private static TourOfferingEntity offering(UUID id, UUID gid, TourStatus status) {

@@ -27,7 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Guide supply-side: tour offerings (BFF maps /v1/guide/offerings → here). Every action requires
  * the GUIDE role (authorization reads user_roles, never the active role). Going live additionally
- * requires an APPROVED application — enforced in the service.
+ * requires a VERIFIED application — enforced in the service.
  */
 @RestController
 @RequestMapping("/guide/offerings")
@@ -122,7 +122,7 @@ public class GuideOfferingController {
             summary = "Activate an offering",
             description =
                     "Publishes a DRAFT offering (moves it to ACTIVE). Requires the guide's"
-                            + " application to be APPROVED; otherwise the service rejects it.")
+                            + " application to be VERIFIED; otherwise the service rejects it.")
     @ApiResponse(
             responseCode = "200",
             description = "The activated (ACTIVE) offering.",

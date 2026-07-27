@@ -67,7 +67,7 @@ public class GuideController {
             description =
                     "Partially updates the guide application. When submit=true the application is"
                             + " finalized: required fields are enforced, the GUIDE role is granted,"
-                            + " and status moves to PENDING_REVIEW.")
+                            + " and status moves to PENDING.")
     @ApiResponse(
             responseCode = "200",
             description = "The updated guide profile.",

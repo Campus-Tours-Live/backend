@@ -28,8 +28,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Public marketplace catalog — read-only discovery of ACTIVE offerings from APPROVED guides. Draft,
- * paused, archived, and unapproved-guide offerings are never returned.
+ * Public marketplace catalog — read-only discovery of ACTIVE offerings from VERIFIED guides. Draft,
+ * paused, archived, and unverified-guide offerings are never returned.
  */
 @Service
 public class TourDiscoveryService {

@@ -163,11 +163,9 @@ CREATE TYPE public.guardian_consent_status AS ENUM (
 --
 
 CREATE TYPE public.guide_application_status AS ENUM (
-    'DRAFT',
-    'PENDING_REVIEW',
-    'APPROVED',
-    'REJECTED',
-    'SUSPENDED'
+    'PENDING',
+    'VERIFIED',
+    'REJECTED'
 );
 
 
@@ -660,7 +658,7 @@ CREATE TABLE public.guide_profiles (
     languages jsonb DEFAULT '["en-US"]'::jsonb NOT NULL,
     specialties jsonb DEFAULT '[]'::jsonb NOT NULL,
     favorite_spots jsonb DEFAULT '[]'::jsonb NOT NULL,
-    application_status public.guide_application_status DEFAULT 'DRAFT'::public.guide_application_status NOT NULL,
+    application_status public.guide_application_status DEFAULT 'PENDING'::public.guide_application_status NOT NULL,
     verification_status public.guide_verification_status DEFAULT 'NOT_SUBMITTED'::public.guide_verification_status NOT NULL,
     base_price_cents bigint DEFAULT 2800 NOT NULL,
     currency character(3) DEFAULT 'USD'::bpchar NOT NULL,

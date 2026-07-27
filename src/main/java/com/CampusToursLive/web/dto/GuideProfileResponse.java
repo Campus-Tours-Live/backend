@@ -18,15 +18,9 @@ import java.util.List;
                         + " Profile-level fields are null before guide onboarding.")
 public record GuideProfileResponse(
         @Schema(
-                        description = "Guide application review status.",
-                        example = "APPROVED",
-                        allowableValues = {
-                            "DRAFT",
-                            "PENDING_REVIEW",
-                            "APPROVED",
-                            "REJECTED",
-                            "SUSPENDED"
-                        },
+                        description = "Guide application verification status.",
+                        example = "VERIFIED",
+                        allowableValues = {"PENDING", "VERIFIED", "REJECTED"},
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 String applicationStatus,
         @Schema(

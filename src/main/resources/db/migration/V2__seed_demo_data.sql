@@ -5,10 +5,10 @@
 -- Also seeds the university catalog (folded in from the former
 -- V2__seed_universities.sql — see below).
 --
--- 500 APPROVED guides across 50 schools, each with 6 ACTIVE tour offerings
+-- 500 VERIFIED guides across 50 schools, each with 6 ACTIVE tour offerings
 -- (3000 total) with varied major / degree / entry_year / topic / features.
 -- Marketplace-only: no participant/admin rows and no availability/booking rows
--- (GET /tours reads only offerings + approved guides + universities).
+-- (GET /tours reads only offerings + verified guides + universities).
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -2978,7 +2978,7 @@ INSERT INTO guide_profiles (
 SELECT
   seed.user_id, university.id, seed.major, seed.class_year, seed.degree, seed.entry_year, seed.bio,
   seed.languages::jsonb, seed.specialties::jsonb,
-  'APPROVED'::guide_application_status, 'VERIFIED'::guide_verification_status,
+  'VERIFIED'::guide_application_status, 'VERIFIED'::guide_verification_status,
   seed.base_price_cents, 'USD', now()
 FROM (
   VALUES
@@ -3485,6 +3485,14 @@ FROM (
 ) AS seed(user_id, university_slug, major, class_year, degree, entry_year, bio, languages, specialties, base_price_cents)
 JOIN universities university ON university.slug = seed.university_slug
 ON CONFLICT (user_id) DO NOTHING;
+
+-- Mirror each seeded demo guide onto guide_universities (the per-university row) so their
+-- /guide/profile universities[] is non-empty and Phase-4 offering rules (which read the
+-- guide_universities row) have something to validate against.
+INSERT INTO guide_universities (id, guide_profile_id, university_id, major, degree, class_year, verification_status)
+SELECT gen_random_uuid(), gp.id, gp.university_id, gp.major, gp.degree, gp.class_year, 'VERIFIED'::guide_verification_status
+FROM guide_profiles gp WHERE gp.university_id IS NOT NULL
+ON CONFLICT (guide_profile_id, university_id) DO NOTHING;
 
 INSERT INTO tour_offerings (
   guide_id, university_id, title, slug, description, topic, duration_min,

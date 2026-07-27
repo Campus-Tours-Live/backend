@@ -48,7 +48,7 @@ class TourOfferingRepositoryTopicIT {
     void seedOfferingsAcrossTopics() {
         String marker = "topic-it-" + UUID.randomUUID().toString().substring(0, 8);
         universityId = insertUniversity("uni-" + marker, "ACTIVE");
-        UUID guideId = insertGuide(universityId, "APPROVED");
+        UUID guideId = insertGuide(universityId, "VERIFIED");
 
         // Two GENERAL_CAMPUS rows so paging (page size 1) has more than one page to walk.
         seedOffering(guideId, universityId, marker + " general 1", TourTopic.GENERAL_CAMPUS);

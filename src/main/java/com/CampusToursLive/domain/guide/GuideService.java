@@ -12,7 +12,6 @@ import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
-import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
@@ -30,8 +29,10 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Guide application / onboarding. Upserts {@code guide_profiles}, records a student-verification
  * submission, and (on submit) grants the GUIDE role (user_roles) and sets the guide's own
- * application_status to PENDING_REVIEW for admin review. Account-wide accountStatus is NOT touched
- * — guide approval is a role-level state, kept on the guide profile rather than the account.
+ * application_status to PENDING. Verification (the stubbed email-verify flow) is what later flips
+ * application_status to VERIFIED — admin review has been retired. Account-wide accountStatus is NOT
+ * touched — guide approval is a role-level state, kept on the guide profile rather than the
+ * account.
  */
 @Service
 public class GuideService {
@@ -175,7 +176,7 @@ public class GuideService {
                 throw new ValidationException(
                         "At least one tour specialty is required to submit your application");
             }
-            profile.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
+            profile.setApplicationStatus(GuideApplicationStatus.PENDING);
             profile.setVerificationStatus(GuideVerificationStatus.PENDING);
             guides.save(profile);
 
@@ -371,47 +372,6 @@ public class GuideService {
         if (t.contains("bachelor")) return 6;
         if (t.contains("associate") || t.contains("certificate") || t.contains("diploma")) return 3;
         return 8;
-    }
-
-    /**
-     * Admin review of a guide application (called by AdminController after requireRole(ADMIN)).
-     * Sets the guide's application_status; approving also marks the verification VERIFIED. This is
-     * what makes APPROVED reachable, so the live-action gate on offerings
-     * (TourOfferingService.activate) can pass.
-     */
-    @Transactional
-    public GuideProfileResponse reviewApplication(UUID guideUserId, String decision) {
-        String d = decision == null ? null : decision.trim().toUpperCase();
-        GuideApplicationStatus next;
-        if ("APPROVED".equals(d)) {
-            next = GuideApplicationStatus.APPROVED;
-        } else if ("REJECTED".equals(d)) {
-            next = GuideApplicationStatus.REJECTED;
-        } else {
-            throw new ValidationException("decision must be APPROVED or REJECTED");
-        }
-
-        GuideProfileEntity profile =
-                guides.findByUserId(guideUserId)
-                        .orElseThrow(
-                                () -> new NotFoundException("No guide application for that user"));
-        profile.setApplicationStatus(next);
-        if (next == GuideApplicationStatus.APPROVED) {
-            profile.setVerificationStatus(GuideVerificationStatus.VERIFIED);
-            // Mirror onto guide_universities: the response's per-school verificationStatus is
-            // read from these rows (not the flat profile column), so an approve must flip both
-            // or the guide's response would still show a stale PENDING/NOT_SUBMITTED status.
-            for (GuideUniversityEntity row :
-                    guideUniversities.findByGuideProfileId(profile.getId())) {
-                row.setVerificationStatus(GuideVerificationStatus.VERIFIED);
-                guideUniversities.save(row);
-            }
-        }
-        guides.save(profile);
-
-        // Data-integrity guard: the guide_profile row references a user that must still exist.
-        users.findById(guideUserId).orElseThrow(() -> new NotFoundException("User not found"));
-        return toResponse(profile);
     }
 
     private GuideProfileResponse toResponse(GuideProfileEntity profile) {

@@ -23,7 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
  * Tour offerings — a guide's supply-side products. This is the first endpoint set that actually
  * exercises the role/approval gates: - creating a DRAFT is allowed while the application is still
  * pending (preparing unpublished content is not a "live" action); - activating (going live,
- * DRAFT→ACTIVE) requires application_status == APPROVED. The caller already enforced the GUIDE role
+ * DRAFT→ACTIVE) requires application_status == VERIFIED. The caller already enforced the GUIDE role
  * (controller: requireRole(GUIDE)).
  */
 @Service
@@ -123,9 +123,9 @@ public class TourOfferingService {
     public TourOfferingResponse activate(UserEntity user, UUID offeringId) {
         GuideProfileEntity guide = requireGuideProfile(user);
 
-        // Live-action gate: publishing a draft (DRAFT -> ACTIVE) requires an APPROVED guide
+        // Live-action gate: publishing a draft (DRAFT -> ACTIVE) requires a VERIFIED guide
         // application.
-        if (guide.getApplicationStatus() != GuideApplicationStatus.APPROVED) {
+        if (guide.getApplicationStatus() != GuideApplicationStatus.VERIFIED) {
             throw new ForbiddenException(
                     "Your guide application must be approved before you can publish offerings");
         }

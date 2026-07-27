@@ -50,11 +50,11 @@ class TourOfferingRepositoryTest {
         activeUniversityId = insertUniversity("active-" + searchMarker, "ACTIVE");
         UUID inactiveUniversityId = insertUniversity("archived-" + searchMarker, "ARCHIVED");
 
-        approvedGuideId = insertGuide(activeUniversityId, "APPROVED");
+        approvedGuideId = insertGuide(activeUniversityId, "VERIFIED");
         UUID pendingGuideUserId = UUID.randomUUID();
         insertUser(pendingGuideUserId, "Pending Guide");
         UUID pendingGuideId =
-                insertGuideWithUser(activeUniversityId, pendingGuideUserId, "PENDING_REVIEW");
+                insertGuideWithUser(activeUniversityId, pendingGuideUserId, "PENDING");
 
         discoverableId =
                 insertOffering(
@@ -200,7 +200,7 @@ class TourOfferingRepositoryTest {
     void findDiscoverable_matchesViaUniversityName() {
         String token = "uni-" + UUID.randomUUID().toString().substring(0, 8);
         UUID uni = insertUniversity(token, "ACTIVE"); // name is "University " + token
-        UUID guide = insertGuide(uni, "APPROVED");
+        UUID guide = insertGuide(uni, "VERIFIED");
         UUID id =
                 insertOffering(
                         guide,
@@ -230,7 +230,7 @@ class TourOfferingRepositoryTest {
     void findDiscoverable_filtersByUniversityIdAndTopic() {
         String token = "flt-" + UUID.randomUUID().toString().substring(0, 8);
         UUID targetUni = insertUniversity("target-" + token, "ACTIVE");
-        UUID targetGuide = insertGuide(targetUni, "APPROVED");
+        UUID targetGuide = insertGuide(targetUni, "VERIFIED");
         UUID match =
                 insertOffering(
                         targetGuide,
@@ -251,7 +251,7 @@ class TourOfferingRepositoryTest {
                 "GENERAL_CAMPUS");
         // different university, same topic -> excluded by the universityId filter
         UUID otherUni = insertUniversity("other-" + token, "ACTIVE");
-        UUID otherGuide = insertGuide(otherUni, "APPROVED");
+        UUID otherGuide = insertGuide(otherUni, "VERIFIED");
         insertOffering(
                 otherGuide,
                 otherUni,

@@ -66,7 +66,7 @@ public class GuideProfileEntity {
             name = "application_status",
             columnDefinition = "guide_application_status",
             nullable = false)
-    private GuideApplicationStatus applicationStatus = GuideApplicationStatus.DRAFT;
+    private GuideApplicationStatus applicationStatus = GuideApplicationStatus.PENDING;
 
     @Enumerated(EnumType.STRING)
     @Column(

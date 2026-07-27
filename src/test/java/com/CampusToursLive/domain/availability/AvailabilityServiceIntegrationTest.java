@@ -93,7 +93,7 @@ class AvailabilityServiceIntegrationTest {
         guide.setUserId(guideUser.getId());
         guide.setUniversityId(universityId);
         guide.setMajor("Computer Science");
-        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guides.save(guide);
         guideId = guide.getId();
 

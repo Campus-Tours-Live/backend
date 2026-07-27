@@ -65,7 +65,7 @@ class GuideUniversityRepositoryTest {
         guide.setUserId(guideUser.getId());
         guide.setUniversityId(universityId);
         guide.setMajor("Computer Science");
-        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guides.save(guide);
 
         guideProfileId = guide.getId();

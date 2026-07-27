@@ -71,7 +71,7 @@ class GuideAvailabilityOccurrenceRepositoryTest {
         guide.setUserId(guideUser.getId());
         guide.setUniversityId(university.getId());
         guide.setMajor("Computer Science");
-        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guides.save(guide);
 
         guideId = guide.getId();
@@ -130,7 +130,7 @@ class GuideAvailabilityOccurrenceRepositoryTest {
                         .orElseThrow()
                         .getId());
         otherGuide.setMajor("Biology");
-        otherGuide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        otherGuide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guides.save(otherGuide);
 
         Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);

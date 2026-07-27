@@ -88,7 +88,7 @@ class BookingWriteIntegrationTest {
         g.setUserId(guideUser.getId());
         g.setUniversityId(university.getId());
         g.setMajor("Computer Science");
-        g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        g.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         guide = guides.save(g);
 
         TourOfferingEntity o = new TourOfferingEntity();
