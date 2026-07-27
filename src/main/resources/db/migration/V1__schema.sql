@@ -67,7 +67,6 @@ CREATE TYPE public.acceptance_mode AS ENUM (
 --
 
 CREATE TYPE public.account_status AS ENUM (
-    'PENDING_VERIFICATION',
     'ACTIVE',
     'SUSPENDED',
     'DELETED'
@@ -1010,7 +1009,7 @@ CREATE TABLE public.users (
     oidc_subject text,
     email public.citext,
     email_verified boolean DEFAULT false NOT NULL,
-    account_status public.account_status DEFAULT 'PENDING_VERIFICATION'::public.account_status NOT NULL,
+    account_status public.account_status DEFAULT 'ACTIVE'::public.account_status NOT NULL,
     date_of_birth date,
     age_band public.age_band,
     first_name text,
