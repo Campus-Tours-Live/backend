@@ -8,9 +8,9 @@ import com.CampusToursLive.domain.booking.AcceptanceMode;
 import com.CampusToursLive.domain.booking.BookingEntity;
 import com.CampusToursLive.domain.booking.BookingRepository;
 import com.CampusToursLive.domain.booking.BookingStatus;
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.tour.TourOfferingEntity;
 import com.CampusToursLive.domain.tour.TourOfferingRepository;
 import com.CampusToursLive.domain.tour.TourStatus;
@@ -1887,7 +1887,7 @@ class AvailabilityWriteServiceIntegrationTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
+        guide.setStatus(GuideStatus.VERIFIED);
         return guides.save(guide);
     }
 

@@ -191,7 +191,7 @@ class ParticipantServiceTest {
         assertEquals("SOPHOMORE", res.gradeLevel());
         assertEquals("CS", res.intendedMajor());
         assertEquals(List.of("DORM_HOUSING"), res.topicsOfInterest());
-        assertEquals("VERIFIED", res.applicationStatus()); // guardianRequired defaults false
+        assertEquals("VERIFIED", res.participantStatus()); // guardianRequired defaults false
     }
 
     @Test
@@ -202,7 +202,7 @@ class ParticipantServiceTest {
 
         ParticipantProfileResponse res = service().getProfile(u);
 
-        assertNull(res.applicationStatus());
+        assertNull(res.participantStatus());
         assertNull(res.type());
         assertNull(res.gradeLevel());
         assertNull(res.intendedMajor());
@@ -230,8 +230,8 @@ class ParticipantServiceTest {
     }
 
     @Test
-    void getProfile_guardianRequired_returnsPendingApplicationStatus() {
-        // Underage-participant path: guardianRequired=true → applicationStatus="PENDING". The
+    void getProfile_guardianRequired_returnsPendingParticipantStatus() {
+        // Underage-participant path: guardianRequired=true → participantStatus="PENDING". The
         // real guardian-verification flow is future work (Phase 4); this just covers the branch.
         UUID uid = UUID.randomUUID();
         UserEntity u = user(uid);
@@ -245,7 +245,7 @@ class ParticipantServiceTest {
 
         ParticipantProfileResponse res = service().getProfile(u);
 
-        assertEquals("PENDING", res.applicationStatus());
+        assertEquals("PENDING", res.participantStatus());
     }
 
     @Test
@@ -265,7 +265,7 @@ class ParticipantServiceTest {
         org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("email"));
         org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("participantType"));
         org.junit.jupiter.api.Assertions.assertTrue(fieldNames.contains("type"));
-        org.junit.jupiter.api.Assertions.assertTrue(fieldNames.contains("applicationStatus"));
+        org.junit.jupiter.api.Assertions.assertTrue(fieldNames.contains("participantStatus"));
     }
 
     // ---- updateProfile: every field set ----
@@ -303,7 +303,7 @@ class ParticipantServiceTest {
         assertEquals(List.of("DORM_HOUSING"), res.topicsOfInterest());
         assertEquals(List.of("166683"), res.universitiesOfInterest());
         assertEquals("Wheelchair access", res.accessibilityPreferences());
-        assertEquals("VERIFIED", res.applicationStatus());
+        assertEquals("VERIFIED", res.participantStatus());
     }
 
     @Test

@@ -3,9 +3,9 @@ package com.CampusToursLive.domain.availability;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.university.UniversityStatus;
@@ -69,7 +69,7 @@ class GuideAvailabilityOccurrenceRepositoryTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
+        guide.setStatus(GuideStatus.VERIFIED);
         guides.save(guide);
 
         guideId = guide.getId();
@@ -121,7 +121,7 @@ class GuideAvailabilityOccurrenceRepositoryTest {
         GuideProfileEntity otherGuide = new GuideProfileEntity();
         otherGuide.setId(UUID.randomUUID());
         otherGuide.setUserId(otherGuideUser.getId());
-        otherGuide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
+        otherGuide.setStatus(GuideStatus.VERIFIED);
         guides.save(otherGuide);
 
         Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);

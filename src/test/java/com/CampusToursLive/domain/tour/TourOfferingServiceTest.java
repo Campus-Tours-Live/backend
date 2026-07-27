@@ -11,9 +11,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.guide.GuideUniversityEntity;
 import com.CampusToursLive.domain.guide.GuideUniversityRepository;
 import com.CampusToursLive.domain.guide.GuideVerificationStatus;
@@ -38,7 +38,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * TourOfferingService — the first endpoint set that exercises the live-action gate: a pending guide
- * may PREPARE a draft, but going live (activate) requires application_status == VERIFIED.
+ * may PREPARE a draft, but going live (activate) requires guide_status == VERIFIED.
  */
 @ExtendWith(MockitoExtension.class)
 class TourOfferingServiceTest {
@@ -66,10 +66,10 @@ class TourOfferingServiceTest {
         return u;
     }
 
-    private static GuideProfileEntity guide(UUID id, GuideApplicationStatus status) {
+    private static GuideProfileEntity guide(UUID id, GuideStatus status) {
         GuideProfileEntity g = new GuideProfileEntity();
         g.setId(id);
-        g.setApplicationStatus(status);
+        g.setStatus(status);
         return g;
     }
 
@@ -96,8 +96,7 @@ class TourOfferingServiceTest {
     void activate_throws403_whenApplicationNotApproved() {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
-        when(guides.findByUserId(uid))
-                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING)));
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(guide(gid, GuideStatus.PENDING)));
 
         assertThrows(
                 ForbiddenException.class, () -> service().activate(user(uid), UUID.randomUUID()));
@@ -114,8 +113,7 @@ class TourOfferingServiceTest {
         draft.setId(oid);
         draft.setGuideId(gid);
         draft.setStatus(TourStatus.DRAFT);
-        when(guides.findByUserId(uid))
-                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.VERIFIED)));
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(guide(gid, GuideStatus.VERIFIED)));
         when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(draft));
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -128,8 +126,7 @@ class TourOfferingServiceTest {
     void create_allowsDraft_whileApplicationPending() {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
-        when(guides.findByUserId(uid))
-                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING)));
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(guide(gid, GuideStatus.PENDING)));
         stubVerifiedMembership(gid);
         when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -192,8 +189,7 @@ class TourOfferingServiceTest {
         // does.
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
-        when(guides.findByUserId(uid))
-                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING)));
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(guide(gid, GuideStatus.PENDING)));
         GuideUniversityEntity pendingRow = new GuideUniversityEntity();
         pendingRow.setId(UUID.randomUUID());
         pendingRow.setGuideProfileId(gid);
@@ -309,14 +305,12 @@ class TourOfferingServiceTest {
     }
 
     private void stubPendingGuide(UUID uid, UUID gid) {
-        when(guides.findByUserId(uid))
-                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.PENDING)));
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(guide(gid, GuideStatus.PENDING)));
         stubVerifiedMembership(gid);
     }
 
     private void stubApprovedGuide(UUID uid, UUID gid) {
-        when(guides.findByUserId(uid))
-                .thenReturn(Optional.of(guide(gid, GuideApplicationStatus.VERIFIED)));
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(guide(gid, GuideStatus.VERIFIED)));
         stubVerifiedMembership(gid);
     }
 

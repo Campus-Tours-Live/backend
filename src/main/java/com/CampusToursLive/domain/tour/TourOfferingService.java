@@ -1,8 +1,8 @@
 package com.CampusToursLive.domain.tour;
 
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.guide.GuideUniversityRepository;
 import com.CampusToursLive.domain.guide.GuideVerificationStatus;
 import com.CampusToursLive.domain.university.CampusImageUrls;
@@ -25,7 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
  * Tour offerings — a guide's supply-side products. This is the first endpoint set that actually
  * exercises the role/approval gates: - creating a DRAFT is allowed while the application is still
  * pending (preparing unpublished content is not a "live" action); - activating (going live,
- * DRAFT→ACTIVE) requires application_status == VERIFIED. The caller already enforced the GUIDE role
+ * DRAFT→ACTIVE) requires guide_status == VERIFIED. The caller already enforced the GUIDE role
  * (controller: requireRole(GUIDE)).
  */
 @Service
@@ -132,7 +132,7 @@ public class TourOfferingService {
 
         // Live-action gate: publishing a draft (DRAFT -> ACTIVE) requires a VERIFIED guide
         // application.
-        if (guide.getApplicationStatus() != GuideApplicationStatus.VERIFIED) {
+        if (guide.getStatus() != GuideStatus.VERIFIED) {
             throw new ForbiddenException(
                     "Your guide application must be approved before you can publish offerings");
         }

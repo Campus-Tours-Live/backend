@@ -13,9 +13,9 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.guide.GuideUniversityEntity;
 import com.CampusToursLive.domain.guide.GuideUniversityRepository;
 import com.CampusToursLive.domain.university.UniversityEntity;
@@ -363,7 +363,7 @@ class TourDiscoveryServiceTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(gid);
         guide.setUserId(uid);
-        guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
+        guide.setStatus(GuideStatus.VERIFIED);
         guide.setBio("Bio text");
         when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
 

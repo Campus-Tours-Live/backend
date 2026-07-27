@@ -7,13 +7,13 @@ import java.util.List;
 /**
  * PATCH /guide/profile body — guide application / onboarding.
  *
- * <p>Maps to: users (firstName, lastName, displayName) + guide_profiles (bio, languages,
- * specialties) + guide_universities (universityId, major, classYear, degree, entryYear, schoolEmail
+ * <p>Maps to: users (firstName, lastName, displayName) + guide_profiles (bio, spokenLanguages,
+ * tourTopics) + guide_universities (universityId, major, classYear, degree, entryYear, schoolEmail
  * from verificationEmail, method UNIVERSITY_EMAIL implied).
  *
  * <p>When {@code submit} is true the application is finalized: required fields (university, major,
  * verification email) are enforced, a verification row is created, the GUIDE role is granted
- * (user_roles) and the guide's own application_status moves to PENDING. The account-level status is
+ * (user_roles) and the guide's own guide_status moves to PENDING. The account-level status is
  * unchanged — role lifecycle lives on the profile, not the account.
  */
 @Schema(
@@ -60,17 +60,17 @@ public record GuideProfileUpdateRequest(
                                         description = "Languages the guide speaks.",
                                         requiredMode = Schema.RequiredMode.NOT_REQUIRED),
                         schema = @Schema(description = "BCP-47 language tag.", example = "en-US"))
-                List<String> languages,
+                List<String> spokenLanguages,
         @ArraySchema(
                         arraySchema =
                                 @Schema(
-                                        description = "Tour specialties the guide focuses on.",
+                                        description = "Tour topics the guide focuses on.",
                                         requiredMode = Schema.RequiredMode.NOT_REQUIRED),
                         schema =
                                 @Schema(
-                                        description = "Free-text specialty label.",
+                                        description = "Free-text tour topic label.",
                                         example = "Dorm & housing tours"))
-                List<String> specialties,
+                List<String> tourTopics,
         @Schema(
                         description =
                                 "University email used for verification (method UNIVERSITY_EMAIL);"

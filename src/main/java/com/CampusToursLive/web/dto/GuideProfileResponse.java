@@ -22,7 +22,7 @@ public record GuideProfileResponse(
                         example = "VERIFIED",
                         allowableValues = {"PENDING", "VERIFIED", "REJECTED"},
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String applicationStatus,
+                String guideStatus,
         @Schema(
                         description =
                                 "Per-university affiliations (major/degree/class year/verification),"
@@ -38,9 +38,9 @@ public record GuideProfileResponse(
                         description = "BCP-47 language tags the guide speaks.",
                         example = "[\"en-US\",\"zh-CN\"]",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                List<String> languages,
+                List<String> spokenLanguages,
         @Schema(
                         description = "Tour topics the guide specializes in.",
                         example = "[\"DORM_HOUSING\"]",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                List<String> specialties) {}
+                List<String> tourTopics) {}

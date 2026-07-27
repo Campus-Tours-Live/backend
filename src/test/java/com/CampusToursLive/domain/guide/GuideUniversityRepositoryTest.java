@@ -63,7 +63,7 @@ class GuideUniversityRepositoryTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
+        guide.setStatus(GuideStatus.VERIFIED);
         guides.save(guide);
 
         guideProfileId = guide.getId();
@@ -112,7 +112,7 @@ class GuideUniversityRepositoryTest {
         GuideProfileEntity otherGuide = new GuideProfileEntity();
         otherGuide.setId(UUID.randomUUID());
         otherGuide.setUserId(otherUser.getId());
-        otherGuide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
+        otherGuide.setStatus(GuideStatus.VERIFIED);
         guides.save(otherGuide);
 
         GuideUniversityEntity otherRow = new GuideUniversityEntity();
@@ -135,7 +135,7 @@ class GuideUniversityRepositoryTest {
         GuideProfileEntity excludedGuide = new GuideProfileEntity();
         excludedGuide.setId(UUID.randomUUID());
         excludedGuide.setUserId(excludedUser.getId());
-        excludedGuide.setApplicationStatus(GuideApplicationStatus.VERIFIED);
+        excludedGuide.setStatus(GuideStatus.VERIFIED);
         guides.save(excludedGuide);
 
         GuideUniversityEntity excludedRow = new GuideUniversityEntity();

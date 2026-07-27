@@ -36,20 +36,17 @@ public class GuideProfileEntity {
 
     /** JSONB array of BCP-47 language tags, e.g. ["en-US","es"]. Raw JSON string. */
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "languages", columnDefinition = "jsonb", nullable = false)
-    private String languages = "[\"en-US\"]";
+    @Column(name = "spoken_languages", columnDefinition = "jsonb", nullable = false)
+    private String spokenLanguages = "[\"en-US\"]";
 
     /** JSONB array of tour_topic values. Raw JSON string. */
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "specialties", columnDefinition = "jsonb", nullable = false)
-    private String specialties = "[]";
+    @Column(name = "tour_topics", columnDefinition = "jsonb", nullable = false)
+    private String tourTopics = "[]";
 
     @Enumerated(EnumType.STRING)
-    @Column(
-            name = "application_status",
-            columnDefinition = "guide_application_status",
-            nullable = false)
-    private GuideApplicationStatus applicationStatus = GuideApplicationStatus.PENDING;
+    @Column(name = "guide_status", columnDefinition = "guide_application_status", nullable = false)
+    private GuideStatus status = GuideStatus.PENDING;
 
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;

@@ -2982,8 +2982,8 @@ CREATE TEMP TABLE guide_university_seed (
   degree text,
   entry_year smallint,
   bio text,
-  languages text,
-  specialties text
+  spoken_languages text,
+  tour_topics text
 ) ON COMMIT DROP;
 
 INSERT INTO guide_university_seed
@@ -3490,12 +3490,12 @@ INSERT INTO guide_university_seed
     ('10000000-0000-0000-0000-0000000001f4'::uuid, 'miami', 'Cybersecurity', '2025', 'MS', 2021, 'Miami Cybersecurity student (class of 2025) who loves showing visitors around campus.', '["en-US","ja"]', '["INTERNATIONAL_STUDENT","FRESHMAN"]');
 
 INSERT INTO guide_profiles (
-  user_id, bio, languages,
-  specialties, application_status, approved_at
+  user_id, bio, spoken_languages,
+  tour_topics, guide_status, approved_at
 )
 SELECT
   seed.user_id, seed.bio,
-  seed.languages::jsonb, seed.specialties::jsonb,
+  seed.spoken_languages::jsonb, seed.tour_topics::jsonb,
   'VERIFIED'::guide_application_status,
   now()
 FROM guide_university_seed seed

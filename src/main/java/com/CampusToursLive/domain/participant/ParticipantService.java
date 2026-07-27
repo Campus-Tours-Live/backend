@@ -125,7 +125,7 @@ public class ParticipantService {
         Map<String, Object> interests =
                 profile != null ? readInterests(profile.getInterests()) : null;
         return new ParticipantProfileResponse(
-                profile == null ? null : participantApplicationStatus(profile),
+                profile == null ? null : participantStatus(profile),
                 profile == null
                         ? null
                         : (profile.getParticipantType() != null
@@ -148,7 +148,7 @@ public class ParticipantService {
      * flow is future work (Phase 4), so today {@code guardianRequired} is always {@code false} and
      * this always returns {@code VERIFIED}.
      */
-    private static String participantApplicationStatus(ParticipantProfileEntity p) {
+    private static String participantStatus(ParticipantProfileEntity p) {
         return p.isGuardianRequired() ? "PENDING" : "VERIFIED";
     }
 

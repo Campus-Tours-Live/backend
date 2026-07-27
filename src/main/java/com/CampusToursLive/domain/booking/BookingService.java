@@ -3,9 +3,9 @@ package com.CampusToursLive.domain.booking;
 import com.CampusToursLive.domain.availability.GuideAvailabilityOccurrenceRepository;
 import com.CampusToursLive.domain.availability.GuideBookingSettingsEntity;
 import com.CampusToursLive.domain.availability.GuideBookingSettingsRepository;
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.tour.TourOfferingEntity;
 import com.CampusToursLive.domain.tour.TourOfferingRepository;
 import com.CampusToursLive.domain.tour.TourStatus;
@@ -544,7 +544,7 @@ public class BookingService {
 
     private GuideProfileEntity requireApprovedGuide(UUID guideProfileId) {
         return guides.findById(guideProfileId)
-                .filter(g -> g.getApplicationStatus() == GuideApplicationStatus.VERIFIED)
+                .filter(g -> g.getStatus() == GuideStatus.VERIFIED)
                 .orElseThrow(() -> new ValidationException("This tour is not currently bookable"));
     }
 

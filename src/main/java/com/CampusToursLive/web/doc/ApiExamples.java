@@ -122,7 +122,7 @@ public interface ApiExamples {
                     + "}";
 
     String GUIDE_PROFILE =
-            "{\"data\":{\"applicationStatus\":\"VERIFIED\","
+            "{\"data\":{\"guideStatus\":\"VERIFIED\","
                     + "\"universities\":[{\"universityId\":"
                     + "\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"universityName\":\"North Coast University\","
@@ -131,12 +131,12 @@ public interface ApiExamples {
                     + "\"entryYear\":2023,"
                     + "\"verificationStatus\":\"VERIFIED\"}],"
                     + "\"bio\":\"Third-year student and campus tour lead.\","
-                    + "\"languages\":[\"en-US\",\"zh-CN\"],\"specialties\":[\"DORM_HOUSING\"]},"
+                    + "\"spokenLanguages\":[\"en-US\",\"zh-CN\"],\"tourTopics\":[\"DORM_HOUSING\"]},"
                     + META
                     + "}";
 
     String PARTICIPANT_PROFILE =
-            "{\"data\":{\"applicationStatus\":\"VERIFIED\","
+            "{\"data\":{\"participantStatus\":\"VERIFIED\","
                     + "\"type\":\"PROSPECTIVE_STUDENT\","
                     + "\"gradeLevel\":\"HIGH_SCHOOL_SENIOR\",\"intendedMajor\":\"Computer Science\","
                     + "\"guardianRequired\":false,\"topicsOfInterest\":[\"DORM_HOUSING\"],"

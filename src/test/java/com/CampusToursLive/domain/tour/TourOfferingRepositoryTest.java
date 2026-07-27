@@ -346,10 +346,10 @@ class TourOfferingRepositoryTest {
         return id;
     }
 
-    private UUID insertGuide(UUID universityId, String applicationStatus) {
+    private UUID insertGuide(UUID universityId, String guideStatus) {
         UUID userId = UUID.randomUUID();
-        insertUser(userId, "Guide " + applicationStatus);
-        return insertGuideWithUser(universityId, userId, applicationStatus);
+        insertUser(userId, "Guide " + guideStatus);
+        return insertGuideWithUser(universityId, userId, guideStatus);
     }
 
     /**
@@ -358,17 +358,17 @@ class TourOfferingRepositoryTest {
      * consult), kept only so callers don't need touching: they already have the id in hand for
      * {@link #insertOffering}.
      */
-    private UUID insertGuideWithUser(UUID universityId, UUID userId, String applicationStatus) {
+    private UUID insertGuideWithUser(UUID universityId, UUID userId, String guideStatus) {
         UUID guideId = UUID.randomUUID();
         entityManager
                 .createNativeQuery(
                         """
-                        INSERT INTO guide_profiles (id, user_id, application_status)
-                        VALUES (:id, :userId, CAST(:applicationStatus AS guide_application_status))
+                        INSERT INTO guide_profiles (id, user_id, guide_status)
+                        VALUES (:id, :userId, CAST(:guideStatus AS guide_application_status))
                         """)
                 .setParameter("id", guideId)
                 .setParameter("userId", userId)
-                .setParameter("applicationStatus", applicationStatus)
+                .setParameter("guideStatus", guideStatus)
                 .executeUpdate();
         return guideId;
     }

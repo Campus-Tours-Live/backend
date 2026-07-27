@@ -650,10 +650,10 @@ CREATE TABLE public.guide_profiles (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     user_id uuid NOT NULL,
     bio text,
-    languages jsonb DEFAULT '["en-US"]'::jsonb NOT NULL,
-    specialties jsonb DEFAULT '[]'::jsonb NOT NULL,
+    spoken_languages jsonb DEFAULT '["en-US"]'::jsonb NOT NULL,
+    tour_topics jsonb DEFAULT '[]'::jsonb NOT NULL,
     favorite_spots jsonb DEFAULT '[]'::jsonb NOT NULL,
-    application_status public.guide_application_status DEFAULT 'PENDING'::public.guide_application_status NOT NULL,
+    guide_status public.guide_application_status DEFAULT 'PENDING'::public.guide_application_status NOT NULL,
     avg_rating numeric(3,2) DEFAULT 0 NOT NULL,
     review_count integer DEFAULT 0 NOT NULL,
     completed_tours integer DEFAULT 0 NOT NULL,
@@ -1456,10 +1456,10 @@ CREATE INDEX ix_guardians_participant ON public.guardians USING btree (participa
 
 
 --
--- Name: ix_guide_app_status; Type: INDEX; Schema: public; Owner: -
+-- Name: ix_guide_status; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX ix_guide_app_status ON public.guide_profiles USING btree (application_status);
+CREATE INDEX ix_guide_status ON public.guide_profiles USING btree (guide_status);
 
 
 --

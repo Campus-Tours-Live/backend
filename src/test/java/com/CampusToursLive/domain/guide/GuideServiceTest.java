@@ -39,10 +39,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * GuideService — guide onboarding (updateProfile). Covers field validation (university, major,
- * price, specialty topics), the draft-vs-submit split, the bidirectional parent/guide exclusion,
- * and the GUIDE-role grant on submit. applicationStatus is verification-driven — VERIFIED is set
- * outside this service (the stubbed email-verify flow), so it's exercised here only via getProfile
- * mapping the stored enum through to the response.
+ * price, tour topics), the draft-vs-submit split, the bidirectional parent/guide exclusion, and the
+ * GUIDE-role grant on submit. guideStatus is verification-driven — VERIFIED is set outside this
+ * service (the stubbed email-verify flow), so it's exercised here only via getProfile mapping the
+ * stored enum through to the response.
  */
 @ExtendWith(MockitoExtension.class)
 class GuideServiceTest {
@@ -78,7 +78,7 @@ class GuideServiceTest {
     private static GuideProfileUpdateRequest req(
             String universityId,
             String major,
-            List<String> specialties,
+            List<String> tourTopics,
             String verificationEmail,
             Boolean submit) {
         return new GuideProfileUpdateRequest(
@@ -89,7 +89,7 @@ class GuideServiceTest {
                 null,
                 null,
                 null,
-                specialties,
+                tourTopics,
                 verificationEmail,
                 submit,
                 "Bachelor's Degree",
@@ -97,12 +97,12 @@ class GuideServiceTest {
     }
 
     /**
-     * A complete submit=true request — includes the now-required bio + specialties (and a valid
+     * A complete submit=true request — includes the now-required bio + tourTopics (and a valid
      * verification email) so submit reaches finalization instead of tripping a required-field
      * guard.
      */
     private static GuideProfileUpdateRequest submitReq(
-            String universityId, String bio, List<String> specialties) {
+            String universityId, String bio, List<String> tourTopics) {
         return new GuideProfileUpdateRequest(
                 null,
                 null,
@@ -111,7 +111,7 @@ class GuideServiceTest {
                 null,
                 bio,
                 null,
-                specialties,
+                tourTopics,
                 "me@school.edu",
                 true,
                 "Bachelor's Degree",
@@ -406,7 +406,7 @@ class GuideServiceTest {
                                         "I lead weekly campus tours for prospective students.",
                                         List.of("GENERAL_CAMPUS")));
 
-        assertEquals("PENDING", res.applicationStatus());
+        assertEquals("PENDING", res.guideStatus());
         verify(roleGrant).grant(u, UserRole.GUIDE);
         verify(users).save(u);
     }
@@ -609,9 +609,9 @@ class GuideServiceTest {
         GuideProfileEntity profile = new GuideProfileEntity();
         profile.setId(profileId);
         profile.setBio("hi");
-        profile.setLanguages("[\"en-US\"]");
-        profile.setSpecialties("[\"GENERAL_CAMPUS\"]");
-        profile.setApplicationStatus(GuideApplicationStatus.VERIFIED);
+        profile.setSpokenLanguages("[\"en-US\"]");
+        profile.setTourTopics("[\"GENERAL_CAMPUS\"]");
+        profile.setStatus(GuideStatus.VERIFIED);
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
         UniversityEntity university = new UniversityEntity();
         university.setId(uni);
@@ -632,9 +632,9 @@ class GuideServiceTest {
 
         GuideProfileResponse res = service().getProfile(u);
 
-        assertEquals("VERIFIED", res.applicationStatus());
-        assertEquals(List.of("en-US"), res.languages());
-        assertEquals(List.of("GENERAL_CAMPUS"), res.specialties());
+        assertEquals("VERIFIED", res.guideStatus());
+        assertEquals(List.of("en-US"), res.spokenLanguages());
+        assertEquals(List.of("GENERAL_CAMPUS"), res.tourTopics());
         assertEquals(1, res.universities().size());
         GuideUniversityView view = res.universities().get(0);
         assertEquals(uni.toString(), view.universityId());
@@ -655,7 +655,7 @@ class GuideServiceTest {
 
         GuideProfileResponse res = service().getProfile(u);
 
-        org.junit.jupiter.api.Assertions.assertNull(res.applicationStatus());
+        org.junit.jupiter.api.Assertions.assertNull(res.guideStatus());
         org.junit.jupiter.api.Assertions.assertTrue(res.universities().isEmpty());
     }
 
@@ -663,19 +663,20 @@ class GuideServiceTest {
     void getProfile_profilePresentButNullEnumsAndArrays() {
         UUID uid = UUID.randomUUID();
         UserEntity u = user(uid);
-        // applicationStatus null, null arrays.
+        // guideStatus null, null arrays.
         GuideProfileEntity profile = new GuideProfileEntity();
-        profile.setApplicationStatus(null);
-        profile.setLanguages(null);
-        profile.setSpecialties("   ");
+        profile.setStatus(null);
+        profile.setSpokenLanguages(null);
+        profile.setTourTopics("   ");
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
 
         GuideProfileResponse res = service().getProfile(u);
 
-        org.junit.jupiter.api.Assertions.assertNull(res.applicationStatus());
+        org.junit.jupiter.api.Assertions.assertNull(res.guideStatus());
         org.junit.jupiter.api.Assertions.assertTrue(res.universities().isEmpty());
-        assertEquals(List.of(), res.languages()); // null json → empty via readArray null branch
-        assertEquals(List.of(), res.specialties()); // blank json → empty via readArray blank branch
+        assertEquals(
+                List.of(), res.spokenLanguages()); // null json → empty via readArray null branch
+        assertEquals(List.of(), res.tourTopics()); // blank json → empty via readArray blank branch
     }
 
     @Test
@@ -690,7 +691,7 @@ class GuideServiceTest {
         UserEntity u = user(uid);
         GuideProfileEntity profile = new GuideProfileEntity();
         profile.setId(profileId);
-        profile.setApplicationStatus(GuideApplicationStatus.PENDING);
+        profile.setStatus(GuideStatus.PENDING);
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
         when(universities.findById(uni)).thenReturn(Optional.empty());
         GuideUniversityEntity row = new GuideUniversityEntity();
@@ -702,7 +703,7 @@ class GuideServiceTest {
 
         GuideProfileResponse res = service().getProfile(u);
 
-        assertEquals("PENDING", res.applicationStatus());
+        assertEquals("PENDING", res.guideStatus());
         assertEquals(uni.toString(), res.universities().get(0).universityId());
         List<String> fieldNames =
                 java.util.Arrays.stream(GuideProfileResponse.class.getRecordComponents())
@@ -1127,11 +1128,11 @@ class GuideServiceTest {
 
         GuideProfileResponse res = service().updateProfile(u, r);
 
-        assertEquals(List.of("en-US"), res.languages());
+        assertEquals(List.of("en-US"), res.spokenLanguages());
     }
 
     @Test
-    void update_specialtiesWithNullAndBlankEntriesSkipped() {
+    void update_tourTopicsWithNullAndBlankEntriesSkipped() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
         UserEntity u = user(uid);
@@ -1159,7 +1160,7 @@ class GuideServiceTest {
 
         GuideProfileResponse res = service().updateProfile(u, r);
 
-        assertEquals(List.of("GENERAL_CAMPUS"), res.specialties());
+        assertEquals(List.of("GENERAL_CAMPUS"), res.tourTopics());
     }
 
     @Test
@@ -1226,7 +1227,7 @@ class GuideServiceTest {
                                         "I lead weekly campus tours for prospective students.",
                                         List.of("GENERAL_CAMPUS")));
 
-        assertEquals("PENDING", res.applicationStatus());
+        assertEquals("PENDING", res.guideStatus());
         verify(roleGrant).grant(u, UserRole.GUIDE);
     }
 
@@ -1308,13 +1309,13 @@ class GuideServiceTest {
                         campusImages,
                         badMapper);
         GuideProfileEntity profile = new GuideProfileEntity();
-        profile.setLanguages("[\"en-US\"]"); // non-blank → readValue invoked → throws → []
-        profile.setSpecialties("[\"GENERAL_CAMPUS\"]");
+        profile.setSpokenLanguages("[\"en-US\"]"); // non-blank → readValue invoked → throws → []
+        profile.setTourTopics("[\"GENERAL_CAMPUS\"]");
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
 
         GuideProfileResponse res = svc.getProfile(u);
 
-        assertEquals(List.of(), res.languages());
-        assertEquals(List.of(), res.specialties());
+        assertEquals(List.of(), res.spokenLanguages());
+        assertEquals(List.of(), res.tourTopics());
     }
 }

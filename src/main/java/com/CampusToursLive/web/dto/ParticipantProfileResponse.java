@@ -21,7 +21,7 @@ public record ParticipantProfileResponse(
                         example = "VERIFIED",
                         allowableValues = {"PENDING", "VERIFIED"},
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String applicationStatus,
+                String participantStatus,
         @Schema(
                         description = "Participant type.",
                         example = "PROSPECTIVE_STUDENT",

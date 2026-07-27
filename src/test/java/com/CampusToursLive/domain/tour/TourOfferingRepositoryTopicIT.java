@@ -144,7 +144,7 @@ class TourOfferingRepositoryTopicIT {
      * consult), kept only so callers don't need touching: they already have the id in hand for
      * {@link #insertOffering}.
      */
-    private UUID insertGuide(UUID universityId, String applicationStatus) {
+    private UUID insertGuide(UUID universityId, String guideStatus) {
         UUID userId = UUID.randomUUID();
         entityManager
                 .createNativeQuery(
@@ -153,19 +153,19 @@ class TourOfferingRepositoryTopicIT {
                         VALUES (:id, :displayName, 'ACTIVE')
                         """)
                 .setParameter("id", userId)
-                .setParameter("displayName", "Guide " + applicationStatus)
+                .setParameter("displayName", "Guide " + guideStatus)
                 .executeUpdate();
 
         UUID guideId = UUID.randomUUID();
         entityManager
                 .createNativeQuery(
                         """
-                        INSERT INTO guide_profiles (id, user_id, application_status)
-                        VALUES (:id, :userId, CAST(:applicationStatus AS guide_application_status))
+                        INSERT INTO guide_profiles (id, user_id, guide_status)
+                        VALUES (:id, :userId, CAST(:guideStatus AS guide_application_status))
                         """)
                 .setParameter("id", guideId)
                 .setParameter("userId", userId)
-                .setParameter("applicationStatus", applicationStatus)
+                .setParameter("guideStatus", guideStatus)
                 .executeUpdate();
         return guideId;
     }

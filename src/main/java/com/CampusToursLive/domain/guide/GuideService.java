@@ -29,9 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Guide application / onboarding. Upserts {@code guide_profiles} and its per-university {@code
  * guide_universities} row, and (on submit) grants the GUIDE role (user_roles) and sets the guide's
- * own application_status to PENDING. Verification (the stubbed email-verify flow, tracked on
- * guide_universities.verification_status) is what later flips application_status to VERIFIED —
- * admin review has been retired. Account-wide accountStatus is NOT touched — guide approval is a
+ * own guide_status to PENDING. Verification (the stubbed email-verify flow, tracked on
+ * guide_universities.verification_status) is what later flips guide_status to VERIFIED — admin
+ * review has been retired. Account-wide accountStatus is NOT touched — guide approval is a
  * role-level state, kept on the guide profile rather than the account.
  */
 @Service
@@ -117,13 +117,13 @@ public class GuideService {
                                 });
 
         if (req.bio() != null) profile.setBio(req.bio().trim());
-        if (req.languages() != null) {
+        if (req.spokenLanguages() != null) {
             List<String> langs =
-                    req.languages().stream().filter(s -> s != null && !s.isBlank()).toList();
-            profile.setLanguages(writeJson(langs.isEmpty() ? List.of("en-US") : langs));
+                    req.spokenLanguages().stream().filter(s -> s != null && !s.isBlank()).toList();
+            profile.setSpokenLanguages(writeJson(langs.isEmpty() ? List.of("en-US") : langs));
         }
-        if (req.specialties() != null) {
-            profile.setSpecialties(writeJson(validateTopics(req.specialties())));
+        if (req.tourTopics() != null) {
+            profile.setTourTopics(writeJson(validateTopics(req.tourTopics())));
         }
 
         if (submit) {
@@ -151,11 +151,11 @@ public class GuideService {
             if (profile.getBio() == null || profile.getBio().isBlank()) {
                 throw new ValidationException("A short bio is required to submit your application");
             }
-            if (readArray(profile.getSpecialties()).isEmpty()) {
+            if (readArray(profile.getTourTopics()).isEmpty()) {
                 throw new ValidationException(
                         "At least one tour specialty is required to submit your application");
             }
-            profile.setApplicationStatus(GuideApplicationStatus.PENDING);
+            profile.setStatus(GuideStatus.PENDING);
             guides.save(profile);
 
             // Submission lives entirely on guide_universities (the per-university row):
@@ -169,7 +169,7 @@ public class GuideService {
             guideUniversities.save(guideUniversity);
 
             // Grant the GUIDE role (user_roles); approval is tracked on the guide
-            // profile's application_status, NOT on the account-wide accountStatus.
+            // profile's guide_status, NOT on the account-wide accountStatus.
             roleGrant.grant(user, UserRole.GUIDE);
         } else {
             guides.save(profile);
@@ -366,13 +366,11 @@ public class GuideService {
         return new GuideProfileResponse(
                 profile == null
                         ? null
-                        : (profile.getApplicationStatus() != null
-                                ? profile.getApplicationStatus().name()
-                                : null),
+                        : (profile.getStatus() != null ? profile.getStatus().name() : null),
                 profile == null ? List.of() : buildUniversityViews(profile.getId()),
                 profile == null ? null : profile.getBio(),
-                profile == null ? null : readArray(profile.getLanguages()),
-                profile == null ? null : readArray(profile.getSpecialties()));
+                profile == null ? null : readArray(profile.getSpokenLanguages()),
+                profile == null ? null : readArray(profile.getTourTopics()));
     }
 
     /**
