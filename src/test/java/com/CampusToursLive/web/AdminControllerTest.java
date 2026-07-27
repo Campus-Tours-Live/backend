@@ -43,24 +43,18 @@ class AdminControllerTest {
         when(guideService.reviewApplication(eq(guideUserId), eq("APPROVED")))
                 .thenReturn(
                         new GuideProfileResponse(
-                                guideUserId.toString(),
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
                                 "APPROVED",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
                                 "VERIFIED",
+                                null,
+                                null,
+                                null,
+                                null,
                                 null));
 
         var envelope = controller().decide(guideUserId, new GuideDecisionRequest("APPROVED"));

@@ -72,7 +72,7 @@ public class GuideService {
     @Transactional(readOnly = true)
     public GuideProfileResponse getProfile(UserEntity user) {
         GuideProfileEntity profile = guides.findByUserId(user.getId()).orElse(null);
-        return toResponse(user, profile);
+        return toResponse(profile);
     }
 
     @Transactional
@@ -191,7 +191,7 @@ public class GuideService {
         }
 
         users.save(user);
-        return toResponse(user, profile);
+        return toResponse(profile);
     }
 
     /**
@@ -348,25 +348,23 @@ public class GuideService {
         }
         guides.save(profile);
 
-        UserEntity guideUser =
-                users.findById(guideUserId)
-                        .orElseThrow(() -> new NotFoundException("User not found"));
-        return toResponse(guideUser, profile);
+        // Data-integrity guard: the guide_profile row references a user that must still exist.
+        users.findById(guideUserId).orElseThrow(() -> new NotFoundException("User not found"));
+        return toResponse(profile);
     }
 
-    private GuideProfileResponse toResponse(UserEntity user, GuideProfileEntity profile) {
+    private GuideProfileResponse toResponse(GuideProfileEntity profile) {
         UniversityEntity university =
                 profile != null && profile.getUniversityId() != null
                         ? universities.findById(profile.getUniversityId()).orElse(null)
                         : null;
 
         return new GuideProfileResponse(
-                user.getId().toString(),
-                user.getFirstName(),
-                user.getLastName(),
-                user.getDisplayName(),
-                user.getEmail(),
-                user.getAccountStatus() != null ? user.getAccountStatus().name() : null,
+                profile == null
+                        ? null
+                        : (profile.getApplicationStatus() != null
+                                ? profile.getApplicationStatus().name()
+                                : null),
                 profile == null
                         ? null
                         : (profile.getUniversityId() != null
@@ -376,22 +374,17 @@ public class GuideService {
                 university != null ? university.getShortName() : null,
                 profile == null ? null : profile.getMajor(),
                 profile == null ? null : profile.getClassYear(),
-                profile == null ? null : profile.getBio(),
-                profile == null ? null : readArray(profile.getLanguages()),
-                profile == null ? null : readArray(profile.getSpecialties()),
-                profile == null ? null : profile.getBasePriceCents(),
-                profile == null ? null : profile.getCurrency(),
-                profile == null
-                        ? null
-                        : (profile.getApplicationStatus() != null
-                                ? profile.getApplicationStatus().name()
-                                : null),
+                profile == null ? null : profile.getDegree(),
                 profile == null
                         ? null
                         : (profile.getVerificationStatus() != null
                                 ? profile.getVerificationStatus().name()
                                 : null),
-                profile == null ? null : profile.getDegree());
+                profile == null ? null : profile.getBio(),
+                profile == null ? null : readArray(profile.getLanguages()),
+                profile == null ? null : readArray(profile.getSpecialties()),
+                profile == null ? null : profile.getBasePriceCents(),
+                profile == null ? null : profile.getCurrency());
     }
 
     private List<String> readArray(String json) {

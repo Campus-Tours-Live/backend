@@ -115,18 +115,15 @@ public interface ApiExamples {
                     + "}";
 
     String GUIDE_PROFILE =
-            "{\"data\":{\"userId\":\"11111111-0000-4000-8000-000000000001\","
-                    + "\"firstName\":\"Maya\",\"lastName\":\"Chen\",\"displayName\":\"Maya Chen\","
-                    + "\"email\":\"maya.chen@ncu.edu\",\"accountStatus\":\"ACTIVE\","
+            "{\"data\":{\"applicationStatus\":\"APPROVED\","
                     + "\"universityId\":\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"universityName\":\"North Coast University\","
                     + "\"universityShortName\":\"NCU\",\"major\":\"Marine Biology\","
-                    + "\"classYear\":\"Junior\",\"bio\":\"Third-year student and campus tour"
-                    + " lead.\","
+                    + "\"classYear\":\"Junior\",\"degree\":\"Bachelor's Degree\","
+                    + "\"verificationStatus\":\"VERIFIED\","
+                    + "\"bio\":\"Third-year student and campus tour lead.\","
                     + "\"languages\":[\"en-US\",\"zh-CN\"],\"specialties\":[\"DORM_HOUSING\"],"
-                    + "\"basePriceCents\":4200,\"currency\":\"USD\","
-                    + "\"applicationStatus\":\"APPROVED\",\"verificationStatus\":\"VERIFIED\","
-                    + "\"degree\":\"Bachelor's Degree\"},"
+                    + "\"basePriceCents\":4200,\"currency\":\"USD\"},"
                     + META
                     + "}";
 

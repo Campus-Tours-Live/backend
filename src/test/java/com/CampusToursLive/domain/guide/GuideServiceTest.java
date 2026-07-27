@@ -543,7 +543,7 @@ class GuideServiceTest {
     void getProfile_profilePresentButNullEnumsAndArrays() {
         UUID uid = UUID.randomUUID();
         UserEntity u = user(uid);
-        // accountStatus null, applicationStatus null, verificationStatus null, null arrays.
+        // applicationStatus null, verificationStatus null, null arrays.
         GuideProfileEntity profile = new GuideProfileEntity();
         profile.setApplicationStatus(null);
         profile.setVerificationStatus(null);
@@ -553,11 +553,42 @@ class GuideServiceTest {
 
         GuideProfileResponse res = service().getProfile(u);
 
-        org.junit.jupiter.api.Assertions.assertNull(res.accountStatus());
         org.junit.jupiter.api.Assertions.assertNull(res.applicationStatus());
         org.junit.jupiter.api.Assertions.assertNull(res.verificationStatus());
         assertEquals(List.of(), res.languages()); // null json → empty via readArray null branch
         assertEquals(List.of(), res.specialties()); // blank json → empty via readArray blank branch
+    }
+
+    @Test
+    void getProfile_doesNotExposeIdentityFields() {
+        // Regression guard for the profile-contract-v2 identity split: /guide/profile is
+        // flat and role-scoped — identity (user id, name, email, account status) lives only
+        // on /userinfo. GuideProfileResponse no longer declares those accessors at all, so
+        // this test documents the removal (would fail to compile if they came back).
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        UserEntity u = user(uid);
+        GuideProfileEntity profile = new GuideProfileEntity();
+        profile.setUniversityId(uni);
+        profile.setMajor("CS");
+        profile.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
+        when(universities.findById(uni)).thenReturn(Optional.empty());
+
+        GuideProfileResponse res = service().getProfile(u);
+
+        assertEquals("PENDING_REVIEW", res.applicationStatus());
+        assertEquals(uni.toString(), res.universityId());
+        List<String> fieldNames =
+                java.util.Arrays.stream(GuideProfileResponse.class.getRecordComponents())
+                        .map(java.lang.reflect.RecordComponent::getName)
+                        .toList();
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("userId"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("firstName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("lastName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("displayName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("email"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("accountStatus"));
     }
 
     // ---- updateProfile: optional fields & display-name sync -------------------------------
