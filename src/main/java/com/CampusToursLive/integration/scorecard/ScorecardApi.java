@@ -203,7 +203,7 @@ public class ScorecardApi {
                                                     .queryParam("id", schoolId.trim())
                                                     .queryParam(
                                                             "fields",
-                                                            "id,school.name,school.city,school.state")
+                                                            "id,school.name,school.alias,school.city,school.state")
                                                     .queryParam("per_page", 1)
                                                     .queryParam("api_key", apiKey)
                                                     .build())
@@ -215,6 +215,7 @@ public class ScorecardApi {
             return new SchoolRef(
                     schoolId.trim(),
                     name,
+                    firstAlias(s.path("school.alias").asText(null)),
                     s.path("school.city").asText(""),
                     s.path("school.state").asText(""));
         } catch (Exception ex) {
@@ -252,5 +253,20 @@ public class ScorecardApi {
     /** Strip the trailing period Scorecard CIP titles carry and collapse whitespace. */
     private static String cleanTitle(String raw) {
         return raw.replaceAll("\\.\\s*$", "").replaceAll("\\s+", " ").trim();
+    }
+
+    /**
+     * The university's short name, derived from Scorecard's {@code school.alias} — a
+     * comma-separated list of alternate names (e.g. {@code "MIT, M.I.T."}). We take the first
+     * non-blank, trimmed token as the canonical short name; {@code null} when alias is null/blank
+     * or every token is blank.
+     */
+    private static String firstAlias(String rawAlias) {
+        if (rawAlias == null || rawAlias.isBlank()) return null;
+        for (String token : rawAlias.split(",")) {
+            String trimmed = token.trim();
+            if (!trimmed.isEmpty()) return trimmed;
+        }
+        return null;
     }
 }

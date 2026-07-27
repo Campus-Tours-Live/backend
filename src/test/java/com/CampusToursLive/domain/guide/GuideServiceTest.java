@@ -159,7 +159,7 @@ class GuideServiceTest {
         when(schools.getSchool("243744"))
                 .thenReturn(
                         new SchoolDirectory.SchoolRef(
-                                "243744", "Stanford University", "Stanford", "CA"));
+                                "243744", "Stanford University", "Stanford", "Stanford", "CA"));
         when(universities.save(org.mockito.ArgumentMatchers.any(UniversityEntity.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
 
@@ -173,6 +173,7 @@ class GuideServiceTest {
         verify(universities).save(saved.capture());
         assertEquals("sc-243744", saved.getValue().getSlug());
         assertEquals("Stanford University", saved.getValue().getName());
+        assertEquals("Stanford", saved.getValue().getShortName());
         assertEquals("America/Los_Angeles", saved.getValue().getTimezone()); // CA → Pacific
     }
 
@@ -182,7 +183,7 @@ class GuideServiceTest {
         when(schools.getSchool("166027"))
                 .thenReturn(
                         new SchoolDirectory.SchoolRef(
-                                "166027", "Harvard University", "Cambridge", "MA"));
+                                "166027", "Harvard University", "Harvard", "Cambridge", "MA"));
         ArgumentCaptor<UniversityEntity> saved = ArgumentCaptor.forClass(UniversityEntity.class);
         when(universities.save(saved.capture())).thenAnswer(i -> i.getArgument(0));
 

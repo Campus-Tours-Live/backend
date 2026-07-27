@@ -265,6 +265,7 @@ public class GuideService {
                             u.setId(UUID.randomUUID());
                             u.setSlug(slug);
                             u.setName(s.name());
+                            u.setShortName(s.shortName());
                             u.setCity(s.city() == null || s.city().isBlank() ? "N/A" : s.city());
                             u.setRegion(s.state());
                             u.setTimezone(tzForState(s.state()));

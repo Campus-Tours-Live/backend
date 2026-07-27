@@ -40,7 +40,7 @@ class MetaControllerTest {
                 @Override
                 public SchoolDirectory.SchoolRef getSchool(String schoolId) {
                     return new SchoolDirectory.SchoolRef(
-                            schoolId, "Stanford University", "Stanford", "CA");
+                            schoolId, "Stanford University", "Stanford", "Stanford", "CA");
                 }
             };
 
