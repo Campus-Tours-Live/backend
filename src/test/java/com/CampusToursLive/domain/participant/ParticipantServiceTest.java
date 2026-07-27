@@ -75,7 +75,7 @@ class ParticipantServiceTest {
         ParticipantProfileResponse res =
                 service().updateProfile(u, req("Jordan", null, null, null));
 
-        assertEquals("PROSPECTIVE", res.participantType()); // created default
+        assertEquals("PROSPECTIVE", res.type()); // created default
         verify(roleGrant).grant(u, UserRole.PARTICIPANT);
         verify(users).save(u);
         verify(profiles).save(any());
@@ -117,7 +117,7 @@ class ParticipantServiceTest {
         ParticipantProfileResponse res =
                 service().updateProfile(u, req(null, null, "PARENT", null));
 
-        assertEquals("PARENT", res.participantType());
+        assertEquals("PARENT", res.type());
         verify(roleGrant).grant(u, UserRole.PARTICIPANT);
     }
 
@@ -149,10 +149,9 @@ class ParticipantServiceTest {
         UserEntity u = user(uid);
         when(profiles.findByUserId(uid)).thenReturn(Optional.empty());
 
-        ParticipantProfileResponse res =
-                service().updateProfile(u, req("Jordan", "JL the Guide", null, null));
+        service().updateProfile(u, req("Jordan", "JL the Guide", null, null));
 
-        assertEquals("JL the Guide", res.displayName());
+        assertEquals("JL the Guide", u.getDisplayName());
     }
 
     @Test
@@ -188,10 +187,11 @@ class ParticipantServiceTest {
 
         ParticipantProfileResponse res = service().getProfile(u);
 
-        assertEquals("TRANSFER", res.participantType());
+        assertEquals("TRANSFER", res.type());
         assertEquals("SOPHOMORE", res.gradeLevel());
         assertEquals("CS", res.intendedMajor());
         assertEquals(List.of("DORM_HOUSING"), res.topicsOfInterest());
+        assertEquals("VERIFIED", res.applicationStatus()); // guardianRequired defaults false
     }
 
     @Test
@@ -202,7 +202,8 @@ class ParticipantServiceTest {
 
         ParticipantProfileResponse res = service().getProfile(u);
 
-        assertNull(res.participantType());
+        assertNull(res.applicationStatus());
+        assertNull(res.type());
         assertNull(res.gradeLevel());
         assertNull(res.intendedMajor());
         assertNull(res.guardianRequired());
@@ -224,8 +225,47 @@ class ParticipantServiceTest {
 
         ParticipantProfileResponse res = service().getProfile(u);
 
-        assertNull(res.participantType());
+        assertNull(res.type());
         assertNull(res.gradeLevel());
+    }
+
+    @Test
+    void getProfile_guardianRequired_returnsPendingApplicationStatus() {
+        // Underage-participant path: guardianRequired=true → applicationStatus="PENDING". The
+        // real guardian-verification flow is future work (Phase 4); this just covers the branch.
+        UUID uid = UUID.randomUUID();
+        UserEntity u = user(uid);
+        ParticipantProfileEntity existing = new ParticipantProfileEntity();
+        existing.setId(UUID.randomUUID());
+        existing.setUserId(uid);
+        existing.setParticipantType(ParticipantType.HIGH_SCHOOL);
+        existing.setGuardianRequired(true);
+        existing.setInterests("{}");
+        when(profiles.findByUserId(uid)).thenReturn(Optional.of(existing));
+
+        ParticipantProfileResponse res = service().getProfile(u);
+
+        assertEquals("PENDING", res.applicationStatus());
+    }
+
+    @Test
+    void getProfile_doesNotExposeIdentityFields() {
+        // Regression guard for the profile-contract-v2 identity split: /participant/profile is
+        // flat and role-scoped — identity (user id, name, email, account status) lives only on
+        // /userinfo. ParticipantProfileResponse no longer declares those accessors at all, so
+        // this test documents the removal (would fail to compile if they came back).
+        List<String> fieldNames =
+                java.util.Arrays.stream(ParticipantProfileResponse.class.getRecordComponents())
+                        .map(java.lang.reflect.RecordComponent::getName)
+                        .toList();
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("userId"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("firstName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("lastName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("displayName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("email"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("participantType"));
+        org.junit.jupiter.api.Assertions.assertTrue(fieldNames.contains("type"));
+        org.junit.jupiter.api.Assertions.assertTrue(fieldNames.contains("applicationStatus"));
     }
 
     // ---- updateProfile: every field set ----
@@ -252,17 +292,18 @@ class ParticipantServiceTest {
 
         ParticipantProfileResponse res = service().updateProfile(u, r);
 
-        assertEquals("Jordan", res.firstName());
-        assertEquals("Lee", res.lastName());
-        assertEquals("Jordan Lee", res.displayName()); // synced from first/last
+        assertEquals("Jordan", u.getFirstName());
+        assertEquals("Lee", u.getLastName());
+        assertEquals("Jordan Lee", u.getDisplayName()); // synced from first/last
         assertEquals("es", res.preferredLanguage());
         assertEquals("America/New_York", res.timezone());
-        assertEquals("HIGH_SCHOOL", res.participantType());
+        assertEquals("HIGH_SCHOOL", res.type());
         assertEquals("JUNIOR", res.gradeLevel());
         assertEquals("Biology", res.intendedMajor());
         assertEquals(List.of("DORM_HOUSING"), res.topicsOfInterest());
         assertEquals(List.of("166683"), res.universitiesOfInterest());
         assertEquals("Wheelchair access", res.accessibilityPreferences());
+        assertEquals("VERIFIED", res.applicationStatus());
     }
 
     @Test
@@ -278,9 +319,9 @@ class ParticipantServiceTest {
 
         ParticipantProfileResponse res = service().updateProfile(u, r);
 
-        assertEquals("Existing", res.firstName());
-        assertNull(res.displayName()); // no sync triggered, no explicit value
-        assertEquals("PROSPECTIVE", res.participantType());
+        assertEquals("Existing", u.getFirstName());
+        assertNull(u.getDisplayName()); // no sync triggered, no explicit value
+        assertEquals("PROSPECTIVE", res.type());
         verify(roleGrant).grant(u, UserRole.PARTICIPANT);
     }
 
@@ -294,10 +335,10 @@ class ParticipantServiceTest {
                 new ParticipantProfileUpdateRequest(
                         null, "Lee", null, null, null, null, null, null, null, null, null);
 
-        ParticipantProfileResponse res = service().updateProfile(u, r);
+        service().updateProfile(u, r);
 
-        assertEquals("Lee", res.lastName());
-        assertEquals("Lee", res.displayName());
+        assertEquals("Lee", u.getLastName());
+        assertEquals("Lee", u.getDisplayName());
     }
 
     @Test
@@ -311,9 +352,9 @@ class ParticipantServiceTest {
                 new ParticipantProfileUpdateRequest(
                         "   ", "   ", null, null, null, null, null, null, null, null, null);
 
-        ParticipantProfileResponse res = service().updateProfile(u, r);
+        service().updateProfile(u, r);
 
-        assertNull(res.displayName());
+        assertNull(u.getDisplayName());
     }
 
     @Test
@@ -355,7 +396,7 @@ class ParticipantServiceTest {
                 service().updateProfile(user(uid), req(null, null, null, List.of("ACADEMICS")));
 
         // participantType left as the existing one (not re-sent)
-        assertEquals("INTERNATIONAL", res.participantType());
+        assertEquals("INTERNATIONAL", res.type());
         assertEquals(List.of("ACADEMICS"), res.topicsOfInterest());
         verify(profiles).save(existing);
     }

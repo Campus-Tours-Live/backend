@@ -128,14 +128,13 @@ public interface ApiExamples {
                     + "}";
 
     String PARTICIPANT_PROFILE =
-            "{\"data\":{\"userId\":\"22222222-0000-4000-8000-000000000001\","
-                    + "\"firstName\":\"Sam\",\"lastName\":\"Rivera\",\"displayName\":\"Sam Rivera\","
-                    + "\"email\":\"sam.rivera@example.com\",\"preferredLanguage\":\"en-US\","
-                    + "\"timezone\":\"America/New_York\",\"participantType\":\"PROSPECTIVE_STUDENT\","
+            "{\"data\":{\"applicationStatus\":\"VERIFIED\","
+                    + "\"type\":\"PROSPECTIVE_STUDENT\","
                     + "\"gradeLevel\":\"HIGH_SCHOOL_SENIOR\",\"intendedMajor\":\"Computer Science\","
                     + "\"guardianRequired\":false,\"topicsOfInterest\":[\"DORM_HOUSING\"],"
                     + "\"universitiesOfInterest\":[\"166683\"],"
-                    + "\"accessibilityPreferences\":null},"
+                    + "\"accessibilityPreferences\":null,\"preferredLanguage\":\"en-US\","
+                    + "\"timezone\":\"America/New_York\"},"
                     + META
                     + "}";
 

@@ -30,8 +30,7 @@ class ParticipantControllerTest {
 
     private static ParticipantProfileResponse response() {
         return new ParticipantProfileResponse(
-                "uid", null, null, null, null, null, null, null, null, null, null, null, null,
-                null);
+                "VERIFIED", null, null, null, null, null, null, null, null, null);
     }
 
     @Test
