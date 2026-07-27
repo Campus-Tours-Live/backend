@@ -41,6 +41,10 @@ public class GuideUniversityEntity {
     @Column(name = "class_year")
     private String classYear;
 
+    /** Year the guide entered this university, e.g. 2023. Nullable. */
+    @Column(name = "entry_year")
+    private Integer entryYear;
+
     /** PII, never serialized. */
     @Column(name = "school_email")
     private String schoolEmail;

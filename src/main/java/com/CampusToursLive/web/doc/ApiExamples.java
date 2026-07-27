@@ -128,10 +128,10 @@ public interface ApiExamples {
                     + "\"universityName\":\"North Coast University\","
                     + "\"universityShortName\":\"NCU\",\"major\":\"Marine Biology\","
                     + "\"degree\":\"Bachelor's Degree\",\"classYear\":\"Junior\","
+                    + "\"entryYear\":2023,"
                     + "\"verificationStatus\":\"VERIFIED\"}],"
                     + "\"bio\":\"Third-year student and campus tour lead.\","
-                    + "\"languages\":[\"en-US\",\"zh-CN\"],\"specialties\":[\"DORM_HOUSING\"],"
-                    + "\"basePriceCents\":4200,\"currency\":\"USD\"},"
+                    + "\"languages\":[\"en-US\",\"zh-CN\"],\"specialties\":[\"DORM_HOUSING\"]},"
                     + META
                     + "}";
 

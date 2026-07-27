@@ -649,14 +649,11 @@ CREATE TABLE public.guide_booking_settings (
 CREATE TABLE public.guide_profiles (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     user_id uuid NOT NULL,
-    entry_year smallint,
     bio text,
     languages jsonb DEFAULT '["en-US"]'::jsonb NOT NULL,
     specialties jsonb DEFAULT '[]'::jsonb NOT NULL,
     favorite_spots jsonb DEFAULT '[]'::jsonb NOT NULL,
     application_status public.guide_application_status DEFAULT 'PENDING'::public.guide_application_status NOT NULL,
-    base_price_cents bigint DEFAULT 2800 NOT NULL,
-    currency character(3) DEFAULT 'USD'::bpchar NOT NULL,
     avg_rating numeric(3,2) DEFAULT 0 NOT NULL,
     review_count integer DEFAULT 0 NOT NULL,
     completed_tours integer DEFAULT 0 NOT NULL,
@@ -664,8 +661,7 @@ CREATE TABLE public.guide_profiles (
     payouts_enabled boolean DEFAULT false NOT NULL,
     approved_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT guide_profiles_base_price_cents_check CHECK (((base_price_cents >= 2000) AND (base_price_cents <= 20000)))
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -2008,6 +2004,7 @@ CREATE TABLE public.guide_universities (
   major                text,
   degree               text,
   class_year           text,
+  entry_year           integer,
   school_email         public.citext,                          -- PII, never serialized
   verification_status  public.guide_verification_status NOT NULL DEFAULT 'NOT_SUBMITTED',
   verification_sent_at timestamptz,

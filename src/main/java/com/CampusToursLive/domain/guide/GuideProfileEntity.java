@@ -31,10 +31,6 @@ public class GuideProfileEntity {
     @Column(name = "user_id", nullable = false, unique = true)
     private UUID userId;
 
-    /** Year the guide entered the university, e.g. 2023. Nullable. */
-    @Column(name = "entry_year")
-    private Integer entryYear;
-
     @Column(name = "bio")
     private String bio;
 
@@ -54,12 +50,6 @@ public class GuideProfileEntity {
             columnDefinition = "guide_application_status",
             nullable = false)
     private GuideApplicationStatus applicationStatus = GuideApplicationStatus.PENDING;
-
-    @Column(name = "base_price_cents", nullable = false)
-    private long basePriceCents = 2800L;
-
-    @Column(name = "currency", nullable = false)
-    private String currency = "USD";
 
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;

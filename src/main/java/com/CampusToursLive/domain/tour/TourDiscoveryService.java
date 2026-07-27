@@ -230,7 +230,7 @@ public class TourDiscoveryService {
                 guideName,
                 guideUniversity != null ? guideUniversity.getMajor() : null,
                 guideUniversity != null ? guideUniversity.getDegree() : null,
-                guide.getEntryYear(),
+                guideUniversity != null ? guideUniversity.getEntryYear() : null,
                 o.getDurationMin(),
                 o.getPriceCents(),
                 o.getCurrency(),

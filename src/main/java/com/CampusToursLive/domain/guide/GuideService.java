@@ -37,9 +37,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class GuideService {
 
-    private static final long MIN_PRICE_CENTS = 2000L; // $20
-    private static final long MAX_PRICE_CENTS = 20000L; // $200
-
     private final GuideProfileRepository guides;
     private final GuideUniversityRepository guideUniversities;
     private final UniversityRepository universities;
@@ -128,17 +125,6 @@ public class GuideService {
         if (req.specialties() != null) {
             profile.setSpecialties(writeJson(validateTopics(req.specialties())));
         }
-        if (req.basePriceCents() != null) {
-            long price = req.basePriceCents();
-            if (price < MIN_PRICE_CENTS || price > MAX_PRICE_CENTS) {
-                throw new ValidationException(
-                        "basePriceCents must be between "
-                                + MIN_PRICE_CENTS
-                                + " and "
-                                + MAX_PRICE_CENTS);
-            }
-            profile.setBasePriceCents(price);
-        }
 
         if (submit) {
             // Parent/guardian participants cannot become guides (bidirectional
@@ -176,7 +162,8 @@ public class GuideService {
             // school_email + verification_status=PENDING, keyed off the request's
             // university/major/degree/classYear.
             GuideUniversityEntity guideUniversity =
-                    writeGuideUniversity(profile, universityId, major, degree, req.classYear());
+                    writeGuideUniversity(
+                            profile, universityId, major, degree, req.classYear(), req.entryYear());
             guideUniversity.setSchoolEmail(email);
             guideUniversity.setVerificationStatus(GuideVerificationStatus.PENDING);
             guideUniversities.save(guideUniversity);
@@ -187,7 +174,13 @@ public class GuideService {
         } else {
             guides.save(profile);
             guideUniversities.save(
-                    writeGuideUniversity(profile, universityId, major, degree, req.classYear()));
+                    writeGuideUniversity(
+                            profile,
+                            universityId,
+                            major,
+                            degree,
+                            req.classYear(),
+                            req.entryYear()));
         }
 
         users.save(user);
@@ -196,17 +189,18 @@ public class GuideService {
 
     /**
      * Upsert the {@code guide_universities} row for {@code universityId} (keyed by {@code
-     * (guide_profile_id, university_id)}, single school today), writing major/degree/classYear
-     * directly from the request — {@code guide_profiles} no longer carries these flat columns. Does
-     * NOT save — callers persist it (after possibly layering on submit-only fields like {@code
-     * schoolEmail}).
+     * (guide_profile_id, university_id)}, single school today), writing
+     * major/degree/classYear/entryYear directly from the request — {@code guide_profiles} no longer
+     * carries these flat columns. Does NOT save — callers persist it (after possibly layering on
+     * submit-only fields like {@code schoolEmail}).
      */
     private GuideUniversityEntity writeGuideUniversity(
             GuideProfileEntity profile,
             UUID universityId,
             String major,
             String degree,
-            String classYear) {
+            String classYear,
+            Integer entryYear) {
         GuideUniversityEntity entry =
                 guideUniversities.findByGuideProfileId(profile.getId()).stream()
                         .filter(g -> universityId.equals(g.getUniversityId()))
@@ -222,6 +216,7 @@ public class GuideService {
         entry.setMajor(major);
         entry.setDegree(degree);
         if (classYear != null) entry.setClassYear(classYear.trim());
+        if (entryYear != null) entry.setEntryYear(entryYear);
         return entry;
     }
 
@@ -377,9 +372,7 @@ public class GuideService {
                 profile == null ? List.of() : buildUniversityViews(profile.getId()),
                 profile == null ? null : profile.getBio(),
                 profile == null ? null : readArray(profile.getLanguages()),
-                profile == null ? null : readArray(profile.getSpecialties()),
-                profile == null ? null : profile.getBasePriceCents(),
-                profile == null ? null : profile.getCurrency());
+                profile == null ? null : readArray(profile.getSpecialties()));
     }
 
     /**
@@ -406,6 +399,7 @@ public class GuideService {
                                     row.getMajor(),
                                     row.getDegree(),
                                     row.getClassYear(),
+                                    row.getEntryYear(),
                                     row.getVerificationStatus() != null
                                             ? row.getVerificationStatus().name()
                                             : null);

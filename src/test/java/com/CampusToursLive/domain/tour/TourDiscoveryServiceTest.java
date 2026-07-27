@@ -96,17 +96,17 @@ class TourDiscoveryServiceTest {
         guide.setId(gid);
         guide.setUserId(uid);
         guide.setBio("Student guide");
-        guide.setEntryYear(2023);
         when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
 
-        // major/degree now live on the guide's guide_universities row for THIS offering's school,
-        // not on the flat guide_profiles row.
+        // major/degree/entryYear now live on the guide's guide_universities row for THIS
+        // offering's school, not on the flat guide_profiles row.
         GuideUniversityEntity guideUniversity = new GuideUniversityEntity();
         guideUniversity.setId(UUID.randomUUID());
         guideUniversity.setGuideProfileId(gid);
         guideUniversity.setUniversityId(univId);
         guideUniversity.setMajor("Computer Science");
         guideUniversity.setDegree("BS");
+        guideUniversity.setEntryYear(2023);
         when(guideUniversities.findByGuideProfileIdIn(List.of(gid)))
                 .thenReturn(List.of(guideUniversity));
 

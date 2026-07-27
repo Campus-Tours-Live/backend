@@ -8,8 +8,8 @@ import java.util.List;
  * PATCH /guide/profile body — guide application / onboarding.
  *
  * <p>Maps to: users (firstName, lastName, displayName) + guide_profiles (bio, languages,
- * specialties, basePriceCents) + guide_universities (universityId, major, classYear, degree,
- * schoolEmail from verificationEmail, method UNIVERSITY_EMAIL implied).
+ * specialties) + guide_universities (universityId, major, classYear, degree, entryYear, schoolEmail
+ * from verificationEmail, method UNIVERSITY_EMAIL implied).
  *
  * <p>When {@code submit} is true the application is finalized: required fields (university, major,
  * verification email) are enforced, a verification row is created, the GUIDE role is granted
@@ -73,14 +73,6 @@ public record GuideProfileUpdateRequest(
                 List<String> specialties,
         @Schema(
                         description =
-                                "Default per-tour price in integer US cents (e.g. 2500 ="
-                                        + " $25.00).",
-                        example = "4200",
-                        minimum = "0",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                Long basePriceCents,
-        @Schema(
-                        description =
                                 "University email used for verification (method UNIVERSITY_EMAIL);"
                                         + " required when submit=true.",
                         example = "maya.chen@ncu.edu",
@@ -100,4 +92,9 @@ public record GuideProfileUpdateRequest(
                                         + " Scorecard credential title).",
                         example = "Bachelor's Degree",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String degree) {}
+                String degree,
+        @Schema(
+                        description = "Year the guide entered this university, e.g. 2023.",
+                        example = "2023",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                Integer entryYear) {}

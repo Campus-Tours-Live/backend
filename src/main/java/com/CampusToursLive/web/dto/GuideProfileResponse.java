@@ -43,14 +43,4 @@ public record GuideProfileResponse(
                         description = "Tour topics the guide specializes in.",
                         example = "[\"DORM_HOUSING\"]",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                List<String> specialties,
-        @Schema(
-                        description = "Default per-tour price in cents.",
-                        example = "4200",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                Long basePriceCents,
-        @Schema(
-                        description = "ISO-4217 currency for basePriceCents.",
-                        example = "USD",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String currency) {}
+                List<String> specialties) {}

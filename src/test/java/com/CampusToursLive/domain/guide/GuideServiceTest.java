@@ -79,7 +79,6 @@ class GuideServiceTest {
             String universityId,
             String major,
             List<String> specialties,
-            Long basePriceCents,
             String verificationEmail,
             Boolean submit) {
         return new GuideProfileUpdateRequest(
@@ -91,10 +90,10 @@ class GuideServiceTest {
                 null,
                 null,
                 specialties,
-                basePriceCents,
                 verificationEmail,
                 submit,
-                "Bachelor's Degree");
+                "Bachelor's Degree",
+                null);
     }
 
     /**
@@ -113,10 +112,10 @@ class GuideServiceTest {
                 bio,
                 null,
                 specialties,
-                null,
                 "me@school.edu",
                 true,
-                "Bachelor's Degree");
+                "Bachelor's Degree",
+                null);
     }
 
     private static RuntimeException badRequest(Runnable r) {
@@ -133,7 +132,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(UUID.randomUUID()),
-                                                req(null, "CS", null, null, null, false)));
+                                                req(null, "CS", null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
         verifyNoInteractions(roleGrant);
     }
@@ -146,7 +145,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(UUID.randomUUID()),
-                                                req("not-a-uuid", "CS", null, null, null, false)));
+                                                req("not-a-uuid", "CS", null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
     }
 
@@ -163,10 +162,7 @@ class GuideServiceTest {
                 .thenAnswer(inv -> inv.getArgument(0));
 
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(
-                () ->
-                        service()
-                                .updateProfile(
-                                        user(uid), req("243744", "CS", null, null, null, false)));
+                () -> service().updateProfile(user(uid), req("243744", "CS", null, null, false)));
 
         ArgumentCaptor<UniversityEntity> saved = ArgumentCaptor.forClass(UniversityEntity.class);
         verify(universities).save(saved.capture());
@@ -292,13 +288,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(UUID.randomUUID()),
-                                                req(
-                                                        uni.toString(),
-                                                        "CS",
-                                                        null,
-                                                        null,
-                                                        null,
-                                                        false)));
+                                                req(uni.toString(), "CS", null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
     }
 
@@ -312,35 +302,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(UUID.randomUUID()),
-                                                req(
-                                                        uni.toString(),
-                                                        "  ",
-                                                        null,
-                                                        null,
-                                                        null,
-                                                        false)));
-        assertInstanceOf(ValidationException.class, ex);
-    }
-
-    @Test
-    void update_422_whenPriceOutOfBounds() {
-        UUID uid = UUID.randomUUID();
-        UUID uni = UUID.randomUUID();
-        when(universities.existsById(uni)).thenReturn(true);
-        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
-        var ex =
-                badRequest(
-                        () ->
-                                service()
-                                        .updateProfile(
-                                                user(uid),
-                                                req(
-                                                        uni.toString(),
-                                                        "CS",
-                                                        null,
-                                                        100L,
-                                                        null,
-                                                        false)));
+                                                req(uni.toString(), "  ", null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
     }
 
@@ -361,7 +323,6 @@ class GuideServiceTest {
                                                         "CS",
                                                         List.of("NOT_A_TOPIC"),
                                                         null,
-                                                        null,
                                                         false)));
         assertInstanceOf(ValidationException.class, ex);
     }
@@ -375,7 +336,7 @@ class GuideServiceTest {
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
 
-        service().updateProfile(user(uid), req(uni.toString(), "CS", null, 5000L, null, false));
+        service().updateProfile(user(uid), req(uni.toString(), "CS", null, null, false));
 
         verify(guides).save(any());
         verify(users).save(any());
@@ -396,7 +357,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(uid),
-                                                req(uni.toString(), "CS", null, null, null, true)));
+                                                req(uni.toString(), "CS", null, null, true)));
         assertInstanceOf(ValidationException.class, ex);
         verify(roleGrant, never()).grant(any(), any());
     }
@@ -420,7 +381,6 @@ class GuideServiceTest {
                                                 req(
                                                         uni.toString(),
                                                         "CS",
-                                                        null,
                                                         null,
                                                         "me@school.edu",
                                                         true)));
@@ -528,7 +488,7 @@ class GuideServiceTest {
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
         when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
 
-        service().updateProfile(user(uid), req(uni.toString(), "CS", null, 5000L, null, false));
+        service().updateProfile(user(uid), req(uni.toString(), "CS", null, null, false));
 
         ArgumentCaptor<GuideUniversityEntity> captor =
                 ArgumentCaptor.forClass(GuideUniversityEntity.class);
@@ -651,7 +611,6 @@ class GuideServiceTest {
         profile.setBio("hi");
         profile.setLanguages("[\"en-US\"]");
         profile.setSpecialties("[\"GENERAL_CAMPUS\"]");
-        profile.setBasePriceCents(5000L);
         profile.setApplicationStatus(GuideApplicationStatus.VERIFIED);
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
         UniversityEntity university = new UniversityEntity();
@@ -667,6 +626,7 @@ class GuideServiceTest {
         row.setMajor("CS");
         row.setDegree("Bachelor's Degree");
         row.setClassYear("2026");
+        row.setEntryYear(2022);
         row.setVerificationStatus(GuideVerificationStatus.VERIFIED);
         when(guideUniversities.findByGuideProfileId(profileId)).thenReturn(List.of(row));
 
@@ -683,6 +643,7 @@ class GuideServiceTest {
         assertEquals("CS", view.major());
         assertEquals("Bachelor's Degree", view.degree());
         assertEquals("2026", view.classYear());
+        assertEquals(2022, view.entryYear());
         assertEquals("VERIFIED", view.verificationStatus());
     }
 
@@ -776,9 +737,9 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
 
         service().updateProfile(u, r);
 
@@ -796,7 +757,7 @@ class GuideServiceTest {
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
 
         // both names null → L73 condition false (short-circuits) → displayName untouched.
-        service().updateProfile(u, req(uni.toString(), "CS", null, null, null, false));
+        service().updateProfile(u, req(uni.toString(), "CS", null, null, false));
 
         org.junit.jupiter.api.Assertions.assertNull(u.getDisplayName());
     }
@@ -813,13 +774,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(uid),
-                                                req(
-                                                        uni.toString(),
-                                                        null,
-                                                        null,
-                                                        null,
-                                                        null,
-                                                        false)));
+                                                req(uni.toString(), null, null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
     }
 
@@ -841,10 +796,10 @@ class GuideServiceTest {
                         "bio",
                         List.of("en-US", "fr-FR"),
                         List.of("GENERAL_CAMPUS"),
-                        5000L,
                         null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
 
         service().updateProfile(u, r);
 
@@ -876,9 +831,9 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
 
         service().updateProfile(u, r);
 
@@ -887,6 +842,39 @@ class GuideServiceTest {
                 ArgumentCaptor.forClass(GuideUniversityEntity.class);
         verify(guideUniversities).save(captor.capture());
         assertEquals("Bachelor's Degree", captor.getValue().getDegree());
+    }
+
+    @Test
+    void update_persistsEntryYearOnGuideUniversityRow() {
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        UserEntity u = user(uid);
+        when(universities.existsById(uni)).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
+
+        GuideProfileUpdateRequest r =
+                new GuideProfileUpdateRequest(
+                        null,
+                        null,
+                        uni.toString(),
+                        "CS",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
+                        "Bachelor's Degree",
+                        2021);
+
+        service().updateProfile(u, r);
+
+        // entryYear now lives on the guide_universities row, not a flat response field.
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        assertEquals(2021, captor.getValue().getEntryYear());
     }
 
     @Test
@@ -906,8 +894,8 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
+                        null,
                         null);
         var ex = badRequest(() -> service().updateProfile(user(uid), r));
         assertInstanceOf(ValidationException.class, ex);
@@ -929,9 +917,9 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
         var ex = badRequest(() -> service().updateProfile(user(uid), r));
         assertInstanceOf(ValidationException.class, ex);
     }
@@ -953,9 +941,9 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
         var ex = badRequest(() -> service().updateProfile(user(uid), r));
         assertInstanceOf(ValidationException.class, ex);
     }
@@ -980,9 +968,9 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
 
         service().updateProfile(u, r);
 
@@ -1023,9 +1011,9 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
         var ex = badRequest(() -> service().updateProfile(user(uid), r));
         assertInstanceOf(ValidationException.class, ex);
     }
@@ -1049,9 +1037,9 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
 
         service().updateProfile(u, r);
 
@@ -1075,9 +1063,9 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
         var ex = badRequest(() -> service().updateProfile(user(UUID.randomUUID()), r));
         assertInstanceOf(ValidationException.class, ex);
     }
@@ -1102,9 +1090,9 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
 
         service().updateProfile(u, r);
 
@@ -1133,9 +1121,9 @@ class GuideServiceTest {
                         langs,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
 
         GuideProfileResponse res = service().updateProfile(u, r);
 
@@ -1165,35 +1153,13 @@ class GuideServiceTest {
                         null,
                         topics,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
 
         GuideProfileResponse res = service().updateProfile(u, r);
 
         assertEquals(List.of("GENERAL_CAMPUS"), res.specialties());
-    }
-
-    @Test
-    void update_priceTooHigh_422() {
-        UUID uid = UUID.randomUUID();
-        UUID uni = UUID.randomUUID();
-        when(universities.existsById(uni)).thenReturn(true);
-        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
-        var ex =
-                badRequest(
-                        () ->
-                                service()
-                                        .updateProfile(
-                                                user(uid),
-                                                req(
-                                                        uni.toString(),
-                                                        "CS",
-                                                        null,
-                                                        999999L,
-                                                        null,
-                                                        false)));
-        assertInstanceOf(ValidationException.class, ex);
     }
 
     @Test
@@ -1204,8 +1170,7 @@ class GuideServiceTest {
                         () ->
                                 service()
                                         .updateProfile(
-                                                user(uid),
-                                                req("   ", "CS", null, null, null, false)));
+                                                user(uid), req("   ", "CS", null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
     }
 
@@ -1216,7 +1181,7 @@ class GuideServiceTest {
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
 
-        service().updateProfile(user(uid), req(uni.toString(), "CS", null, null, null, null));
+        service().updateProfile(user(uid), req(uni.toString(), "CS", null, null, null));
 
         verify(guides).save(any());
         verifyNoInteractions(roleGrant);
@@ -1236,13 +1201,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(uid),
-                                                req(
-                                                        uni.toString(),
-                                                        "CS",
-                                                        null,
-                                                        null,
-                                                        "noatsign",
-                                                        true)));
+                                                req(uni.toString(), "CS", null, "noatsign", true)));
         assertInstanceOf(ValidationException.class, ex);
         verify(roleGrant, never()).grant(any(), any());
     }
@@ -1281,7 +1240,7 @@ class GuideServiceTest {
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.of(existing));
 
-        service().updateProfile(user(uid), req(uni.toString(), "CS", null, 5000L, null, false));
+        service().updateProfile(user(uid), req(uni.toString(), "CS", null, null, false));
 
         verify(guides).save(existing);
     }
@@ -1321,9 +1280,9 @@ class GuideServiceTest {
                         List.of("en-US"),
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
 
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> svc.updateProfile(user(uid), r));
     }

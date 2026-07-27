@@ -3491,24 +3491,24 @@ INSERT INTO guide_university_seed
     ('10000000-0000-0000-0000-0000000001f4'::uuid, 'miami', 'Cybersecurity', '2025', 'MS', 2021, 'Miami Cybersecurity student (class of 2025) who loves showing visitors around campus.', '["en-US","ja"]', '["INTERNATIONAL_STUDENT","FRESHMAN"]', 4500::bigint);
 
 INSERT INTO guide_profiles (
-  user_id, entry_year, bio, languages,
-  specialties, application_status, base_price_cents, currency, approved_at
+  user_id, bio, languages,
+  specialties, application_status, approved_at
 )
 SELECT
-  seed.user_id, seed.entry_year, seed.bio,
+  seed.user_id, seed.bio,
   seed.languages::jsonb, seed.specialties::jsonb,
   'VERIFIED'::guide_application_status,
-  seed.base_price_cents, 'USD', now()
+  now()
 FROM guide_university_seed seed
 JOIN universities university ON university.slug = seed.university_slug
 ON CONFLICT (user_id) DO NOTHING;
 
 -- Mirror each seeded demo guide onto guide_universities (the per-university row) so their
 -- /guide/profile universities[] is non-empty and Phase-4 offering rules (which read the
--- guide_universities row) have something to validate against. university/major/degree/classYear
--- come from the seed VALUES (guide_profiles no longer carries flat university columns).
-INSERT INTO guide_universities (id, guide_profile_id, university_id, major, degree, class_year, verification_status)
-SELECT gen_random_uuid(), gp.id, university.id, seed.major, seed.degree, seed.class_year, 'VERIFIED'::guide_verification_status
+-- guide_universities row) have something to validate against. university/major/degree/classYear/
+-- entryYear come from the seed VALUES (guide_profiles no longer carries flat university columns).
+INSERT INTO guide_universities (id, guide_profile_id, university_id, major, degree, class_year, entry_year, verification_status)
+SELECT gen_random_uuid(), gp.id, university.id, seed.major, seed.degree, seed.class_year, seed.entry_year, 'VERIFIED'::guide_verification_status
 FROM guide_university_seed seed
 JOIN guide_profiles gp ON gp.user_id = seed.user_id
 JOIN universities university ON university.slug = seed.university_slug

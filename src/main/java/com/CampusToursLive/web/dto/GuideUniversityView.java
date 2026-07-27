@@ -11,7 +11,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(
         name = "GuideUniversityView",
         description =
-                "A guide's per-university affiliation (major/degree/class year + verification).")
+                "A guide's per-university affiliation (major/degree/class year/entry year +"
+                        + " verification).")
 public record GuideUniversityView(
         @Schema(
                         description = "Id of this university.",
@@ -45,6 +46,11 @@ public record GuideUniversityView(
                         example = "Junior",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 String classYear,
+        @Schema(
+                        description = "Year the guide entered this university, e.g. 2023.",
+                        example = "2023",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                Integer entryYear,
         @Schema(
                         description = "University-email verification status for this university.",
                         example = "VERIFIED",

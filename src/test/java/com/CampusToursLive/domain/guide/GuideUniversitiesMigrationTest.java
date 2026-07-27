@@ -55,6 +55,7 @@ class GuideUniversitiesMigrationTest {
                         "major",
                         "degree",
                         "class_year",
+                        "entry_year",
                         "school_email",
                         "verification_status",
                         "verification_sent_at",
@@ -74,6 +75,8 @@ class GuideUniversitiesMigrationTest {
         assertThat(byName.get("major").get("data_type")).isEqualTo("text");
         assertThat(byName.get("degree").get("data_type")).isEqualTo("text");
         assertThat(byName.get("class_year").get("data_type")).isEqualTo("text");
+        assertThat(byName.get("entry_year").get("data_type")).isEqualTo("integer");
+        assertThat(byName.get("entry_year").get("is_nullable")).isEqualTo("YES");
 
         assertThat(byName.get("school_email").get("udt_name")).isEqualTo("citext");
         assertThat(byName.get("school_email").get("is_nullable")).isEqualTo("YES");
