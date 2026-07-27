@@ -123,11 +123,12 @@ public interface ApiExamples {
 
     String GUIDE_PROFILE =
             "{\"data\":{\"applicationStatus\":\"APPROVED\","
-                    + "\"universityId\":\"u1a2c3d4-0000-4000-8000-000000000003\","
+                    + "\"universities\":[{\"universityId\":"
+                    + "\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"universityName\":\"North Coast University\","
                     + "\"universityShortName\":\"NCU\",\"major\":\"Marine Biology\","
-                    + "\"classYear\":\"Junior\",\"degree\":\"Bachelor's Degree\","
-                    + "\"verificationStatus\":\"VERIFIED\","
+                    + "\"degree\":\"Bachelor's Degree\",\"classYear\":\"Junior\","
+                    + "\"verificationStatus\":\"VERIFIED\"}],"
                     + "\"bio\":\"Third-year student and campus tour lead.\","
                     + "\"languages\":[\"en-US\",\"zh-CN\"],\"specialties\":[\"DORM_HOUSING\"],"
                     + "\"basePriceCents\":4200,\"currency\":\"USD\"},"

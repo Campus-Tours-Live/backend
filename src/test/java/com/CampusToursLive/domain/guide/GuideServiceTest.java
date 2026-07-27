@@ -25,6 +25,7 @@ import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
+import com.CampusToursLive.web.dto.GuideUniversityView;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
@@ -457,13 +458,37 @@ class GuideServiceTest {
 
     @Test
     void getProfile_doesNotExposeSchoolEmail() {
-        // Regression guard: GET /guide/profile stays flat this task — schoolEmail (PII) lives only
-        // on guide_universities and must never leak through GuideProfileResponse.
+        // Regression guard: schoolEmail (PII) lives only on guide_universities and must never
+        // leak through GuideProfileResponse or GuideUniversityView.
+        List<String> responseFields =
+                java.util.Arrays.stream(GuideProfileResponse.class.getRecordComponents())
+                        .map(java.lang.reflect.RecordComponent::getName)
+                        .toList();
+        org.junit.jupiter.api.Assertions.assertFalse(responseFields.contains("schoolEmail"));
+        List<String> universityViewFields =
+                java.util.Arrays.stream(GuideUniversityView.class.getRecordComponents())
+                        .map(java.lang.reflect.RecordComponent::getName)
+                        .toList();
+        org.junit.jupiter.api.Assertions.assertFalse(universityViewFields.contains("schoolEmail"));
+    }
+
+    @Test
+    void getProfile_flatUniversityFieldsAreGone_replacedByUniversitiesArray() {
+        // Regression guard for this task: the Phase-1 flat universityId/major/classYear/degree/
+        // verificationStatus fields are removed from GuideProfileResponse — replaced by
+        // universities[]. Would fail to compile if they came back.
         List<String> fieldNames =
                 java.util.Arrays.stream(GuideProfileResponse.class.getRecordComponents())
                         .map(java.lang.reflect.RecordComponent::getName)
                         .toList();
-        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("schoolEmail"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("universityId"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("universityName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("universityShortName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("major"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("classYear"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("degree"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("verificationStatus"));
+        org.junit.jupiter.api.Assertions.assertTrue(fieldNames.contains("universities"));
     }
 
     @Test
@@ -532,17 +557,31 @@ class GuideServiceTest {
     @Test
     void review_approve_setsApprovedAndVerified() {
         UUID guideUserId = UUID.randomUUID();
+        UUID profileId = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
         GuideProfileEntity profile = new GuideProfileEntity();
-        profile.setId(UUID.randomUUID());
+        profile.setId(profileId);
         profile.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
         when(guides.findByUserId(guideUserId)).thenReturn(Optional.of(profile));
         when(users.findById(guideUserId)).thenReturn(Optional.of(user(guideUserId)));
+
+        GuideUniversityEntity row = new GuideUniversityEntity();
+        row.setId(UUID.randomUUID());
+        row.setGuideProfileId(profileId);
+        row.setUniversityId(uni);
+        row.setVerificationStatus(GuideVerificationStatus.PENDING);
+        when(guideUniversities.findByGuideProfileId(profileId)).thenReturn(List.of(row));
 
         GuideProfileResponse res = service().reviewApplication(guideUserId, "approved");
 
         assertEquals("APPROVED", res.applicationStatus());
         assertEquals(GuideApplicationStatus.APPROVED, profile.getApplicationStatus());
         assertEquals(GuideVerificationStatus.VERIFIED, profile.getVerificationStatus());
+        // Consistency fix: approve mirrors verificationStatus onto the guide_universities row(s)
+        // too, since the response reads per-school status from there, not the flat column.
+        assertEquals(GuideVerificationStatus.VERIFIED, row.getVerificationStatus());
+        verify(guideUniversities).save(row);
+        assertEquals("VERIFIED", res.universities().get(0).verificationStatus());
     }
 
     @Test
@@ -561,6 +600,8 @@ class GuideServiceTest {
         // reject must NOT flip the verification to VERIFIED — it stays where it was.
         org.junit.jupiter.api.Assertions.assertEquals(
                 GuideVerificationStatus.PENDING, profile.getVerificationStatus());
+        // reject must NOT mirror onto guide_universities either — only approve does.
+        verify(guideUniversities, never()).save(any());
     }
 
     @Test
@@ -595,10 +636,12 @@ class GuideServiceTest {
     void getProfile_withExistingProfile_mapsAllFields() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
+        UUID profileId = UUID.randomUUID();
         UserEntity u = user(uid);
         u.setEmail("g@school.edu");
         u.setAccountStatus(com.CampusToursLive.domain.user.AccountStatus.ACTIVE);
         GuideProfileEntity profile = new GuideProfileEntity();
+        profile.setId(profileId);
         profile.setUniversityId(uni);
         profile.setMajor("CS");
         profile.setClassYear("2026");
@@ -615,16 +658,30 @@ class GuideServiceTest {
         university.setShortName("Stanford");
         when(universities.findById(uni)).thenReturn(Optional.of(university));
 
+        GuideUniversityEntity row = new GuideUniversityEntity();
+        row.setId(UUID.randomUUID());
+        row.setGuideProfileId(profileId);
+        row.setUniversityId(uni);
+        row.setMajor("CS");
+        row.setDegree("Bachelor's Degree");
+        row.setClassYear("2026");
+        row.setVerificationStatus(GuideVerificationStatus.VERIFIED);
+        when(guideUniversities.findByGuideProfileId(profileId)).thenReturn(List.of(row));
+
         GuideProfileResponse res = service().getProfile(u);
 
-        assertEquals(uni.toString(), res.universityId());
-        assertEquals("Stanford University", res.universityName());
-        assertEquals("Stanford", res.universityShortName());
-        assertEquals("CS", res.major());
         assertEquals("APPROVED", res.applicationStatus());
-        assertEquals("VERIFIED", res.verificationStatus());
         assertEquals(List.of("en-US"), res.languages());
         assertEquals(List.of("GENERAL_CAMPUS"), res.specialties());
+        assertEquals(1, res.universities().size());
+        GuideUniversityView view = res.universities().get(0);
+        assertEquals(uni.toString(), view.universityId());
+        assertEquals("Stanford University", view.universityName());
+        assertEquals("Stanford", view.universityShortName());
+        assertEquals("CS", view.major());
+        assertEquals("Bachelor's Degree", view.degree());
+        assertEquals("2026", view.classYear());
+        assertEquals("VERIFIED", view.verificationStatus());
     }
 
     @Test
@@ -635,10 +692,8 @@ class GuideServiceTest {
 
         GuideProfileResponse res = service().getProfile(u);
 
-        org.junit.jupiter.api.Assertions.assertNull(res.universityId());
-        org.junit.jupiter.api.Assertions.assertNull(res.major());
         org.junit.jupiter.api.Assertions.assertNull(res.applicationStatus());
-        org.junit.jupiter.api.Assertions.assertNull(res.verificationStatus());
+        org.junit.jupiter.api.Assertions.assertTrue(res.universities().isEmpty());
     }
 
     @Test
@@ -656,7 +711,7 @@ class GuideServiceTest {
         GuideProfileResponse res = service().getProfile(u);
 
         org.junit.jupiter.api.Assertions.assertNull(res.applicationStatus());
-        org.junit.jupiter.api.Assertions.assertNull(res.verificationStatus());
+        org.junit.jupiter.api.Assertions.assertTrue(res.universities().isEmpty());
         assertEquals(List.of(), res.languages()); // null json → empty via readArray null branch
         assertEquals(List.of(), res.specialties()); // blank json → empty via readArray blank branch
     }
@@ -664,23 +719,31 @@ class GuideServiceTest {
     @Test
     void getProfile_doesNotExposeIdentityFields() {
         // Regression guard for the profile-contract-v2 identity split: /guide/profile is
-        // flat and role-scoped — identity (user id, name, email, account status) lives only
+        // role-scoped — identity (user id, name, email, account status) lives only
         // on /userinfo. GuideProfileResponse no longer declares those accessors at all, so
         // this test documents the removal (would fail to compile if they came back).
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
+        UUID profileId = UUID.randomUUID();
         UserEntity u = user(uid);
         GuideProfileEntity profile = new GuideProfileEntity();
+        profile.setId(profileId);
         profile.setUniversityId(uni);
         profile.setMajor("CS");
         profile.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
         when(universities.findById(uni)).thenReturn(Optional.empty());
+        GuideUniversityEntity row = new GuideUniversityEntity();
+        row.setId(UUID.randomUUID());
+        row.setGuideProfileId(profileId);
+        row.setUniversityId(uni);
+        row.setMajor("CS");
+        when(guideUniversities.findByGuideProfileId(profileId)).thenReturn(List.of(row));
 
         GuideProfileResponse res = service().getProfile(u);
 
         assertEquals("PENDING_REVIEW", res.applicationStatus());
-        assertEquals(uni.toString(), res.universityId());
+        assertEquals(uni.toString(), res.universities().get(0).universityId());
         List<String> fieldNames =
                 java.util.Arrays.stream(GuideProfileResponse.class.getRecordComponents())
                         .map(java.lang.reflect.RecordComponent::getName)
@@ -808,6 +871,7 @@ class GuideServiceTest {
         UserEntity u = user(uid);
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
 
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
@@ -824,9 +888,13 @@ class GuideServiceTest {
                         false,
                         "Bachelor's Degree");
 
-        GuideProfileResponse res = service().updateProfile(u, r);
+        service().updateProfile(u, r);
 
-        assertEquals("Bachelor's Degree", res.degree());
+        // Degree now lives on the guide_universities row, not a flat response field.
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        assertEquals("Bachelor's Degree", captor.getValue().getDegree());
     }
 
     @Test
@@ -907,6 +975,7 @@ class GuideServiceTest {
         UserEntity u = user(uid);
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
         String year = String.valueOf(java.time.Year.now().getValue() + 4); // within Bachelor's +6
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
@@ -923,9 +992,13 @@ class GuideServiceTest {
                         false,
                         "Bachelor's Degree");
 
-        GuideProfileResponse res = service().updateProfile(u, r);
+        service().updateProfile(u, r);
 
-        assertEquals(year, res.classYear());
+        // classYear now lives on the guide_universities row, not a flat response field.
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        assertEquals(year, captor.getValue().getClassYear());
     }
 
     @Test
@@ -972,6 +1045,7 @@ class GuideServiceTest {
         UserEntity u = user(uid);
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
                         null,
@@ -987,9 +1061,12 @@ class GuideServiceTest {
                         false,
                         "Bachelor's Degree");
 
-        GuideProfileResponse res = service().updateProfile(u, r);
+        service().updateProfile(u, r);
 
-        assertEquals("", res.classYear());
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        assertEquals("", captor.getValue().getClassYear());
     }
 
     @Test

@@ -29,8 +29,7 @@ class GuideControllerTest {
     }
 
     private static GuideProfileResponse response() {
-        return new GuideProfileResponse(
-                null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new GuideProfileResponse(null, null, null, null, null, null, null);
     }
 
     @Test

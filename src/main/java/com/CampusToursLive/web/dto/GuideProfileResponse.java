@@ -4,16 +4,17 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
- * Guide profile view — flat, role-scoped ({@code GET /guide/profile}), immutable record whose field
- * names are the JSON keys. No identity fields (user id, name, email, account status): those live
- * only on {@code GET /userinfo}. The profile-level fields are null when the user has not started
- * guide onboarding yet. Still single-university for this phase; a {@code universities[]} array is a
- * later phase.
+ * Guide profile view — role-scoped ({@code GET /guide/profile}), immutable record whose field names
+ * are the JSON keys. No identity fields (user id, name, email, account status): those live only on
+ * {@code GET /userinfo}. The profile-level fields are null when the user has not started guide
+ * onboarding yet. Per-university affiliation (university id/name, major, degree, class year,
+ * verification status) lives in {@code universities[]}, one entry per {@code guide_universities}
+ * row — a guide may be affiliated with more than one school.
  */
 @Schema(
         name = "GuideProfileResponse",
         description =
-                "Guide profile view; flat and role-scoped (no identity fields — see /userinfo)."
+                "Guide profile view; role-scoped (no identity fields — see /userinfo)."
                         + " Profile-level fields are null before guide onboarding.")
 public record GuideProfileResponse(
         @Schema(
@@ -29,42 +30,11 @@ public record GuideProfileResponse(
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 String applicationStatus,
         @Schema(
-                        description = "Id of the university the guide is affiliated with.",
-                        example = "u1a2c3d4-0000-4000-8000-000000000003",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String universityId,
-        @Schema(
-                        description = "University name.",
-                        example = "North Coast University",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String universityName,
-        @Schema(
-                        description = "University short name / abbreviation.",
-                        example = "NCU",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String universityShortName,
-        @Schema(
-                        description = "Field of study.",
-                        example = "Marine Biology",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String major,
-        @Schema(
-                        description = "Class year (free-form label).",
-                        example = "Junior",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String classYear,
-        @Schema(
                         description =
-                                "Degree level (free-form; e.g. the College Scorecard credential"
-                                        + " title from GET /v1/meta/degrees).",
-                        example = "Bachelor's Degree",
+                                "Per-university affiliations (major/degree/class year/verification),"
+                                        + " one entry per guide_universities row.",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String degree,
-        @Schema(
-                        description = "University-email verification status.",
-                        example = "VERIFIED",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String verificationStatus,
+                List<GuideUniversityView> universities,
         @Schema(
                         description = "Guide biography.",
                         example = "Third-year student and campus tour lead.",

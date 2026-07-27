@@ -17,6 +17,7 @@ import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
+import com.CampusToursLive.web.dto.GuideUniversityView;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Year;
@@ -381,6 +382,14 @@ public class GuideService {
         profile.setApplicationStatus(next);
         if (next == GuideApplicationStatus.APPROVED) {
             profile.setVerificationStatus(GuideVerificationStatus.VERIFIED);
+            // Mirror onto guide_universities: the response's per-school verificationStatus is
+            // read from these rows (not the flat profile column), so an approve must flip both
+            // or the guide's response would still show a stale PENDING/NOT_SUBMITTED status.
+            for (GuideUniversityEntity row :
+                    guideUniversities.findByGuideProfileId(profile.getId())) {
+                row.setVerificationStatus(GuideVerificationStatus.VERIFIED);
+                guideUniversities.save(row);
+            }
         }
         guides.save(profile);
 
@@ -390,37 +399,49 @@ public class GuideService {
     }
 
     private GuideProfileResponse toResponse(GuideProfileEntity profile) {
-        UniversityEntity university =
-                profile != null && profile.getUniversityId() != null
-                        ? universities.findById(profile.getUniversityId()).orElse(null)
-                        : null;
-
         return new GuideProfileResponse(
                 profile == null
                         ? null
                         : (profile.getApplicationStatus() != null
                                 ? profile.getApplicationStatus().name()
                                 : null),
-                profile == null
-                        ? null
-                        : (profile.getUniversityId() != null
-                                ? profile.getUniversityId().toString()
-                                : null),
-                university != null ? university.getName() : null,
-                university != null ? university.getShortName() : null,
-                profile == null ? null : profile.getMajor(),
-                profile == null ? null : profile.getClassYear(),
-                profile == null ? null : profile.getDegree(),
-                profile == null
-                        ? null
-                        : (profile.getVerificationStatus() != null
-                                ? profile.getVerificationStatus().name()
-                                : null),
+                profile == null ? List.of() : buildUniversityViews(profile.getId()),
                 profile == null ? null : profile.getBio(),
                 profile == null ? null : readArray(profile.getLanguages()),
                 profile == null ? null : readArray(profile.getSpecialties()),
                 profile == null ? null : profile.getBasePriceCents(),
                 profile == null ? null : profile.getCurrency());
+    }
+
+    /**
+     * One {@link GuideUniversityView} per {@code guide_universities} row for this profile,
+     * resolving each row's university name/shortName. {@code schoolEmail} (PII) is intentionally
+     * never read into the view.
+     */
+    private List<GuideUniversityView> buildUniversityViews(UUID profileId) {
+        return guideUniversities.findByGuideProfileId(profileId).stream()
+                .map(
+                        row -> {
+                            UniversityEntity uni =
+                                    row.getUniversityId() != null
+                                            ? universities
+                                                    .findById(row.getUniversityId())
+                                                    .orElse(null)
+                                            : null;
+                            return new GuideUniversityView(
+                                    row.getUniversityId() != null
+                                            ? row.getUniversityId().toString()
+                                            : null,
+                                    uni != null ? uni.getName() : null,
+                                    uni != null ? uni.getShortName() : null,
+                                    row.getMajor(),
+                                    row.getDegree(),
+                                    row.getClassYear(),
+                                    row.getVerificationStatus() != null
+                                            ? row.getVerificationStatus().name()
+                                            : null);
+                        })
+                .toList();
     }
 
     private List<String> readArray(String json) {

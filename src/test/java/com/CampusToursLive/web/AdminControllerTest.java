@@ -15,6 +15,8 @@ import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.dto.GuideDecisionRequest;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
+import com.CampusToursLive.web.dto.GuideUniversityView;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,26 +42,26 @@ class AdminControllerTest {
     void decide_delegatesToReview_whenAdmin() {
         UUID guideUserId = UUID.randomUUID();
         when(currentUser.requireRole(UserRole.ADMIN)).thenReturn(new UserEntity());
+        GuideUniversityView universityView =
+                new GuideUniversityView(
+                        UUID.randomUUID().toString(),
+                        "North Coast University",
+                        "NCU",
+                        "Marine Biology",
+                        "Bachelor's Degree",
+                        "Junior",
+                        "VERIFIED");
         when(guideService.reviewApplication(eq(guideUserId), eq("APPROVED")))
                 .thenReturn(
                         new GuideProfileResponse(
-                                "APPROVED",
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                "VERIFIED",
-                                null,
-                                null,
-                                null,
-                                null,
-                                null));
+                                "APPROVED", List.of(universityView), null, null, null, null, null));
 
         var envelope = controller().decide(guideUserId, new GuideDecisionRequest("APPROVED"));
 
         assertEquals("APPROVED", envelope.data().applicationStatus());
+        // Proves the approve → guide_universities mirror: the response's per-school
+        // verificationStatus (not the flat profile column) reflects the just-approved state.
+        assertEquals("VERIFIED", envelope.data().universities().get(0).verificationStatus());
     }
 
     @Test
