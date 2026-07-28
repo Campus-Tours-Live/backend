@@ -13,6 +13,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Grep-style architecture guard (CTL-97 Core-A Task 6) — a cheap alternative to pulling in ArchUnit
@@ -33,13 +34,19 @@ import org.junit.jupiter.api.Test;
  *       com.CampusToursLive.security.CurrentUser} gate instead of re-resolving it ad hoc (which is
  *       exactly the multi-snapshot bug the account-resolution redesign closed). The allowlist is
  *       {@code CurrentUser} (its {@code resolve(intent)} OAuth-callback path legitimately needs the
- *       raw, ACTIVE-only lookup) and {@code AccountResolver} (listed for the identity-resolution
- *       layer even though it currently reads the richer account-projection query instead).
- *       <b>Core-B note:</b> its onboarding flow needs a lifecycle-inclusive lookup that also sees
- *       pending accounts — that belongs behind a dedicated repository method (e.g. {@code
- *       OnboardingAccountRepository.findAnyByOidcSubject}), not by adding a new class to this
- *       allowlist or by reusing {@code findByOidcSubject} elsewhere. This keeps the guard exact
- *       without needing to be edited when Core-B lands.
+ *       raw, ACTIVE-only lookup), {@code AccountResolver} (listed for the identity-resolution layer
+ *       even though it currently reads the richer account-projection query instead), and — as of
+ *       CTL-97 Core-B Task 2 — {@code OnboardingAccountRepository} (the write-side,
+ *       lifecycle-inclusive counterpart onboarding uses; see {@link
+ *       com.CampusToursLive.domain.user.OnboardingAccountRepository}'s class javadoc). {@code
+ *       OnboardingAccountRepository} is allowlisted BY TYPE even though its own method is named
+ *       {@code findAnyByOidcSubject} — which would never trip {@link #FIND_BY_OIDC_SUBJECT} in the
+ *       first place — precisely so the exception is an explicit, reviewable grant rather than an
+ *       accident of naming that a future rename inside that file could silently defeat. {@link
+ *       #noClassOutsideAllowlistCallsFindByOidcSubject_allowlistIsNotVacuous} proves this entry
+ *       doesn't gut the rule: a synthetic {@code OnboardingAccountRepository.java} calling the raw
+ *       method is permitted, but a synthetic file under any other name with the exact same
+ *       offending call is still caught.
  * </ol>
  *
  * <p>Deliberately does <b>not</b> forbid {@code findById}/{@code findByUserId} — managed-entity
@@ -55,9 +62,9 @@ class ArchitectureGuardTest {
     private static final Pattern REQUIRE_NO_ARGS = Pattern.compile("\\.require\\(\\)");
     private static final Pattern FIND_BY_OIDC_SUBJECT = Pattern.compile("\\.findByOidcSubject\\(");
 
-    /** See the class javadoc for why each of these two files is exempt. */
+    /** See the class javadoc for why each of these files is exempt. */
     private static final Set<String> FIND_BY_OIDC_SUBJECT_ALLOWLIST =
-            Set.of("CurrentUser.java", "AccountResolver.java");
+            Set.of("CurrentUser.java", "AccountResolver.java", "OnboardingAccountRepository.java");
 
     @Test
     void noControllerCallsTheRemovedRequireGate() throws IOException {
@@ -86,26 +93,74 @@ class ArchitectureGuardTest {
                 .as("expected %s to exist — is this test running from the module root?", MAIN_SRC)
                 .isTrue();
 
-        List<String> violations = new ArrayList<>();
-        try (Stream<Path> files = Files.walk(MAIN_SRC)) {
-            files.filter(ArchitectureGuardTest::isJavaFile)
-                    .filter(
-                            file ->
-                                    !FIND_BY_OIDC_SUBJECT_ALLOWLIST.contains(
-                                            file.getFileName().toString()))
-                    .forEach(file -> collectMatches(file, FIND_BY_OIDC_SUBJECT, violations));
-        }
+        List<String> violations =
+                findByOidcSubjectViolations(MAIN_SRC, FIND_BY_OIDC_SUBJECT_ALLOWLIST);
 
         assertThat(violations)
                 .as(
-                        "only CurrentUser/AccountResolver may call the raw"
-                                + " UserRepository.findByOidcSubject(...) — every other caller must go"
-                                + " through the single-snapshot AccountResolver/CurrentUser gate"
-                                + " instead of re-resolving the current user ad hoc. Core-B's"
-                                + " lifecycle-inclusive onboarding lookup belongs behind a dedicated"
-                                + " repository method (e.g."
-                                + " OnboardingAccountRepository.findAnyByOidcSubject), not here")
+                        "only CurrentUser/AccountResolver/OnboardingAccountRepository may call the"
+                                + " raw UserRepository.findByOidcSubject(...) — every other caller"
+                                + " must go through the single-snapshot AccountResolver/CurrentUser"
+                                + " gate instead of re-resolving the current user ad hoc. Core-B's"
+                                + " lifecycle-inclusive onboarding lookup belongs behind"
+                                + " OnboardingAccountRepository.findAnyByOidcSubject, not a stray"
+                                + " findByOidcSubject call elsewhere")
                 .isEmpty();
+    }
+
+    /**
+     * Proves the {@code OnboardingAccountRepository.java} allowlist entry is a targeted, by-type
+     * grant rather than one that quietly disables the rule everywhere. Two synthetic files sharing
+     * the SAME offending {@code .findByOidcSubject(} call are scanned with the real production
+     * allowlist and matcher ({@link #findByOidcSubjectViolations}): one named {@code
+     * OnboardingAccountRepository.java} (must be permitted — the whole point of the allowlist
+     * entry) and one named {@code SomeOtherRepository.java} (must still be caught — the whole point
+     * of the rule). If a future change replaced the by-type allowlist with something broader (e.g.
+     * matching any file whose name contains "Onboarding", or disabling the rule outright), this
+     * test would catch it because the stray-caller file must still fail.
+     */
+    @Test
+    void noClassOutsideAllowlistCallsFindByOidcSubject_allowlistIsNotVacuous(@TempDir Path tempSrc)
+            throws IOException {
+        String offendingLine = "userRepository.findByOidcSubject(subject);";
+        writeJavaFile(tempSrc, "OnboardingAccountRepository.java", offendingLine);
+        writeJavaFile(tempSrc, "SomeOtherRepository.java", offendingLine);
+
+        List<String> violations =
+                findByOidcSubjectViolations(tempSrc, FIND_BY_OIDC_SUBJECT_ALLOWLIST);
+
+        assertThat(violations)
+                .as(
+                        "the allowlisted OnboardingAccountRepository.java must NOT be reported, but"
+                                + " a same-content file under any other name must still be caught")
+                .hasSize(1)
+                .allMatch(violation -> violation.contains("SomeOtherRepository.java"));
+    }
+
+    private static void writeJavaFile(Path dir, String fileName, String bodyLine)
+            throws IOException {
+        Files.writeString(
+                dir.resolve(fileName),
+                "package example;\n\nclass "
+                        + fileName.substring(0, fileName.length() - ".java".length())
+                        + " {\n    void probe() {\n        "
+                        + bodyLine
+                        + "\n    }\n}\n");
+    }
+
+    /**
+     * Core scan shared by the real rule and its vacuity proof: every {@code .java} file under
+     * {@code root} not named in {@code allowlist}, checked for {@link #FIND_BY_OIDC_SUBJECT}.
+     */
+    private static List<String> findByOidcSubjectViolations(Path root, Set<String> allowlist)
+            throws IOException {
+        List<String> violations = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(root)) {
+            files.filter(ArchitectureGuardTest::isJavaFile)
+                    .filter(file -> !allowlist.contains(file.getFileName().toString()))
+                    .forEach(file -> collectMatches(file, FIND_BY_OIDC_SUBJECT, violations));
+        }
+        return violations;
     }
 
     private static boolean isControllerFile(Path file) {
