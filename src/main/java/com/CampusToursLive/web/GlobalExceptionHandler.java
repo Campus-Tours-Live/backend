@@ -6,11 +6,16 @@ import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.UnauthorizedException;
 import com.CampusToursLive.error.ValidationException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -145,6 +150,43 @@ public class GlobalExceptionHandler {
         ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.UNPROCESSABLE_ENTITY);
         pd.setTitle("Validation failed");
         pd.setDetail(ex.getMessage());
+        return pd;
+    }
+
+    /**
+     * Bean-validation failure on a {@code @Valid @RequestBody} (e.g. an onboarding command missing
+     * a first-time-required field — see {@code GuideOnboardingRequest} / {@code
+     * ParticipantOnboardingRequest}) → 422 {@code VALIDATION_FAILED}, overriding Spring's default
+     * of 400 for this exception. Core's contract reserves 400 for a structurally malformed body
+     * (see {@link #handleMalformedBody}) and 422 for a well-formed-but-invalid one, matching how
+     * {@link ValidationException} is already mapped. Per-field messages are surfaced under {@code
+     * errors} for client-side form binding when present.
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ProblemDetail handleBeanValidation(MethodArgumentNotValidException ex) {
+        ProblemDetail pd = problem(HttpStatus.UNPROCESSABLE_ENTITY, "Validation failed");
+        pd.setProperty("code", "VALIDATION_FAILED");
+        Map<String, String> errors = new LinkedHashMap<>();
+        for (FieldError fe : ex.getBindingResult().getFieldErrors()) {
+            errors.put(fe.getField(), fe.getDefaultMessage());
+        }
+        if (!errors.isEmpty()) {
+            pd.setProperty("errors", errors);
+        }
+        return pd;
+    }
+
+    /**
+     * A structurally malformed request body (unparsable JSON) stays 400 — distinct from the 422
+     * bean-validation failures above, which require a well-formed body. Spring's own default for
+     * this exception is already 400; this handler exists only so the broad {@link
+     * #handleGeneric(Exception)} catch-all below (which would otherwise also match, at 500) never
+     * takes priority.
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ProblemDetail handleMalformedBody(HttpMessageNotReadableException ex) {
+        ProblemDetail pd = ProblemDetail.forStatus(HttpStatus.BAD_REQUEST);
+        pd.setTitle("Malformed request body");
         return pd;
     }
 

@@ -10,8 +10,14 @@ import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.UnauthorizedException;
 import com.CampusToursLive.error.ValidationException;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.MethodParameter;
+import org.springframework.http.HttpInputMessage;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.BeanPropertyBindingResult;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
@@ -184,4 +190,66 @@ class GlobalExceptionHandlerTest {
         assertEquals(403, pd.getStatus());
         assertNull(pd.getProperties());
     }
+
+    // ---- bean-validation (@Valid @RequestBody) vs malformed JSON ----
+
+    /**
+     * Spring maps {@link MethodArgumentNotValidException} (a {@code @Valid @RequestBody} that
+     * failed bean validation, e.g. a missing first-time-required onboarding field) to 400 by
+     * default. Core's contract reserves 400 for structurally malformed bodies and 422 for
+     * well-formed-but-invalid ones (matching {@link ValidationException}), so this advice must
+     * override that default to 422 with a machine {@code VALIDATION_FAILED} code.
+     */
+    @Test
+    void methodArgumentNotValid_mapsTo422WithValidationFailedCodeAndFieldErrors() throws Exception {
+        MethodParameter param = dummyMethodParameter();
+        BeanPropertyBindingResult bindingResult =
+                new BeanPropertyBindingResult(new Object(), "guideOnboardingRequest");
+        bindingResult.addError(
+                new FieldError("guideOnboardingRequest", "universityId", "must not be blank"));
+        MethodArgumentNotValidException ex =
+                new MethodArgumentNotValidException(param, bindingResult);
+
+        ProblemDetail pd = handler.handleBeanValidation(ex);
+
+        assertEquals(422, pd.getStatus());
+        assertEquals("VALIDATION_FAILED", pd.getProperties().get("code"));
+        @SuppressWarnings("unchecked")
+        var errors = (java.util.Map<String, String>) pd.getProperties().get("errors");
+        assertEquals("must not be blank", errors.get("universityId"));
+    }
+
+    @Test
+    void methodArgumentNotValid_withNoFieldErrors_omitsErrorsProperty() throws Exception {
+        MethodParameter param = dummyMethodParameter();
+        BeanPropertyBindingResult bindingResult =
+                new BeanPropertyBindingResult(new Object(), "guideOnboardingRequest");
+        MethodArgumentNotValidException ex =
+                new MethodArgumentNotValidException(param, bindingResult);
+
+        ProblemDetail pd = handler.handleBeanValidation(ex);
+
+        assertEquals(422, pd.getStatus());
+        assertEquals("VALIDATION_FAILED", pd.getProperties().get("code"));
+        assertNull(pd.getProperties().get("errors"));
+    }
+
+    /** Structurally malformed request body (unparsable JSON) stays 400 — not 422. */
+    @Test
+    void httpMessageNotReadable_mapsTo400() {
+        HttpMessageNotReadableException ex =
+                new HttpMessageNotReadableException("JSON parse error", (HttpInputMessage) null);
+
+        ProblemDetail pd = handler.handleMalformedBody(ex);
+
+        assertEquals(400, pd.getStatus());
+    }
+
+    private MethodParameter dummyMethodParameter() throws NoSuchMethodException {
+        return new MethodParameter(
+                GlobalExceptionHandlerTest.class.getDeclaredMethod("dummyTarget", Object.class), 0);
+    }
+
+    @SuppressWarnings("unused")
+    private void dummyTarget(Object body) {}
 }
