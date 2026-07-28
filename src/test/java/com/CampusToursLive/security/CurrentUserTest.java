@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
@@ -37,6 +39,9 @@ class CurrentUserTest {
     @Mock UserRepository users;
     @Mock UserRoleRepository userRoles;
     @Mock UserProvisioningService provisioning;
+    @Mock AccountResolver accountResolver;
+    @Mock GuideProfileRepository guideProfiles;
+    @Mock ParticipantProfileRepository participantProfiles;
 
     @AfterEach
     void clearContext() {
@@ -52,7 +57,13 @@ class CurrentUserTest {
     }
 
     private CurrentUser currentUser() {
-        return new CurrentUser(users, userRoles, provisioning);
+        return new CurrentUser(
+                users,
+                userRoles,
+                provisioning,
+                accountResolver,
+                guideProfiles,
+                participantProfiles);
     }
 
     @Test

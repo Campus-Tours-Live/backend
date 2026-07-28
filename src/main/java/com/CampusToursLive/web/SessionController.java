@@ -6,6 +6,7 @@ import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.domain.user.UserRoleEntity;
 import com.CampusToursLive.domain.user.UserRoleRepository;
 import com.CampusToursLive.security.CurrentUser;
+import com.CampusToursLive.security.ProvisionedAccount;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
 import com.CampusToursLive.web.dto.CurrentUserResponse;
@@ -139,6 +140,10 @@ public class SessionController {
      * GET /users/me/role-eligibility — authoritative "can this account acquire this role" check,
      * replacing the removed {@code /userinfo.participantType} inspection. The bff calls this (not
      * any profile field) to enforce PARENT→guide during signup/onboarding routing.
+     *
+     * <p>Gated by {@link CurrentUser#requireProvisioned()} rather than the deprecated {@link
+     * CurrentUser#require()}: a caller with no {@code users} row yet (never signed up / not yet
+     * provisioned) now gets a coded 404, not a bare 401.
      */
     @Operation(
             summary = "Role eligibility",
@@ -171,12 +176,22 @@ public class SessionController {
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_400)))
     @ApiResponse(
             responseCode = "401",
-            description = "No valid principal / account not provisioned.",
+            description = "No valid JWT principal.",
             content =
                     @Content(
                             mediaType = "application/json",
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "404",
+            description =
+                    "No account is provisioned for this principal yet (code"
+                            + " ACCOUNT_NOT_PROVISIONED).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
     @ApiResponse(
             responseCode = "403",
             description =
@@ -197,8 +212,12 @@ public class SessionController {
                             schema = @Schema(allowableValues = {"PARTICIPANT", "GUIDE"}))
                     @RequestParam("role")
                     String role) {
-        UserEntity user = currentUser.require();
-        return ApiEnvelope.of(roleEligibility.checkEligibility(user, parseRole(role)));
+        UserRole parsedRole = parseRole(role);
+        ProvisionedAccount account = currentUser.requireProvisioned();
+        UserEntity user = new UserEntity();
+        user.setId(account.userId());
+        user.setAccountStatus(account.accountStatus());
+        return ApiEnvelope.of(roleEligibility.checkEligibility(user, parsedRole));
     }
 
     private static UserRole parseRole(String raw) {

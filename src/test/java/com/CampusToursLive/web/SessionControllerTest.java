@@ -4,8 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
+import com.CampusToursLive.domain.user.AccountStatus;
 import com.CampusToursLive.domain.user.RoleEligibilityService;
 import com.CampusToursLive.domain.user.RoleIneligibilityReason;
 import com.CampusToursLive.domain.user.UserEntity;
@@ -13,9 +16,12 @@ import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.domain.user.UserRoleEntity;
 import com.CampusToursLive.domain.user.UserRoleRepository;
 import com.CampusToursLive.security.CurrentUser;
+import com.CampusToursLive.security.ProvisionedAccount;
 import com.CampusToursLive.web.dto.CurrentUserResponse;
 import com.CampusToursLive.web.dto.RoleEligibilityResponse;
+import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,6 +51,20 @@ class SessionControllerTest {
         UserEntity u = new UserEntity();
         u.setId(id);
         return u;
+    }
+
+    private static ProvisionedAccount provisionedAccount(UUID id) {
+        return new ProvisionedAccount(
+                id,
+                "sub-1",
+                "ada@example.com",
+                "Ada",
+                "Lovelace",
+                "Ada Lovelace",
+                AccountStatus.ACTIVE,
+                null,
+                Instant.parse("2024-01-01T00:00:00Z"),
+                Set.of());
     }
 
     @Test
@@ -95,9 +115,8 @@ class SessionControllerTest {
     @Test
     void roleEligibility_delegatesParsedRoleToService() {
         UUID uid = UUID.randomUUID();
-        UserEntity u = user(uid);
-        when(currentUser.require()).thenReturn(u);
-        when(roleEligibilityService.checkEligibility(u, UserRole.GUIDE))
+        when(currentUser.requireProvisioned()).thenReturn(provisionedAccount(uid));
+        when(roleEligibilityService.checkEligibility(any(UserEntity.class), eq(UserRole.GUIDE)))
                 .thenReturn(
                         new RoleEligibilityResponse(
                                 false, RoleIneligibilityReason.PARENT_CANNOT_BECOME_GUIDE));
@@ -111,9 +130,9 @@ class SessionControllerTest {
     @Test
     void roleEligibility_eligibleHasNullReason() {
         UUID uid = UUID.randomUUID();
-        UserEntity u = user(uid);
-        when(currentUser.require()).thenReturn(u);
-        when(roleEligibilityService.checkEligibility(u, UserRole.PARTICIPANT))
+        when(currentUser.requireProvisioned()).thenReturn(provisionedAccount(uid));
+        when(roleEligibilityService.checkEligibility(
+                        any(UserEntity.class), eq(UserRole.PARTICIPANT)))
                 .thenReturn(new RoleEligibilityResponse(true, null));
 
         RoleEligibilityResponse body = controller().roleEligibility("PARTICIPANT").data();
