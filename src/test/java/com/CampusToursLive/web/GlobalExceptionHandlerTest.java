@@ -2,7 +2,9 @@ package com.CampusToursLive.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
+import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.UnauthorizedException;
@@ -109,5 +111,77 @@ class GlobalExceptionHandlerTest {
                 handler.handleUnauthorized(new UnauthorizedException("Account not provisioned"));
         assertEquals(401, pd.getStatus());
         assertEquals("Account not provisioned", pd.getTitle());
+    }
+
+    // ---- CodedProblem contract: ConflictException (409) + coded 404/403 ----
+
+    @Test
+    void conflictException_roleAlreadyGranted_mapsTo409WithCodeAndReconciliationFlag() {
+        ProblemDetail pd = handler.handleConflict(ConflictException.roleAlreadyGranted("GUIDE"));
+        assertEquals(409, pd.getStatus());
+        assertEquals("ROLE_ALREADY_GRANTED", pd.getProperties().get("code"));
+        assertEquals("GUIDE", pd.getProperties().get("role"));
+        assertEquals(true, pd.getProperties().get("reconciliationRequired"));
+    }
+
+    @Test
+    void conflictException_roleNotEligible_mapsTo409WithCodeAndRole() {
+        ProblemDetail pd = handler.handleConflict(ConflictException.roleNotEligible("GUIDE"));
+        assertEquals(409, pd.getStatus());
+        assertEquals("ROLE_NOT_ELIGIBLE", pd.getProperties().get("code"));
+        assertEquals("GUIDE", pd.getProperties().get("role"));
+    }
+
+    @Test
+    void conflictException_accountStateInvalid_mapsTo409WithCode() {
+        ProblemDetail pd = handler.handleConflict(ConflictException.accountStateInvalid());
+        assertEquals(409, pd.getStatus());
+        assertEquals("ACCOUNT_STATE_INVALID", pd.getProperties().get("code"));
+    }
+
+    @Test
+    void conflictException_roleProfileStateInvalid_mapsTo409WithCodeAndRole() {
+        ProblemDetail pd =
+                handler.handleConflict(ConflictException.roleProfileStateInvalid("GUIDE"));
+        assertEquals(409, pd.getStatus());
+        assertEquals("ROLE_PROFILE_STATE_INVALID", pd.getProperties().get("code"));
+        assertEquals("GUIDE", pd.getProperties().get("role"));
+    }
+
+    @Test
+    void notFoundException_withCode_mapsTo404WithCode() {
+        ProblemDetail pd =
+                handler.handleDomainNotFound(
+                        new NotFoundException(
+                                "Account not provisioned", "ACCOUNT_NOT_PROVISIONED"));
+        assertEquals(404, pd.getStatus());
+        assertEquals("Account not provisioned", pd.getTitle());
+        assertEquals("ACCOUNT_NOT_PROVISIONED", pd.getProperties().get("code"));
+    }
+
+    @Test
+    void notFoundException_withoutCode_hasNoCodeProperty() {
+        ProblemDetail pd =
+                handler.handleDomainNotFound(new NotFoundException("Offering not found"));
+        assertEquals(404, pd.getStatus());
+        assertNull(pd.getProperties());
+    }
+
+    @Test
+    void forbiddenException_withCode_mapsTo403WithCode() {
+        ProblemDetail pd =
+                handler.handleForbidden(
+                        new ForbiddenException("Missing required role: GUIDE", "ROLE_REQUIRED"));
+        assertEquals(403, pd.getStatus());
+        assertEquals("Missing required role: GUIDE", pd.getTitle());
+        assertEquals("ROLE_REQUIRED", pd.getProperties().get("code"));
+    }
+
+    @Test
+    void forbiddenException_withoutCode_hasNoCodeProperty() {
+        ProblemDetail pd =
+                handler.handleForbidden(new ForbiddenException("Missing required role: ADMIN"));
+        assertEquals(403, pd.getStatus());
+        assertNull(pd.getProperties());
     }
 }
