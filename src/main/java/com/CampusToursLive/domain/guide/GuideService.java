@@ -14,6 +14,7 @@ import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
+import com.CampusToursLive.security.GuideProfileSnapshot;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.CampusToursLive.web.dto.GuideUniversityView;
@@ -72,6 +73,23 @@ public class GuideService {
     public GuideProfileResponse getProfile(UserEntity user) {
         GuideProfileEntity profile = guides.findByUserId(user.getId()).orElse(null);
         return toResponse(profile);
+    }
+
+    /**
+     * {@code GET /guide/profile}'s read path: builds the response directly from the {@link
+     * GuideProfileSnapshot} {@link com.CampusToursLive.security.CurrentUser#requireGuide()} already
+     * resolved (account + role-profile pairing already asserted there) — no second {@code
+     * guide_profiles} lookup. Only the per-university affiliations still require their own read
+     * (there is no snapshot equivalent for {@code guide_universities}).
+     */
+    @Transactional(readOnly = true)
+    public GuideProfileResponse getProfile(GuideProfileSnapshot profile) {
+        return new GuideProfileResponse(
+                profile.status() != null ? profile.status().name() : null,
+                buildUniversityViews(profile.id()),
+                profile.bio(),
+                readArray(profile.spokenLanguages()),
+                readArray(profile.tourTopics()));
     }
 
     @Transactional

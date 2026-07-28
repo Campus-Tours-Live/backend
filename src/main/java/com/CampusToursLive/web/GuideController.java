@@ -1,7 +1,12 @@
 package com.CampusToursLive.web;
 
 import com.CampusToursLive.domain.guide.GuideService;
+import com.CampusToursLive.domain.user.UserEntity;
+import com.CampusToursLive.domain.user.UserRepository;
+import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.security.CurrentUser;
+import com.CampusToursLive.security.ProvisionedAccount;
+import com.CampusToursLive.security.RoleAccountContext;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
@@ -31,17 +36,21 @@ public class GuideController {
 
     private final CurrentUser currentUser;
     private final GuideService guideService;
+    private final UserRepository users;
 
-    public GuideController(CurrentUser currentUser, GuideService guideService) {
+    public GuideController(
+            CurrentUser currentUser, GuideService guideService, UserRepository users) {
         this.currentUser = currentUser;
         this.guideService = guideService;
+        this.users = users;
     }
 
     @Operation(
             summary = "Get own guide profile",
             description =
-                    "Returns the current user's guide application / profile. Profile-level fields"
-                            + " are null if guide onboarding has not started.")
+                    "Returns the current user's guide application / profile. Requires the caller to"
+                            + " already hold the GUIDE role — see the coded error responses below"
+                            + " for every other case.")
     @ApiResponse(
             responseCode = "200",
             description = "The caller's guide profile.",
@@ -51,15 +60,44 @@ public class GuideController {
                             examples = @ExampleObject(value = ApiExamples.GUIDE_PROFILE)))
     @ApiResponse(
             responseCode = "401",
-            description = "No valid principal / account not provisioned.",
+            description = "No valid JWT principal.",
             content =
                     @Content(
                             mediaType = "application/json",
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "404",
+            description =
+                    "No account is provisioned for this principal yet (ACCOUNT_NOT_PROVISIONED).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @ApiResponse(
+            responseCode = "403",
+            description =
+                    "The account is provisioned but does not hold the GUIDE role (ROLE_REQUIRED).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "409",
+            description =
+                    "Data-integrity violation: the account holds GUIDE but its guide profile is"
+                            + " missing (ROLE_PROFILE_STATE_INVALID).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_409)))
     @GetMapping("/profile")
     public ApiEnvelope<GuideProfileResponse> getProfile() {
-        return ApiEnvelope.of(guideService.getProfile(currentUser.require()));
+        RoleAccountContext.Guide context = currentUser.requireGuide();
+        return ApiEnvelope.of(guideService.getProfile(context.profile()));
     }
 
     @Operation(
@@ -77,12 +115,21 @@ public class GuideController {
                             examples = @ExampleObject(value = ApiExamples.GUIDE_PROFILE)))
     @ApiResponse(
             responseCode = "401",
-            description = "No valid principal / account not provisioned.",
+            description = "No valid JWT principal.",
             content =
                     @Content(
                             mediaType = "application/json",
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "404",
+            description =
+                    "No account is provisioned for this principal yet (ACCOUNT_NOT_PROVISIONED).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
     @ApiResponse(
             responseCode = "422",
             description = "Missing required fields on submit, or invalid values.",
@@ -94,6 +141,20 @@ public class GuideController {
     @PatchMapping("/profile")
     public ApiEnvelope<GuideProfileResponse> updateProfile(
             @RequestBody GuideProfileUpdateRequest req) {
-        return ApiEnvelope.of(guideService.updateProfile(currentUser.require(), req));
+        ProvisionedAccount account = currentUser.requireProvisioned();
+        return ApiEnvelope.of(guideService.updateProfile(loadManagedUser(account), req));
+    }
+
+    /**
+     * PATCH keeps working for ANY provisioned caller (not just current GUIDE holders): today,
+     * {@code submit=true} is ALSO the onboarding-create path (see {@link
+     * GuideService#updateProfile}, which grants GUIDE on submit) — gating this endpoint behind
+     * {@link CurrentUser#requireGuide()} would 403 the very first application. So PATCH uses {@link
+     * CurrentUser#requireProvisioned()} and re-loads the MANAGED {@link UserEntity} by {@code
+     * account.userId()} for the service call — never the read-only {@link ProvisionedAccount}
+     * snapshot itself, which cannot be saved back.
+     */
+    private UserEntity loadManagedUser(ProvisionedAccount account) {
+        return users.findById(account.userId()).orElseThrow(ConflictException::accountStateInvalid);
     }
 }

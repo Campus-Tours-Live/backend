@@ -23,11 +23,13 @@ import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
+import com.CampusToursLive.security.GuideProfileSnapshot;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.CampusToursLive.web.dto.GuideUniversityView;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -715,6 +717,73 @@ class GuideServiceTest {
         org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("displayName"));
         org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("email"));
         org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("accountStatus"));
+    }
+
+    // ---- getProfile(GuideProfileSnapshot): the GET /guide/profile read path (CTL-97 Task 5) ---
+
+    @Test
+    void getProfile_fromSnapshot_mapsAllFieldsWithoutRequeryingGuideProfiles() {
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        UUID profileId = UUID.randomUUID();
+        GuideProfileSnapshot snapshot =
+                new GuideProfileSnapshot(
+                        profileId,
+                        uid,
+                        "hi",
+                        "[\"en-US\"]",
+                        "[\"GENERAL_CAMPUS\"]",
+                        GuideStatus.VERIFIED,
+                        Instant.now(),
+                        Instant.now());
+        UniversityEntity university = new UniversityEntity();
+        university.setId(uni);
+        university.setName("Stanford University");
+        university.setShortName("Stanford");
+        when(universities.findById(uni)).thenReturn(Optional.of(university));
+        GuideUniversityEntity row = new GuideUniversityEntity();
+        row.setId(UUID.randomUUID());
+        row.setGuideProfileId(profileId);
+        row.setUniversityId(uni);
+        row.setMajor("CS");
+        row.setDegree("Bachelor's Degree");
+        row.setClassYear("2026");
+        row.setEntryYear(2022);
+        row.setVerificationStatus(GuideVerificationStatus.VERIFIED);
+        when(guideUniversities.findByGuideProfileId(profileId)).thenReturn(List.of(row));
+
+        GuideProfileResponse res = service().getProfile(snapshot);
+
+        assertEquals("VERIFIED", res.guideStatus());
+        assertEquals("hi", res.bio());
+        assertEquals(List.of("en-US"), res.spokenLanguages());
+        assertEquals(List.of("GENERAL_CAMPUS"), res.tourTopics());
+        assertEquals(1, res.universities().size());
+        assertEquals(uni.toString(), res.universities().get(0).universityId());
+        verify(guides, never()).findByUserId(any());
+    }
+
+    @Test
+    void getProfile_fromSnapshot_nullStatusAndBlankArrays_mapToNullAndEmpty() {
+        GuideProfileSnapshot snapshot =
+                new GuideProfileSnapshot(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        null,
+                        null,
+                        "   ",
+                        null,
+                        Instant.now(),
+                        Instant.now());
+        when(guideUniversities.findByGuideProfileId(snapshot.id())).thenReturn(List.of());
+
+        GuideProfileResponse res = service().getProfile(snapshot);
+
+        org.junit.jupiter.api.Assertions.assertNull(res.guideStatus());
+        org.junit.jupiter.api.Assertions.assertNull(res.bio());
+        assertEquals(List.of(), res.spokenLanguages());
+        assertEquals(List.of(), res.tourTopics());
+        org.junit.jupiter.api.Assertions.assertTrue(res.universities().isEmpty());
     }
 
     // ---- updateProfile: optional fields & display-name sync -------------------------------
