@@ -60,6 +60,10 @@ public class SessionController {
     /**
      * GET /users/me — read-only: the current authenticated principal (must already be provisioned).
      * Distinct from POST /session, which resolves/provisions.
+     *
+     * <p>Gated by {@link CurrentUser#requireProvisioned()}, not the removed {@code require()}: this
+     * is the pending-detection endpoint the BFF and Core-B rely on, so a caller with no {@code
+     * users} row yet must get a coded 404, never a bare 401 (I10).
      */
     @Operation(
             summary = "Current principal",
@@ -67,7 +71,8 @@ public class SessionController {
                     "Returns the current authenticated principal (identity and the authoritative"
                             + " role set). Read-only — the account must already be provisioned;"
                             + " it is never created here (use POST /session for that). No"
-                            + " session/current-role context is returned — that is bff-owned.")
+                            + " session/current-role context is returned — that is bff-owned. See"
+                            + " the coded error responses below for every non-provisioned case.")
     @ApiResponse(
             responseCode = "200",
             description = "The current principal.",
@@ -77,15 +82,44 @@ public class SessionController {
                             examples = @ExampleObject(value = ApiExamples.CURRENT_USER)))
     @ApiResponse(
             responseCode = "401",
-            description = "No valid principal / account not provisioned.",
+            description = "No valid JWT principal.",
             content =
                     @Content(
                             mediaType = "application/json",
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "404",
+            description =
+                    "No account is provisioned for this principal yet (ACCOUNT_NOT_PROVISIONED).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @ApiResponse(
+            responseCode = "403",
+            description =
+                    "The account is suspended (ACCOUNT_SUSPENDED) or deleted (ACCOUNT_DELETED).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "409",
+            description =
+                    "Data-integrity violation: the account has no roles (ACCOUNT_STATE_INVALID) or"
+                            + " a held role's profile is missing"
+                            + " (ROLE_PROFILE_STATE_INVALID).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_409)))
     @GetMapping("/users/me")
     public ApiEnvelope<CurrentUserResponse> me() {
-        return ApiEnvelope.of(currentUser(currentUser.require()));
+        return ApiEnvelope.of(CurrentUserResponse.of(currentUser.requireProvisioned()));
     }
 
     /**

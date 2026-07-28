@@ -1,6 +1,7 @@
 package com.CampusToursLive.web.dto;
 
 import com.CampusToursLive.domain.user.UserEntity;
+import com.CampusToursLive.security.ProvisionedAccount;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /** Account-level identity (matches openapi CurrentUserResponse.user). No role-scoped fields. */
@@ -61,5 +62,18 @@ public record UserSummary(
                 u.getAccountStatus() != null ? u.getAccountStatus().name() : null,
                 u.getAgeBand() != null ? u.getAgeBand().name() : null,
                 u.getCreatedAt() != null ? u.getCreatedAt().toString() : null);
+    }
+
+    /** Built straight from a {@link ProvisionedAccount} snapshot — no re-query. */
+    public static UserSummary of(ProvisionedAccount a) {
+        return new UserSummary(
+                a.userId().toString(),
+                a.firstName(),
+                a.lastName(),
+                a.displayName(),
+                a.email(),
+                a.accountStatus() != null ? a.accountStatus().name() : null,
+                a.ageBand() != null ? a.ageBand().name() : null,
+                a.createdAt() != null ? a.createdAt().toString() : null);
     }
 }

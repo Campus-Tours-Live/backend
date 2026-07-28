@@ -14,7 +14,6 @@ import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
 import com.CampusToursLive.domain.user.AccountStatus;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
-import com.CampusToursLive.domain.user.UserRoleRepository;
 import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.error.NotFoundException;
@@ -40,10 +39,12 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
  *
  * <p>Note: the produced {@code RoleAccountContext.NonProfile requireRole(UserRole)} signature from
  * the plan collides with the pre-existing, actively-used {@code requireRole(UserRole)} (returns a
- * bare {@code UserEntity}, still called by several controllers for GUIDE/PARTICIPANT) — Java can't
+ * bare {@code UserEntity}, still called by ~28 controller sites for GUIDE/PARTICIPANT) — Java can't
  * overload on return type alone. The new typed, fail-fast method is implemented here as {@link
- * CurrentUser#requireNonProfileRole(UserRole)} instead, leaving the legacy method untouched for
- * Task 5/6 to migrate.
+ * CurrentUser#requireNonProfileRole(UserRole)} instead. {@code requireRole(UserRole)} itself was
+ * reimplemented on top of {@link CurrentUser#requireProvisioned()} in Task 6 (see {@link
+ * CurrentUserTest}) — kept as the untyped {@code UserEntity} gate deliberately, since migrating its
+ * ~28 call sites to the typed contexts is out of Core-A's scope.
  */
 @ExtendWith(MockitoExtension.class)
 class CurrentUserAuthzTest {
@@ -52,7 +53,6 @@ class CurrentUserAuthzTest {
     private static final String SUBJECT = "sub-1";
 
     @Mock UserRepository users;
-    @Mock UserRoleRepository userRoles;
     @Mock UserProvisioningService provisioning;
     @Mock AccountResolver accountResolver;
     @Mock GuideProfileRepository guideProfiles;
@@ -65,12 +65,7 @@ class CurrentUserAuthzTest {
 
     private CurrentUser currentUser() {
         return new CurrentUser(
-                users,
-                userRoles,
-                provisioning,
-                accountResolver,
-                guideProfiles,
-                participantProfiles);
+                users, provisioning, accountResolver, guideProfiles, participantProfiles);
     }
 
     private void authenticate() {

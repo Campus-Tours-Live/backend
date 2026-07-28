@@ -13,8 +13,9 @@ import com.CampusToursLive.domain.user.RoleEligibilityService;
 import com.CampusToursLive.domain.user.RoleIneligibilityReason;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
-import com.CampusToursLive.domain.user.UserRoleEntity;
 import com.CampusToursLive.domain.user.UserRoleRepository;
+import com.CampusToursLive.error.ForbiddenException;
+import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.security.ProvisionedAccount;
 import com.CampusToursLive.web.dto.CurrentUserResponse;
@@ -53,7 +54,7 @@ class SessionControllerTest {
         return u;
     }
 
-    private static ProvisionedAccount provisionedAccount(UUID id) {
+    private static ProvisionedAccount provisionedAccount(UUID id, UserRole... roles) {
         return new ProvisionedAccount(
                 id,
                 "sub-1",
@@ -64,21 +65,20 @@ class SessionControllerTest {
                 AccountStatus.ACTIVE,
                 null,
                 Instant.parse("2024-01-01T00:00:00Z"),
-                Set.of());
+                Set.of(roles));
+    }
+
+    private static ProvisionedAccount provisionedAccount(UUID id) {
+        return provisionedAccount(id, new UserRole[0]);
     }
 
     @Test
     void me_returnsUserEnvelopeWithFixedEnumOrderRoles() {
         UUID uid = UUID.randomUUID();
-        UserEntity u = user(uid);
-        when(currentUser.require()).thenReturn(u);
-        // GUIDE (ordinal 1) inserted before PARTICIPANT (ordinal 0) — currentUser() must
-        // still emit fixed enum order, not insertion order.
-        when(userRoles.findByUserId(uid))
-                .thenReturn(
-                        List.of(
-                                new UserRoleEntity(uid, UserRole.GUIDE),
-                                new UserRoleEntity(uid, UserRole.PARTICIPANT)));
+        // GUIDE inserted before PARTICIPANT in the Set — the response must still emit fixed enum
+        // order (PARTICIPANT before GUIDE), not Set/insertion order.
+        when(currentUser.requireProvisioned())
+                .thenReturn(provisionedAccount(uid, UserRole.GUIDE, UserRole.PARTICIPANT));
 
         CurrentUserResponse body = controller().me().data();
 
@@ -90,13 +90,31 @@ class SessionControllerTest {
     @Test
     void me_returnsEmptyRoles_forBrandNewSignup() {
         UUID uid = UUID.randomUUID();
-        UserEntity u = user(uid);
-        when(currentUser.require()).thenReturn(u);
-        when(userRoles.findByUserId(uid)).thenReturn(List.of());
+        when(currentUser.requireProvisioned()).thenReturn(provisionedAccount(uid));
 
         CurrentUserResponse body = controller().me().data();
 
         assertEquals(List.of(), body.roles());
+    }
+
+    @Test
+    void me_pending_propagates404AccountNotProvisioned() {
+        when(currentUser.requireProvisioned())
+                .thenThrow(
+                        new NotFoundException(
+                                "Account not provisioned", "ACCOUNT_NOT_PROVISIONED"));
+
+        NotFoundException ex = assertThrows(NotFoundException.class, () -> controller().me());
+        assertEquals("ACCOUNT_NOT_PROVISIONED", ex.code());
+    }
+
+    @Test
+    void me_suspended_propagates403AccountSuspended() {
+        when(currentUser.requireProvisioned())
+                .thenThrow(new ForbiddenException("Account is suspended", "ACCOUNT_SUSPENDED"));
+
+        ForbiddenException ex = assertThrows(ForbiddenException.class, () -> controller().me());
+        assertEquals("ACCOUNT_SUSPENDED", ex.code());
     }
 
     @Test

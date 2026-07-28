@@ -5,7 +5,6 @@ import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
-import com.CampusToursLive.domain.user.UserRoleRepository;
 import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.error.NotFoundException;
@@ -30,7 +29,6 @@ import org.springframework.stereotype.Component;
 public class CurrentUser {
 
     private final UserRepository users;
-    private final UserRoleRepository userRoles;
     private final UserProvisioningService provisioning;
     private final AccountResolver accountResolver;
     private final GuideProfileRepository guideProfiles;
@@ -38,32 +36,15 @@ public class CurrentUser {
 
     public CurrentUser(
             UserRepository users,
-            UserRoleRepository userRoles,
             UserProvisioningService provisioning,
             AccountResolver accountResolver,
             GuideProfileRepository guideProfiles,
             ParticipantProfileRepository participantProfiles) {
         this.users = users;
-        this.userRoles = userRoles;
         this.provisioning = provisioning;
         this.accountResolver = accountResolver;
         this.guideProfiles = guideProfiles;
         this.participantProfiles = participantProfiles;
-    }
-
-    /**
-     * The current authenticated user. Must already be provisioned (via {@link #resolve}).
-     *
-     * @deprecated use {@link #requireProvisioned()} instead — it classifies through the
-     *     single-snapshot {@link AccountResolver} and maps Suspended/Deleted/Invalid to their own
-     *     coded problems instead of collapsing everything non-provisioned into a bare 401. Kept
-     *     only until Task 6 migrates its callers.
-     */
-    @Deprecated(forRemoval = true)
-    public UserEntity require() {
-        Jwt jwt = currentJwt();
-        return users.findByOidcSubject(jwt.getSubject())
-                .orElseThrow(() -> new UnauthorizedException("Account not provisioned"));
     }
 
     /**
@@ -183,17 +164,29 @@ public class CurrentUser {
     }
 
     /**
-     * Authorize a role-scoped action against the authoritative role set in {@code user_roles}. Used
-     * by future supply-/demand-side endpoints (e.g. guide listings → GUIDE); onboarding endpoints
-     * that GRANT a role must NOT call this (they'd 403 the very first acquisition). Authorization
-     * always reads {@code user_roles}, never the current role.
+     * Authorize a role-scoped action against the authoritative role set, returning the MANAGED
+     * {@link UserEntity} that supply-/demand-side endpoints
+     * (Availability/GuideOffering/Cart/OfferingSlot/Booking — ~28 call sites) pass straight into
+     * their JPA-entity-typed service methods. Onboarding endpoints that GRANT a role must NOT call
+     * this (they'd 403 the very first acquisition).
+     *
+     * <p>Gated by {@link #requireProvisioned()} instead of the removed {@code require()}: a pending
+     * caller now gets 404 {@code ACCOUNT_NOT_PROVISIONED} instead of a bare 401 (I10). This also
+     * means the resolver's WHOLE-account validation applies here, not just the checked {@code role}
+     * — a caller whose account holds some unrelated broken role/profile pairing now fails closed
+     * with 409 rather than being silently authorized (I9), by design.
+     *
+     * @throws ForbiddenException {@code ROLE_REQUIRED} (403) if the account does not hold {@code
+     *     role}.
      */
     public UserEntity requireRole(UserRole role) {
-        UserEntity user = require();
-        if (!userRoles.existsByUserIdAndRole(user.getId(), role)) {
-            throw new ForbiddenException("Missing required role: " + role);
-        }
-        return user;
+        ProvisionedAccount account = requireProvisioned();
+        requireRoleHeld(account, role);
+        // Defensive: the resolver just vouched for this account's existence in the same request,
+        // so a miss here is a broken invariant (row deleted between the resolve and this load),
+        // not an ordinary "not found" — fail closed with 409, consistent with requireGuide()'s /
+        // requireParticipant()'s treatment of the analogous profile-miss case.
+        return users.findById(account.userId()).orElseThrow(ConflictException::accountStateInvalid);
     }
 
     /**

@@ -1,5 +1,7 @@
 package com.CampusToursLive.security;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -8,15 +10,18 @@ import static org.mockito.Mockito.when;
 
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
 import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
+import com.CampusToursLive.domain.user.AccountStatus;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
-import com.CampusToursLive.domain.user.UserRoleRepository;
+import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.UnauthorizedException;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -30,14 +35,25 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 /**
- * CurrentUser.requireRole — the role gate behind every role-scoped endpoint. Authorization reads
- * user_roles, never the current role.
+ * CurrentUser.requireRole(UserRole) — the legacy role gate behind the ~28 supply/demand-side
+ * endpoints (Availability/GuideOffering/Cart/OfferingSlot/Booking) that still consume a MANAGED
+ * {@link UserEntity} rather than a typed {@link RoleAccountContext}. Reimplemented on top of {@link
+ * CurrentUser#requireProvisioned()} (CTL-97 Task 6): a pending caller now gets 404 {@code
+ * ACCOUNT_NOT_PROVISIONED} instead of a bare 401 (I10), and the resolver's whole-account validation
+ * applies before the role check even runs.
+ *
+ * <p>Also covers {@link CurrentUser#resolve(String)} (the OAuth-callback provisioning path, kept
+ * unchanged) and the {@code currentJwt()} rejection branches. {@code require()} was removed in Task
+ * 6 — {@code SessionController.me()} was its only caller and now uses {@code requireProvisioned()}
+ * directly ({@link CurrentUserAuthzTest} covers that method's full outcome matrix).
  */
 @ExtendWith(MockitoExtension.class)
 class CurrentUserTest {
 
+    private static final UUID USER_ID = UUID.randomUUID();
+    private static final String SUBJECT = "sub-1";
+
     @Mock UserRepository users;
-    @Mock UserRoleRepository userRoles;
     @Mock UserProvisioningService provisioning;
     @Mock AccountResolver accountResolver;
     @Mock GuideProfileRepository guideProfiles;
@@ -58,57 +74,81 @@ class CurrentUserTest {
 
     private CurrentUser currentUser() {
         return new CurrentUser(
-                users,
-                userRoles,
-                provisioning,
-                accountResolver,
-                guideProfiles,
-                participantProfiles);
+                users, provisioning, accountResolver, guideProfiles, participantProfiles);
+    }
+
+    private static ProvisionedAccount provisionedAccount(UserRole... roles) {
+        return new ProvisionedAccount(
+                USER_ID,
+                SUBJECT,
+                "ada@example.com",
+                "Ada",
+                "Lovelace",
+                "Ada Lovelace",
+                AccountStatus.ACTIVE,
+                null,
+                Instant.parse("2024-01-01T00:00:00Z"),
+                Set.of(roles));
+    }
+
+    // ---- requireRole(UserRole) --------------------------------------------------------------
+
+    @Test
+    void requireRole_returnsManagedUser_whenRoleHeld() {
+        when(accountResolver.resolveAuthenticatedIdentity(any()))
+                .thenReturn(new AccountResolution.Provisioned(provisionedAccount(UserRole.GUIDE)));
+        UserEntity managed = new UserEntity();
+        managed.setId(USER_ID);
+        when(users.findById(USER_ID)).thenReturn(Optional.of(managed));
+        authenticate(SUBJECT);
+
+        assertSame(managed, currentUser().requireRole(UserRole.GUIDE));
     }
 
     @Test
-    void requireRole_returnsUser_whenRoleHeld() {
-        UUID uid = UUID.randomUUID();
-        UserEntity u = new UserEntity();
-        u.setId(uid);
-        when(users.findByOidcSubject("sub-1")).thenReturn(Optional.of(u));
-        when(userRoles.existsByUserIdAndRole(uid, UserRole.GUIDE)).thenReturn(true);
-        authenticate("sub-1");
+    void requireRole_throws404_withCode_whenPending() {
+        when(accountResolver.resolveAuthenticatedIdentity(any()))
+                .thenReturn(new AccountResolution.Pending());
+        authenticate(SUBJECT);
 
-        assertSame(u, currentUser().requireRole(UserRole.GUIDE));
+        assertThatThrownBy(() -> currentUser().requireRole(UserRole.GUIDE))
+                .isInstanceOf(NotFoundException.class)
+                .satisfies(
+                        ex ->
+                                assertThat(((NotFoundException) ex).code())
+                                        .isEqualTo("ACCOUNT_NOT_PROVISIONED"));
     }
 
     @Test
-    void requireRole_throws403_whenRoleNotHeld() {
-        UUID uid = UUID.randomUUID();
-        UserEntity u = new UserEntity();
-        u.setId(uid);
-        when(users.findByOidcSubject("sub-1")).thenReturn(Optional.of(u));
-        when(userRoles.existsByUserIdAndRole(uid, UserRole.GUIDE)).thenReturn(false);
-        authenticate("sub-1");
+    void requireRole_throws403_withCode_whenRoleNotHeld() {
+        when(accountResolver.resolveAuthenticatedIdentity(any()))
+                .thenReturn(
+                        new AccountResolution.Provisioned(
+                                provisionedAccount(UserRole.PARTICIPANT)));
+        authenticate(SUBJECT);
 
         RuntimeException ex =
                 assertThrows(
                         RuntimeException.class, () -> currentUser().requireRole(UserRole.GUIDE));
         assertInstanceOf(ForbiddenException.class, ex);
-    }
-
-    // ---- require() ------------------------------------------------------------------------
-
-    @Test
-    void require_throws401_whenNoAuthentication() {
-        // No principal in the context (cleared by @AfterEach of the previous test / fresh thread).
-        RuntimeException ex = assertThrows(RuntimeException.class, () -> currentUser().require());
-        assertInstanceOf(UnauthorizedException.class, ex);
+        assertThat(((ForbiddenException) ex).code()).isEqualTo("ROLE_REQUIRED");
     }
 
     @Test
-    void require_throws401_whenSubjectNotProvisioned() {
-        when(users.findByOidcSubject("sub-1")).thenReturn(Optional.empty());
-        authenticate("sub-1");
+    void requireRole_throws409_accountStateInvalid_whenManagedRowMissingDespiteResolution() {
+        // Defensive branch: the resolver just vouched for the row in this same request, so a miss
+        // on the immediate findById is a broken invariant, not an ordinary "not found".
+        when(accountResolver.resolveAuthenticatedIdentity(any()))
+                .thenReturn(new AccountResolution.Provisioned(provisionedAccount(UserRole.GUIDE)));
+        when(users.findById(USER_ID)).thenReturn(Optional.empty());
+        authenticate(SUBJECT);
 
-        RuntimeException ex = assertThrows(RuntimeException.class, () -> currentUser().require());
-        assertInstanceOf(UnauthorizedException.class, ex);
+        assertThatThrownBy(() -> currentUser().requireRole(UserRole.GUIDE))
+                .isInstanceOf(ConflictException.class)
+                .satisfies(
+                        ex ->
+                                assertThat(((ConflictException) ex).code())
+                                        .isEqualTo("ACCOUNT_STATE_INVALID"));
     }
 
     // ---- resolve(intent) ------------------------------------------------------------------
@@ -160,20 +200,28 @@ class CurrentUserTest {
     // ---- currentJwt() rejection branches -------------------------------------------------
 
     @Test
-    void require_throws401_whenAuthenticationIsNotAuthenticated() {
-        // Present but not authenticated (2-arg token has isAuthenticated() == false).
-        SecurityContextHolder.getContext()
-                .setAuthentication(new UsernamePasswordAuthenticationToken("u", "p"));
-        assertThrows(UnauthorizedException.class, () -> currentUser().require());
+    void resolve_throws401_whenNoAuthentication() {
+        // No principal in the context (cleared by @AfterEach of the previous test / fresh thread).
+        RuntimeException ex =
+                assertThrows(RuntimeException.class, () -> currentUser().resolve("signin"));
+        assertInstanceOf(UnauthorizedException.class, ex);
     }
 
     @Test
-    void require_throws401_whenPrincipalIsNotAJwt() {
+    void resolve_throws401_whenAuthenticationIsNotAuthenticated() {
+        // Present but not authenticated (2-arg token has isAuthenticated() == false).
+        SecurityContextHolder.getContext()
+                .setAuthentication(new UsernamePasswordAuthenticationToken("u", "p"));
+        assertThrows(UnauthorizedException.class, () -> currentUser().resolve("signin"));
+    }
+
+    @Test
+    void resolve_throws401_whenPrincipalIsNotAJwt() {
         // Authenticated, but the principal is not a Jwt → still rejected.
         SecurityContextHolder.getContext()
                 .setAuthentication(
                         new UsernamePasswordAuthenticationToken("u", "p", Collections.emptyList()));
-        assertThrows(UnauthorizedException.class, () -> currentUser().require());
+        assertThrows(UnauthorizedException.class, () -> currentUser().resolve("signin"));
     }
 
     @Test

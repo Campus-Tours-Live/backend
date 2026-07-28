@@ -2,7 +2,9 @@ package com.CampusToursLive.web.dto;
 
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
+import com.CampusToursLive.security.ProvisionedAccount;
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -33,5 +35,17 @@ public record CurrentUserResponse(
 
     public static CurrentUserResponse of(UserEntity u, List<UserRole> roles) {
         return new CurrentUserResponse(UserSummary.of(u), roles);
+    }
+
+    /**
+     * Built straight from a {@link ProvisionedAccount} snapshot — no re-query. The snapshot's
+     * {@code roles()} is a {@code Set} in role-check insertion order (see {@code
+     * AccountResolver#classify}), not the fixed enum order this response promises, so it is
+     * re-sorted here the same way {@code UserRoleEntity}-derived roles are elsewhere.
+     */
+    public static CurrentUserResponse of(ProvisionedAccount account) {
+        List<UserRole> roles =
+                account.roles().stream().sorted(Comparator.comparingInt(Enum::ordinal)).toList();
+        return new CurrentUserResponse(UserSummary.of(account), roles);
     }
 }
