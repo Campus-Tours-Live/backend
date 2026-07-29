@@ -183,6 +183,38 @@ class ParticipantControllerTest {
     }
 
     @Test
+    void updateProfile_freeTextTopicsOutsideControlledVocabulary_isAccepted() {
+        // CTL-97 Option B: topicsOfInterest stays FREE-TEXT on the PATCH path — unlike the
+        // onboarding command DTO, ParticipantProfileUpdateRequest carries no @TourTopicCodes
+        // constraint, and this endpoint doesn't even declare @Valid on the request body, so an
+        // out-of-vocabulary value must flow straight through to the service, not be rejected.
+        RoleAccountContext.Participant ctx =
+                new RoleAccountContext.Participant(account(UserRole.PARTICIPANT), snapshot());
+        when(currentUser.requireParticipant()).thenReturn(ctx);
+        UserEntity managed = new UserEntity();
+        managed.setId(USER_ID);
+        when(users.findById(USER_ID)).thenReturn(Optional.of(managed));
+        ParticipantProfileUpdateRequest req =
+                new ParticipantProfileUpdateRequest(
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        java.util.List.of("dorm-life", "research"),
+                        null,
+                        null,
+                        null);
+        ParticipantProfileResponse resp = response();
+        OidcIdentity expectedIdentity = new OidcIdentity(ISSUER, SUBJECT);
+        when(participantService.updateProfile(managed, expectedIdentity, req)).thenReturn(resp);
+
+        assertSame(resp, controller().updateProfile(jwt(), req).data());
+    }
+
+    @Test
     void updateProfile_provisionedNonHolder_propagates403RoleRequired() {
         ParticipantProfileUpdateRequest req =
                 new ParticipantProfileUpdateRequest(

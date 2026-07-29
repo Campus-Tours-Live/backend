@@ -72,23 +72,16 @@ public record ParticipantProfileUpdateRequest(
                         arraySchema =
                                 @Schema(
                                         description =
-                                                "Tour topic codes the participant is interested"
-                                                        + " in (controlled vocabulary).",
+                                                "Topics the participant is interested in."
+                                                        + " Free-form text — no fixed vocabulary;"
+                                                        + " any string is accepted (unlike the"
+                                                        + " onboarding command's controlled 8-code"
+                                                        + " set).",
                                         requiredMode = Schema.RequiredMode.NOT_REQUIRED),
                         schema =
                                 @Schema(
-                                        description = "Tour topic code.",
-                                        example = "DORM_HOUSING",
-                                        allowableValues = {
-                                            "GENERAL_CAMPUS",
-                                            "DORM_HOUSING",
-                                            "DINING_STUDENT_LIFE",
-                                            "MAJOR_SPECIFIC",
-                                            "INTERNATIONAL_STUDENT",
-                                            "PARENT_FOCUSED",
-                                            "FRESHMAN",
-                                            "TRANSFER"
-                                        }))
+                                        description = "Free-text topic of interest.",
+                                        example = "DORM_HOUSING"))
                 List<String> topicsOfInterest,
         @Schema(
                         description = "Preferred BCP-47 language tag.",

@@ -138,4 +138,109 @@ class OnboardingRequestValidationWebTest {
                                 .content(mapper.writeValueAsString(req)))
                 .andExpect(status().isOk());
     }
+
+    // ---- topicsOfInterest controlled vocabulary (CTL-97 Option B: onboarding-only) ---------
+
+    @Test
+    void participantOnboarding_validTopicsSubset_yields200() throws Exception {
+        String body =
+                """
+                {
+                  "participantType": "PROSPECTIVE",
+                  "topicsOfInterest": ["DORM_HOUSING", "FRESHMAN"]
+                }
+                """;
+
+        mockMvc.perform(
+                        post("/__test/participant-onboarding")
+                                .contentType("application/json")
+                                .content(body))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void participantOnboarding_invalidTopicCode_yields422ValidationFailed() throws Exception {
+        String body =
+                """
+                {
+                  "participantType": "PROSPECTIVE",
+                  "topicsOfInterest": ["NOT_A_TOPIC"]
+                }
+                """;
+
+        mockMvc.perform(
+                        post("/__test/participant-onboarding")
+                                .contentType("application/json")
+                                .content(body))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void participantOnboarding_lowercaseTopicCode_yields422ValidationFailed() throws Exception {
+        String body =
+                """
+                {
+                  "participantType": "PROSPECTIVE",
+                  "topicsOfInterest": ["dorm-life"]
+                }
+                """;
+
+        mockMvc.perform(
+                        post("/__test/participant-onboarding")
+                                .contentType("application/json")
+                                .content(body))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void participantOnboarding_emptyTopicsList_yields200() throws Exception {
+        String body =
+                """
+                {
+                  "participantType": "PROSPECTIVE",
+                  "topicsOfInterest": []
+                }
+                """;
+
+        mockMvc.perform(
+                        post("/__test/participant-onboarding")
+                                .contentType("application/json")
+                                .content(body))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void participantOnboarding_omittedTopics_yields200() throws Exception {
+        String body =
+                """
+                {
+                  "participantType": "PROSPECTIVE"
+                }
+                """;
+
+        mockMvc.perform(
+                        post("/__test/participant-onboarding")
+                                .contentType("application/json")
+                                .content(body))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void participantOnboarding_duplicateValidTopicCodes_yields200() throws Exception {
+        String body =
+                """
+                {
+                  "participantType": "PROSPECTIVE",
+                  "topicsOfInterest": ["DORM_HOUSING", "DORM_HOUSING"]
+                }
+                """;
+
+        mockMvc.perform(
+                        post("/__test/participant-onboarding")
+                                .contentType("application/json")
+                                .content(body))
+                .andExpect(status().isOk());
+    }
 }

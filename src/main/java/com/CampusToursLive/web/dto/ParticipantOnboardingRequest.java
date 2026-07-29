@@ -1,5 +1,6 @@
 package com.CampusToursLive.web.dto;
 
+import com.CampusToursLive.web.validation.TourTopicCodes;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
@@ -81,7 +82,8 @@ public record ParticipantOnboardingRequest(
                                         description = "College Scorecard school id (string).",
                                         example = "166683"))
                 List<String> universitiesOfInterest,
-        @ArraySchema(
+        @TourTopicCodes
+                @ArraySchema(
                         arraySchema =
                                 @Schema(
                                         description =
