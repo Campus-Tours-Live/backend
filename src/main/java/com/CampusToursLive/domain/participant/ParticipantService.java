@@ -7,6 +7,8 @@ import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.domain.user.UserRoleRepository;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.security.OidcIdentity;
+import com.CampusToursLive.security.OidcIdentityLock;
 import com.CampusToursLive.web.dto.ParticipantProfileResponse;
 import com.CampusToursLive.web.dto.ParticipantProfileUpdateRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -26,6 +28,7 @@ public class ParticipantService {
     private final UserRepository users;
     private final UserRoleRepository userRoles;
     private final RoleGrantService roleGrant;
+    private final OidcIdentityLock identityLock;
     private final ObjectMapper mapper;
 
     public ParticipantService(
@@ -33,11 +36,13 @@ public class ParticipantService {
             UserRepository users,
             UserRoleRepository userRoles,
             RoleGrantService roleGrant,
+            OidcIdentityLock identityLock,
             ObjectMapper mapper) {
         this.profiles = profiles;
         this.users = users;
         this.userRoles = userRoles;
         this.roleGrant = roleGrant;
+        this.identityLock = identityLock;
         this.mapper = mapper;
     }
 
@@ -49,7 +54,7 @@ public class ParticipantService {
 
     @Transactional
     public ParticipantProfileResponse updateProfile(
-            UserEntity user, ParticipantProfileUpdateRequest req) {
+            UserEntity user, OidcIdentity oidcIdentity, ParticipantProfileUpdateRequest req) {
         // users-table fields
         NameRules.validate("firstName", req.firstName());
         NameRules.validate("lastName", req.lastName());
@@ -80,10 +85,27 @@ public class ParticipantService {
                                     return p;
                                 });
 
-        if (req.participantType() != null) {
-            profile.setParticipantType(parseType(req.participantType()));
+        ParticipantType requestedType =
+                req.participantType() != null ? parseType(req.participantType()) : null;
+        boolean participantTypeChanging =
+                requestedType != null && requestedType != profile.getParticipantType();
+
+        if (participantTypeChanging) {
+            // I14: any participant_type change (to OR from PARENT) mutates PARENT<->GUIDE
+            // eligibility, so it must be serialized against concurrent eligibility mutations
+            // (guide onboarding, other participant-type edits) for the SAME identity, FIRST —
+            // before evaluating the exclusion check below. Re-entrant + a harmless no-op when the
+            // caller (e.g. OnboardingService) already holds this identity's lock in the same
+            // transaction.
+            identityLock.acquire(oidcIdentity);
         }
-        // Bidirectional exclusion: a guide cannot also be a parent/guardian participant.
+
+        if (requestedType != null) {
+            profile.setParticipantType(requestedType);
+        }
+        // Bidirectional exclusion: a guide cannot also be a parent/guardian participant. This
+        // read is issued AFTER the lock acquire above (when the type is changing), so it observes
+        // any concurrent GUIDE grant that had to finish committing first under the same lock.
         if (profile.getParticipantType() == ParticipantType.PARENT
                 && userRoles.existsByUserIdAndRole(user.getId(), UserRole.GUIDE)) {
             throw new ValidationException("Guides cannot also be parent or guardian participants.");

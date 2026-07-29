@@ -17,6 +17,7 @@ import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.security.CurrentUser;
+import com.CampusToursLive.security.OidcIdentity;
 import com.CampusToursLive.security.ParticipantProfileSnapshot;
 import com.CampusToursLive.security.ProvisionedAccount;
 import com.CampusToursLive.security.RoleAccountContext;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.oauth2.jwt.Jwt;
 
 /**
  * ParticipantController — thin adapter over the typed role contexts (CTL-97 Core-A Task 5, Core-B
@@ -73,6 +75,17 @@ class ParticipantControllerTest {
                 null,
                 Instant.parse("2024-01-01T00:00:00Z"),
                 Set.of(roles));
+    }
+
+    private static final String ISSUER = "https://accounts.google.com";
+    private static final String SUBJECT = "sub-1";
+
+    private static Jwt jwt() {
+        return Jwt.withTokenValue("t")
+                .header("alg", "none")
+                .issuer(ISSUER)
+                .subject(SUBJECT)
+                .build();
     }
 
     private static ParticipantProfileSnapshot snapshot() {
@@ -163,9 +176,10 @@ class ParticipantControllerTest {
                 new ParticipantProfileUpdateRequest(
                         null, null, null, null, null, null, null, null, null, null, null);
         ParticipantProfileResponse resp = response();
-        when(participantService.updateProfile(managed, req)).thenReturn(resp);
+        OidcIdentity expectedIdentity = new OidcIdentity(ISSUER, SUBJECT);
+        when(participantService.updateProfile(managed, expectedIdentity, req)).thenReturn(resp);
 
-        assertSame(resp, controller().updateProfile(req).data());
+        assertSame(resp, controller().updateProfile(jwt(), req).data());
     }
 
     @Test
@@ -180,7 +194,7 @@ class ParticipantControllerTest {
                                 "ROLE_REQUIRED",
                                 Map.of("role", "PARTICIPANT")));
 
-        assertThatThrownBy(() -> controller().updateProfile(req))
+        assertThatThrownBy(() -> controller().updateProfile(jwt(), req))
                 .isInstanceOf(ForbiddenException.class)
                 .satisfies(
                         ex ->
@@ -199,7 +213,7 @@ class ParticipantControllerTest {
                         new NotFoundException(
                                 "Account not provisioned", "ACCOUNT_NOT_PROVISIONED"));
 
-        assertThatThrownBy(() -> controller().updateProfile(req))
+        assertThatThrownBy(() -> controller().updateProfile(jwt(), req))
                 .isInstanceOf(NotFoundException.class)
                 .satisfies(
                         ex ->
@@ -218,7 +232,7 @@ class ParticipantControllerTest {
                 new ParticipantProfileUpdateRequest(
                         null, null, null, null, null, null, null, null, null, null, null);
 
-        assertThatThrownBy(() -> controller().updateProfile(req))
+        assertThatThrownBy(() -> controller().updateProfile(jwt(), req))
                 .isInstanceOf(ConflictException.class)
                 .satisfies(
                         ex ->

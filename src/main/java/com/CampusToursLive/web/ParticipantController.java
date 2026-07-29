@@ -5,6 +5,7 @@ import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.security.CurrentUser;
+import com.CampusToursLive.security.OidcIdentity;
 import com.CampusToursLive.security.ProvisionedAccount;
 import com.CampusToursLive.security.RoleAccountContext;
 import com.CampusToursLive.web.doc.ApiExamples;
@@ -18,6 +19,8 @@ import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -158,10 +161,14 @@ public class ParticipantController {
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
     @PatchMapping("/profile")
     public ApiEnvelope<ParticipantProfileResponse> updateProfile(
-            @RequestBody ParticipantProfileUpdateRequest req) {
+            @AuthenticationPrincipal Jwt jwt, @RequestBody ParticipantProfileUpdateRequest req) {
         RoleAccountContext.Participant context = currentUser.requireParticipant();
         UserEntity managed = loadManagedUser(context.account());
-        return ApiEnvelope.of(participantService.updateProfile(managed, req));
+        // I14: pass the already-validated JWT's OidcIdentity straight through (Core-A resolve-once
+        // — never re-resolved/re-queried in the service) so a participant_type change can be
+        // serialized under the per-identity advisory lock.
+        OidcIdentity oidcIdentity = new OidcIdentity(jwt.getIssuer().toString(), jwt.getSubject());
+        return ApiEnvelope.of(participantService.updateProfile(managed, oidcIdentity, req));
     }
 
     /**

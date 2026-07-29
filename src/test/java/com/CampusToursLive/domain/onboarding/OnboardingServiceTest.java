@@ -462,10 +462,21 @@ class OnboardingServiceTest {
                         participantProfile(profileId, ParticipantType.PROSPECTIVE));
         when(stateReader.loadState(userId)).thenReturn(preState, postState);
         ParticipantProfileResponse profileResponse = participantProfileResponse();
-        when(participantService.updateProfile(eq(created), any())).thenReturn(profileResponse);
+        when(participantService.updateProfile(eq(created), any(OidcIdentity.class), any()))
+                .thenReturn(profileResponse);
 
         OnboardingResponse response =
                 service().onboardParticipant(jwt, participantRequest("PROSPECTIVE"));
+
+        // I14: onboardParticipant passes its own JWT-derived OidcIdentity straight into
+        // participantService.updateProfile — re-entrant with the lock resolveAccount() already
+        // acquired for the SAME identity.
+        ArgumentCaptor<OidcIdentity> participantIdentityCaptor =
+                ArgumentCaptor.forClass(OidcIdentity.class);
+        verify(participantService)
+                .updateProfile(eq(created), participantIdentityCaptor.capture(), any());
+        assertThat(participantIdentityCaptor.getValue())
+                .isEqualTo(new OidcIdentity(ISSUER, "new-participant-subject"));
 
         verify(auditWriter)
                 .record(
@@ -560,7 +571,7 @@ class OnboardingServiceTest {
                         null,
                         participantProfile(profileId, ParticipantType.PARENT));
         when(stateReader.loadState(userId)).thenReturn(preState, postState);
-        when(participantService.updateProfile(eq(existingUser), any()))
+        when(participantService.updateProfile(eq(existingUser), any(OidcIdentity.class), any()))
                 .thenReturn(participantProfileResponse());
 
         OnboardingResponse response =

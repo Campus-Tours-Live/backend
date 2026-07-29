@@ -138,8 +138,13 @@ public class OnboardingService {
             throw ConflictException.roleNotEligible(UserRole.PARTICIPANT.name());
         }
 
+        // I14: participantService.updateProfile() acquires this SAME identity's lock again when
+        // participant_type changes — pg_advisory_xact_lock is re-entrant, so this is a harmless
+        // no-op layered on top of the lock resolveAccount() already acquired above.
+        OidcIdentity identity = new OidcIdentity(jwt.getIssuer().toString(), jwt.getSubject());
         ParticipantProfileResponse profileResponse =
-                participantService.updateProfile(ctx.user(), toParticipantUpdateRequest(req));
+                participantService.updateProfile(
+                        ctx.user(), identity, toParticipantUpdateRequest(req));
 
         LockedOnboardingState postState = stateReader.loadState(ctx.user().getId());
         ParticipantProfileEntity createdProfile =

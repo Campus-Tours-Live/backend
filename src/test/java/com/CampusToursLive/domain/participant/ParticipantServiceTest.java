@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.CampusToursLive.domain.user.RoleGrantService;
@@ -15,6 +16,8 @@ import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.domain.user.UserRoleRepository;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.security.OidcIdentity;
+import com.CampusToursLive.security.OidcIdentityLock;
 import com.CampusToursLive.web.dto.ParticipantProfileResponse;
 import com.CampusToursLive.web.dto.ParticipantProfileUpdateRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -24,7 +27,9 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
@@ -39,9 +44,14 @@ class ParticipantServiceTest {
     @Mock UserRepository users;
     @Mock UserRoleRepository userRoles;
     @Mock RoleGrantService roleGrant;
+    @Mock OidcIdentityLock identityLock;
+
+    private static final OidcIdentity IDENTITY =
+            new OidcIdentity("https://accounts.google.com", "sub-1");
 
     private ParticipantService service() {
-        return new ParticipantService(profiles, users, userRoles, roleGrant, new ObjectMapper());
+        return new ParticipantService(
+                profiles, users, userRoles, roleGrant, identityLock, new ObjectMapper());
     }
 
     private static UserEntity user(UUID id) {
@@ -73,7 +83,7 @@ class ParticipantServiceTest {
         when(profiles.findByUserId(uid)).thenReturn(Optional.empty());
 
         ParticipantProfileResponse res =
-                service().updateProfile(u, req("Jordan", null, null, null));
+                service().updateProfile(u, IDENTITY, req("Jordan", null, null, null));
 
         assertEquals("PROSPECTIVE", res.type()); // created default
         verify(roleGrant).grant(u, UserRole.PARTICIPANT);
@@ -88,7 +98,12 @@ class ParticipantServiceTest {
         var ex =
                 assertThrows(
                         RuntimeException.class,
-                        () -> service().updateProfile(user(uid), req(null, null, "BOGUS", null)));
+                        () ->
+                                service()
+                                        .updateProfile(
+                                                user(uid),
+                                                IDENTITY,
+                                                req(null, null, "BOGUS", null)));
         assertInstanceOf(ValidationException.class, ex);
         verify(roleGrant, never()).grant(any(), any());
     }
@@ -102,7 +117,12 @@ class ParticipantServiceTest {
         var ex =
                 assertThrows(
                         RuntimeException.class,
-                        () -> service().updateProfile(user(uid), req(null, null, "PARENT", null)));
+                        () ->
+                                service()
+                                        .updateProfile(
+                                                user(uid),
+                                                IDENTITY,
+                                                req(null, null, "PARENT", null)));
         assertInstanceOf(ValidationException.class, ex);
         verify(roleGrant, never()).grant(any(), any());
     }
@@ -115,10 +135,104 @@ class ParticipantServiceTest {
         when(userRoles.existsByUserIdAndRole(uid, UserRole.GUIDE)).thenReturn(false);
 
         ParticipantProfileResponse res =
-                service().updateProfile(u, req(null, null, "PARENT", null));
+                service().updateProfile(u, IDENTITY, req(null, null, "PARENT", null));
 
         assertEquals("PARENT", res.type());
         verify(roleGrant).grant(u, UserRole.PARTICIPANT);
+    }
+
+    // ---- I14: identity lock on participant_type changes -----------------------------------
+
+    @Test
+    void update_typeChangeToParent_acquiresLockBeforeExclusionCheck() {
+        // I14: a participant_type change is an eligibility mutation — the identity lock must be
+        // acquired FIRST (before the fresh PARENT<->GUIDE exclusion read), so a concurrent guide
+        // grant for the SAME identity is serialized against it rather than racing it.
+        UUID uid = UUID.randomUUID();
+        UserEntity u = user(uid);
+        when(profiles.findByUserId(uid)).thenReturn(Optional.empty()); // default PROSPECTIVE
+        when(userRoles.existsByUserIdAndRole(uid, UserRole.GUIDE)).thenReturn(false);
+
+        service().updateProfile(u, IDENTITY, req(null, null, "PARENT", null));
+
+        InOrder inOrder = Mockito.inOrder(identityLock, userRoles);
+        inOrder.verify(identityLock).acquire(IDENTITY);
+        inOrder.verify(userRoles).existsByUserIdAndRole(uid, UserRole.GUIDE);
+    }
+
+    @Test
+    void update_typeChangeToParent_whenGuideHeld_locksThenRejects() {
+        // Same race, but the lock hand-off reveals a concurrently-held GUIDE role — I13 must
+        // still reject, now proven under the lock rather than racing it.
+        UUID uid = UUID.randomUUID();
+        when(profiles.findByUserId(uid)).thenReturn(Optional.empty());
+        when(userRoles.existsByUserIdAndRole(uid, UserRole.GUIDE)).thenReturn(true);
+
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .updateProfile(
+                                        user(uid), IDENTITY, req(null, null, "PARENT", null)));
+
+        InOrder inOrder = Mockito.inOrder(identityLock, userRoles);
+        inOrder.verify(identityLock).acquire(IDENTITY);
+        inOrder.verify(userRoles).existsByUserIdAndRole(uid, UserRole.GUIDE);
+    }
+
+    @Test
+    void update_typeChangeAwayFromParent_alsoAcquiresLock() {
+        // I14: the lock must trigger on ANY participant_type change, not only transitions TO
+        // PARENT — leaving PARENT also flips PARENT<->GUIDE eligibility.
+        UUID uid = UUID.randomUUID();
+        UserEntity u = user(uid);
+        ParticipantProfileEntity existing = new ParticipantProfileEntity();
+        existing.setId(UUID.randomUUID());
+        existing.setUserId(uid);
+        existing.setParticipantType(ParticipantType.PARENT);
+        existing.setInterests("{}");
+        when(profiles.findByUserId(uid)).thenReturn(Optional.of(existing));
+
+        ParticipantProfileResponse res =
+                service().updateProfile(u, IDENTITY, req(null, null, "TRANSFER", null));
+
+        assertEquals("TRANSFER", res.type());
+        verify(identityLock).acquire(IDENTITY);
+        // Leaving PARENT is never itself blocked — the exclusion only fires for PARENT.
+        verify(userRoles, never()).existsByUserIdAndRole(any(), any());
+    }
+
+    @Test
+    void update_typeUnchanged_doesNotAcquireLock() {
+        // No participant_type change requested → not an eligibility mutation → no lock needed.
+        UUID uid = UUID.randomUUID();
+        ParticipantProfileEntity existing = new ParticipantProfileEntity();
+        existing.setId(UUID.randomUUID());
+        existing.setUserId(uid);
+        existing.setParticipantType(ParticipantType.INTERNATIONAL);
+        existing.setInterests("{}");
+        when(profiles.findByUserId(uid)).thenReturn(Optional.of(existing));
+
+        service().updateProfile(user(uid), IDENTITY, req(null, null, null, null));
+
+        verifyNoInteractions(identityLock);
+    }
+
+    @Test
+    void update_typeResentSameValue_doesNotAcquireLock() {
+        // Re-sending the SAME participantType is not a "change" — no new eligibility mutation.
+        UUID uid = UUID.randomUUID();
+        ParticipantProfileEntity existing = new ParticipantProfileEntity();
+        existing.setId(UUID.randomUUID());
+        existing.setUserId(uid);
+        existing.setParticipantType(ParticipantType.PARENT);
+        existing.setInterests("{}");
+        when(profiles.findByUserId(uid)).thenReturn(Optional.of(existing));
+        when(userRoles.existsByUserIdAndRole(uid, UserRole.GUIDE)).thenReturn(false);
+
+        service().updateProfile(user(uid), IDENTITY, req(null, null, "PARENT", null));
+
+        verifyNoInteractions(identityLock);
     }
 
     @Test
@@ -127,7 +241,11 @@ class ParticipantServiceTest {
         when(profiles.findByUserId(uid)).thenReturn(Optional.empty());
 
         ParticipantProfileResponse res =
-                service().updateProfile(user(uid), req(null, null, null, List.of("DORM_HOUSING")));
+                service()
+                        .updateProfile(
+                                user(uid),
+                                IDENTITY,
+                                req(null, null, null, List.of("DORM_HOUSING")));
 
         assertEquals(List.of("DORM_HOUSING"), res.topicsOfInterest());
     }
@@ -139,7 +257,12 @@ class ParticipantServiceTest {
         var ex =
                 assertThrows(
                         RuntimeException.class,
-                        () -> service().updateProfile(user(uid), req("Ann3", null, null, null)));
+                        () ->
+                                service()
+                                        .updateProfile(
+                                                user(uid),
+                                                IDENTITY,
+                                                req("Ann3", null, null, null)));
         assertInstanceOf(ValidationException.class, ex);
     }
 
@@ -149,7 +272,7 @@ class ParticipantServiceTest {
         UserEntity u = user(uid);
         when(profiles.findByUserId(uid)).thenReturn(Optional.empty());
 
-        service().updateProfile(u, req("Jordan", "JL the Guide", null, null));
+        service().updateProfile(u, IDENTITY, req("Jordan", "JL the Guide", null, null));
 
         assertEquals("JL the Guide", u.getDisplayName());
     }
@@ -165,7 +288,7 @@ class ParticipantServiceTest {
         when(profiles.findByUserId(uid)).thenReturn(Optional.of(existing));
 
         ParticipantProfileResponse res =
-                service().updateProfile(user(uid), req(null, null, null, null));
+                service().updateProfile(user(uid), IDENTITY, req(null, null, null, null));
 
         assertEquals(List.of("GENERAL_CAMPUS"), res.topicsOfInterest());
     }
@@ -290,7 +413,7 @@ class ParticipantServiceTest {
                         "America/New_York",
                         "Wheelchair access");
 
-        ParticipantProfileResponse res = service().updateProfile(u, r);
+        ParticipantProfileResponse res = service().updateProfile(u, IDENTITY, r);
 
         assertEquals("Jordan", u.getFirstName());
         assertEquals("Lee", u.getLastName());
@@ -317,7 +440,7 @@ class ParticipantServiceTest {
                 new ParticipantProfileUpdateRequest(
                         null, null, null, null, null, null, null, null, null, null, null);
 
-        ParticipantProfileResponse res = service().updateProfile(u, r);
+        ParticipantProfileResponse res = service().updateProfile(u, IDENTITY, r);
 
         assertEquals("Existing", u.getFirstName());
         assertNull(u.getDisplayName()); // no sync triggered, no explicit value
@@ -335,7 +458,7 @@ class ParticipantServiceTest {
                 new ParticipantProfileUpdateRequest(
                         null, "Lee", null, null, null, null, null, null, null, null, null);
 
-        service().updateProfile(u, r);
+        service().updateProfile(u, IDENTITY, r);
 
         assertEquals("Lee", u.getLastName());
         assertEquals("Lee", u.getDisplayName());
@@ -352,7 +475,7 @@ class ParticipantServiceTest {
                 new ParticipantProfileUpdateRequest(
                         "   ", "   ", null, null, null, null, null, null, null, null, null);
 
-        service().updateProfile(u, r);
+        service().updateProfile(u, IDENTITY, r);
 
         assertNull(u.getDisplayName());
     }
@@ -376,7 +499,7 @@ class ParticipantServiceTest {
                         null,
                         "Sign language");
 
-        ParticipantProfileResponse res = service().updateProfile(user(uid), r);
+        ParticipantProfileResponse res = service().updateProfile(user(uid), IDENTITY, r);
 
         assertEquals(List.of("243744"), res.universitiesOfInterest());
         assertEquals("Sign language", res.accessibilityPreferences());
@@ -393,7 +516,9 @@ class ParticipantServiceTest {
         when(profiles.findByUserId(uid)).thenReturn(Optional.of(existing));
 
         ParticipantProfileResponse res =
-                service().updateProfile(user(uid), req(null, null, null, List.of("ACADEMICS")));
+                service()
+                        .updateProfile(
+                                user(uid), IDENTITY, req(null, null, null, List.of("ACADEMICS")));
 
         // participantType left as the existing one (not re-sent)
         assertEquals("INTERNATIONAL", res.type());
@@ -415,7 +540,7 @@ class ParticipantServiceTest {
         when(profiles.findByUserId(uid)).thenReturn(Optional.of(existing));
 
         ParticipantProfileResponse res =
-                service().updateProfile(user(uid), req(null, null, null, null));
+                service().updateProfile(user(uid), IDENTITY, req(null, null, null, null));
 
         assertEquals(List.of("ATHLETICS"), res.topicsOfInterest());
         assertEquals(List.of("110662"), res.universitiesOfInterest());
@@ -438,10 +563,10 @@ class ParticipantServiceTest {
                 .thenThrow(new RuntimeException("boom"));
         when(mock.writeValueAsString(any())).thenReturn("{}");
         ParticipantService svc =
-                new ParticipantService(profiles, users, userRoles, roleGrant, mock);
+                new ParticipantService(profiles, users, userRoles, roleGrant, identityLock, mock);
 
         ParticipantProfileResponse res =
-                svc.updateProfile(user(uid), req(null, null, null, List.of("X")));
+                svc.updateProfile(user(uid), IDENTITY, req(null, null, null, List.of("X")));
 
         // readValue always throws → readInterests returns empty map (catch). The response is
         // re-read via the mock too, so topics come back as the empty default.
@@ -461,9 +586,9 @@ class ParticipantServiceTest {
         when(mock.writeValueAsString(any()))
                 .thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("boom") {});
         ParticipantService svc =
-                new ParticipantService(profiles, users, userRoles, roleGrant, mock);
+                new ParticipantService(profiles, users, userRoles, roleGrant, identityLock, mock);
 
-        svc.updateProfile(user(uid), req(null, null, null, List.of("X")));
+        svc.updateProfile(user(uid), IDENTITY, req(null, null, null, List.of("X")));
 
         // writeJson swallowed the exception and stored "{}"
         org.mockito.ArgumentCaptor<ParticipantProfileEntity> cap =
@@ -485,7 +610,7 @@ class ParticipantServiceTest {
         when(profiles.findByUserId(uid)).thenReturn(Optional.of(existing));
 
         ParticipantProfileResponse res =
-                service().updateProfile(user(uid), req(null, null, null, List.of("Y")));
+                service().updateProfile(user(uid), IDENTITY, req(null, null, null, List.of("Y")));
 
         assertEquals(List.of("Y"), res.topicsOfInterest());
     }
@@ -501,7 +626,7 @@ class ParticipantServiceTest {
         when(profiles.findByUserId(uid)).thenReturn(Optional.of(existing));
 
         ParticipantProfileResponse res =
-                service().updateProfile(user(uid), req(null, null, null, List.of("Z")));
+                service().updateProfile(user(uid), IDENTITY, req(null, null, null, List.of("Z")));
 
         assertEquals(List.of("Z"), res.topicsOfInterest());
     }
