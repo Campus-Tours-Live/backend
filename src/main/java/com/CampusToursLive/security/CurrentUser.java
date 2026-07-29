@@ -10,8 +10,6 @@ import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.UnauthorizedException;
 import java.util.Map;
-import java.util.Optional;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -21,27 +19,26 @@ import org.springframework.stereotype.Component;
  * Resolves the authenticated principal (a Google id_token) to a domain user, looked up by
  * oidc_subject (the OIDC "sub").
  *
- * <p>Accounts are NOT created implicitly on every request — provisioning only happens through
- * {@link #resolve(String)} with a "signup" intent, so that signing in with an unregistered Google
- * account is rejected rather than silently creating an account.
+ * <p>Accounts are NOT created implicitly on every request, and NOT created here at all: the only
+ * provisioning path is {@code UserProvisioningService.createUserForOnboarding(jwt)}, called once by
+ * {@code OnboardingService} inside the onboarding-submit transaction. A Google sign-in with no
+ * prior onboarding stays unprovisioned — {@link #requireProvisioned()} reports it as {@code
+ * Pending} (404 {@code ACCOUNT_NOT_PROVISIONED}) rather than silently creating an account.
  */
 @Component
 public class CurrentUser {
 
     private final UserRepository users;
-    private final UserProvisioningService provisioning;
     private final AccountResolver accountResolver;
     private final GuideProfileRepository guideProfiles;
     private final ParticipantProfileRepository participantProfiles;
 
     public CurrentUser(
             UserRepository users,
-            UserProvisioningService provisioning,
             AccountResolver accountResolver,
             GuideProfileRepository guideProfiles,
             ParticipantProfileRepository participantProfiles) {
         this.users = users;
-        this.provisioning = provisioning;
         this.accountResolver = accountResolver;
         this.guideProfiles = guideProfiles;
         this.participantProfiles = participantProfiles;
@@ -189,46 +186,11 @@ public class CurrentUser {
         return users.findById(account.userId()).orElseThrow(ConflictException::accountStateInvalid);
     }
 
-    /**
-     * Resolve a login by intent:
-     *
-     * <ul>
-     *   <li>existing account → returned as-is (either intent);
-     *   <li>new subject + "signup" → provisioned;
-     *   <li>new subject + "signin" → 404, so the web app can send the user to sign up.
-     * </ul>
-     */
-    public UserEntity resolve(String intent) {
-        Jwt jwt = currentJwt();
-        Optional<UserEntity> existing = users.findByOidcSubject(jwt.getSubject());
-        if (existing.isPresent()) {
-            return existing.get();
-        }
-        if ("signup".equalsIgnoreCase(intent)) {
-            return provisionOrGet(jwt);
-        }
-        throw new NotFoundException(
-                "No account is registered for this Google account. Please sign up first.");
-    }
-
     private Jwt currentJwt() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof Jwt jwt) {
             return jwt;
         }
         throw new UnauthorizedException("Authentication required");
-    }
-
-    /**
-     * Provision a brand-new subject, tolerating the race where several concurrent requests for a
-     * first-time user each try to INSERT: only one wins, the rest hit the unique constraint on
-     * oidc_subject — for those, return the row the winner just created instead of failing.
-     */
-    private UserEntity provisionOrGet(Jwt jwt) {
-        try {
-            return provisioning.provisionFromJwt(jwt);
-        } catch (DataIntegrityViolationException raceLost) {
-            return users.findByOidcSubject(jwt.getSubject()).orElseThrow(() -> raceLost);
-        }
     }
 }

@@ -53,7 +53,6 @@ class CurrentUserAuthzTest {
     private static final String SUBJECT = "sub-1";
 
     @Mock UserRepository users;
-    @Mock UserProvisioningService provisioning;
     @Mock AccountResolver accountResolver;
     @Mock GuideProfileRepository guideProfiles;
     @Mock ParticipantProfileRepository participantProfiles;
@@ -64,8 +63,7 @@ class CurrentUserAuthzTest {
     }
 
     private CurrentUser currentUser() {
-        return new CurrentUser(
-                users, provisioning, accountResolver, guideProfiles, participantProfiles);
+        return new CurrentUser(users, accountResolver, guideProfiles, participantProfiles);
     }
 
     private void authenticate() {

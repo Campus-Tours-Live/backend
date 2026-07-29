@@ -3,8 +3,6 @@ package com.CampusToursLive.web;
 import com.CampusToursLive.domain.user.RoleEligibilityService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
-import com.CampusToursLive.domain.user.UserRoleEntity;
-import com.CampusToursLive.domain.user.UserRoleRepository;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.security.ProvisionedAccount;
 import com.CampusToursLive.web.doc.ApiExamples;
@@ -19,22 +17,21 @@ import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import java.util.Comparator;
-import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Session / identity endpoints. Paths are bare (no /v1) — the BFF strips the /v1 prefix before
- * calling Core, and calls /session directly at login time.
+ * calling Core.
  *
  * <p>Core owns account facts only (identity, held roles). Current-role / session context — "which
  * role this browser session is currently using" — is owned entirely by the bff's server-side
- * session, never by Core: there is no current-role column, endpoint, or field here.
+ * session, never by Core: there is no current-role column, endpoint, or field here. Accounts are
+ * provisioned only via onboarding submission ({@code OnboardingController}); there is no OAuth-time
+ * provisioning endpoint here any more.
  */
 @RestController
 @Tag(
@@ -45,21 +42,16 @@ import org.springframework.web.server.ResponseStatusException;
 public class SessionController {
 
     private final CurrentUser currentUser;
-    private final UserRoleRepository userRoles;
     private final RoleEligibilityService roleEligibility;
 
-    public SessionController(
-            CurrentUser currentUser,
-            UserRoleRepository userRoles,
-            RoleEligibilityService roleEligibility) {
+    public SessionController(CurrentUser currentUser, RoleEligibilityService roleEligibility) {
         this.currentUser = currentUser;
-        this.userRoles = userRoles;
         this.roleEligibility = roleEligibility;
     }
 
     /**
      * GET /users/me — read-only: the current authenticated principal (must already be provisioned).
-     * Distinct from POST /session, which resolves/provisions.
+     * The account is never created here — provisioning happens only via onboarding submission.
      *
      * <p>Gated by {@link CurrentUser#requireProvisioned()}, not the removed {@code require()}: this
      * is the pending-detection endpoint the BFF and Core-B rely on, so a caller with no {@code
@@ -69,8 +61,8 @@ public class SessionController {
             summary = "Current principal",
             description =
                     "Returns the current authenticated principal (identity and the authoritative"
-                            + " role set). Read-only — the account must already be provisioned;"
-                            + " it is never created here (use POST /session for that). No"
+                            + " role set). Read-only — the account must already be provisioned; it"
+                            + " is never created here, only via onboarding submission. No"
                             + " session/current-role context is returned — that is bff-owned. See"
                             + " the coded error responses below for every non-provisioned case.")
     @ApiResponse(
@@ -120,54 +112,6 @@ public class SessionController {
     @GetMapping("/users/me")
     public ApiEnvelope<CurrentUserResponse> me() {
         return ApiEnvelope.of(CurrentUserResponse.of(currentUser.requireProvisioned()));
-    }
-
-    /**
-     * POST /session — resolve or provision a login. Called once by the BFF right after the Google
-     * code exchange. intent=signup provisions a new account; intent=signin requires an existing one
-     * (404 otherwise → the web app sends the user to sign up). Has a write/side-effect (JIT
-     * provisioning) that GET /users/me deliberately does not.
-     */
-    @Operation(
-            summary = "Resolve a login",
-            description =
-                    "Resolves or provisions a login right after the Google code exchange."
-                            + " intent=signup provisions a new account; intent=signin requires an"
-                            + " existing one (404 otherwise, so the web app can send the user to"
-                            + " sign up). Unlike the read-only GET /users/me, this endpoint may"
-                            + " create the account.")
-    @ApiResponse(
-            responseCode = "200",
-            description = "The resolved principal.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            examples = @ExampleObject(value = ApiExamples.CURRENT_USER)))
-    @ApiResponse(
-            responseCode = "401",
-            description = "No valid JWT principal.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(implementation = Problem.class),
-                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
-    @ApiResponse(
-            responseCode = "404",
-            description = "intent=signin but no account is registered for this Google account.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(implementation = Problem.class),
-                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
-    @PostMapping("/session")
-    public ApiEnvelope<CurrentUserResponse> resolveSession(
-            @Parameter(
-                            description =
-                                    "Login intent: signup provisions a new account, signin requires"
-                                            + " an existing one.")
-                    @RequestParam(name = "intent", defaultValue = "signin")
-                    String intent) {
-        return ApiEnvelope.of(currentUser(currentUser.resolve(intent)));
     }
 
     /**
@@ -263,15 +207,5 @@ public class SessionController {
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown role: " + raw);
         }
-    }
-
-    /** Build the principal view, enriched with the authoritative role set (fixed enum order). */
-    private CurrentUserResponse currentUser(UserEntity user) {
-        List<UserRole> roles =
-                userRoles.findByUserId(user.getId()).stream()
-                        .map(UserRoleEntity::getRole)
-                        .sorted(Comparator.comparingInt(Enum::ordinal))
-                        .toList();
-        return CurrentUserResponse.of(user, roles);
     }
 }

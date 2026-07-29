@@ -182,10 +182,10 @@ public class OnboardingService {
             }
             return new AccountContext(user, false);
         }
-        UserEntity created = provisioning.provisionFromJwt(jwt);
-        // Flush (not commit) NOW, still inside this same transaction: provisionFromJwt() only
-        // persist()s when called nested like this (no outer transaction of its own to trigger an
-        // implicit commit-time flush the way it does when CurrentUser calls it standalone).
+        UserEntity created = provisioning.createUserForOnboarding(jwt);
+        // Flush (not commit) NOW, still inside this same transaction: createUserForOnboarding()
+        // only persist()s — it never has an outer transaction of its own to trigger an implicit
+        // commit-time flush, since onboarding is the ONLY caller.
         // guide_profiles/participant_profiles/user_roles/audit_log all reference user_id via a
         // plain UUID column (not a mapped JPA association), so Hibernate's insert-ordering has no
         // way to infer that dependency on its own -- flushing here pins the users row to the DB

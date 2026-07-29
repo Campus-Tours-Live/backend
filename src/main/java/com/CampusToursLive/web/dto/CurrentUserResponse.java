@@ -1,6 +1,5 @@
 package com.CampusToursLive.web.dto;
 
-import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.security.ProvisionedAccount;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -8,9 +7,9 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Current principal (GET /users/me, POST /session). Deliberately NOT named {@code MeResponse} to
- * avoid a Core-vs-bff name collision — the bff owns a distinct, session-scoped {@code /userinfo}
- * that additionally carries {@code currentRole}. Core knows nothing about current/session role.
+ * Current principal (GET /users/me). Deliberately NOT named {@code MeResponse} to avoid a
+ * Core-vs-bff name collision — the bff owns a distinct, session-scoped {@code /userinfo} that
+ * additionally carries {@code currentRole}. Core knows nothing about current/session role.
  */
 @Schema(
         name = "CurrentUserResponse",
@@ -32,10 +31,6 @@ public record CurrentUserResponse(
                         example = "[\"PARTICIPANT\"]",
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 List<UserRole> roles) {
-
-    public static CurrentUserResponse of(UserEntity u, List<UserRole> roles) {
-        return new CurrentUserResponse(UserSummary.of(u), roles);
-    }
 
     /**
      * Built straight from a {@link ProvisionedAccount} snapshot — no re-query. The snapshot's

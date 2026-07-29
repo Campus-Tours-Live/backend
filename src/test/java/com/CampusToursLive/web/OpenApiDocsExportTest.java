@@ -65,6 +65,12 @@ class OpenApiDocsExportTest {
      * path keys rather than by firing an unauthenticated request — an unauthenticated request to a
      * removed, authenticated path 401s at the security chain before Spring Web would even 404 it,
      * so a request-based check can't distinguish "removed" from "still there but needs a token".
+     *
+     * <p>The old OAuth-time JIT-provisioning session endpoint was also removed in CTL-97 Task 11 —
+     * provisioning now happens ONLY at onboarding submit ({@code UserProvisioningService
+     * .createUserForOnboarding}, called from {@code OnboardingService}). The whole {@code
+     * "/session"} path key is asserted absent below, since removing the only mapping on it means
+     * springdoc no longer emits the path at all (not even for GET).
      */
     @Test
     void removedEndpoints_areAbsent_andReplacementsArePresent() throws Exception {
@@ -73,6 +79,7 @@ class OpenApiDocsExportTest {
 
         assertThat(body).doesNotContain("\"/userinfo\"");
         assertThat(body).doesNotContain("\"/session/current-role\"");
+        assertThat(body).doesNotContain("\"/session\"");
         assertThat(body).contains("\"/users/me\"");
         assertThat(body).contains("\"/users/me/role-eligibility\"");
     }

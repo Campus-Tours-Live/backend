@@ -13,7 +13,6 @@ import com.CampusToursLive.domain.user.RoleEligibilityService;
 import com.CampusToursLive.domain.user.RoleIneligibilityReason;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
-import com.CampusToursLive.domain.user.UserRoleRepository;
 import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.security.CurrentUser;
@@ -31,27 +30,21 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * SessionController.me / resolveSession / roleEligibility — the principal view
- * (CurrentUserResponse) and the role-eligibility passthrough. Verifies the enrichment in {@code
- * currentUser()}: identity nested under {@code user} and the authoritative role set in FIXED enum
- * order (PARTICIPANT, GUIDE, ADMIN, SUPPORT), not insertion order. There is no {@code currentRole}
- * field and no /session/current-role endpoint any more — current-role/session context is bff-owned.
+ * SessionController.me / roleEligibility — the principal view (CurrentUserResponse) and the
+ * role-eligibility passthrough. Verifies identity nested under {@code user} and the authoritative
+ * role set in FIXED enum order (PARTICIPANT, GUIDE, ADMIN, SUPPORT), not insertion order. There is
+ * no {@code currentRole} field and no /session/current-role endpoint any more —
+ * current-role/session context is bff-owned. The old OAuth-time session-provisioning endpoint was
+ * removed in CTL-97 — provisioning is onboarding-only now (see {@code OnboardingServiceTest}).
  */
 @ExtendWith(MockitoExtension.class)
 class SessionControllerTest {
 
     @Mock CurrentUser currentUser;
-    @Mock UserRoleRepository userRoles;
     @Mock RoleEligibilityService roleEligibilityService;
 
     private SessionController controller() {
-        return new SessionController(currentUser, userRoles, roleEligibilityService);
-    }
-
-    private static UserEntity user(UUID id) {
-        UserEntity u = new UserEntity();
-        u.setId(id);
-        return u;
+        return new SessionController(currentUser, roleEligibilityService);
     }
 
     private static ProvisionedAccount provisionedAccount(UUID id, UserRole... roles) {
@@ -115,19 +108,6 @@ class SessionControllerTest {
 
         ForbiddenException ex = assertThrows(ForbiddenException.class, () -> controller().me());
         assertEquals("ACCOUNT_SUSPENDED", ex.code());
-    }
-
-    @Test
-    void resolveSession_delegatesToResolveWithIntent() {
-        UUID uid = UUID.randomUUID();
-        UserEntity u = user(uid);
-        when(currentUser.resolve("signup")).thenReturn(u);
-        when(userRoles.findByUserId(uid)).thenReturn(List.of());
-
-        CurrentUserResponse body = controller().resolveSession("signup").data();
-
-        assertEquals(List.of(), body.roles());
-        assertNotNull(body.user());
     }
 
     @Test

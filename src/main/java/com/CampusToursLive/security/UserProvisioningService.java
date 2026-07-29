@@ -10,10 +10,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Just-in-time user provisioning. On first authenticated request from a new subject, create a BARE
- * domain user (one account ↔ one subject) — NO role and NO profile. The role is acquired when that
- * role's onboarding completes (writes user_roles + creates the profile, see RoleGrantService /
- * *Service).
+ * Onboarding-time user provisioning. Called ONLY from {@code OnboardingService} once, inside the
+ * onboarding transaction, when the caller's identity has no existing {@code users} row yet: creates
+ * a BARE domain user (one account &harr; one subject) — NO role and NO profile — atomically
+ * alongside the role grant, profile, and audit row that same onboarding submit writes. There is no
+ * OAuth-time (JIT) provisioning path any more; a Google sign-in with no prior onboarding stays
+ * unprovisioned (404 {@code ACCOUNT_NOT_PROVISIONED}) until onboarding completes.
  *
  * <p>Provisioning grants no role: a bare account can later become a participant, a guide, or both,
  * depending on which onboarding flows the user completes. The display name is read best-effort from
@@ -29,7 +31,7 @@ public class UserProvisioningService {
     }
 
     @Transactional
-    public UserEntity provisionFromJwt(Jwt jwt) {
+    public UserEntity createUserForOnboarding(Jwt jwt) {
         String email = jwt.getClaimAsString("email");
         String name = jwt.getClaimAsString("name");
         String firstName = jwt.getClaimAsString("given_name");

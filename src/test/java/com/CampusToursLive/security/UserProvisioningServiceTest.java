@@ -16,9 +16,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 /**
- * UserProvisioningService — just-in-time creation of a BARE account from a Google id_token (no
- * role, no profile; those come at onboarding). Covers the display-name fallback chain and the fixed
- * account defaults.
+ * UserProvisioningService — onboarding-time creation of a BARE account from a Google id_token (no
+ * role, no profile; those are written by the same onboarding transaction, see OnboardingService).
+ * Covers the display-name fallback chain and the fixed account defaults.
  */
 @ExtendWith(MockitoExtension.class)
 class UserProvisioningServiceTest {
@@ -41,43 +41,43 @@ class UserProvisioningServiceTest {
                         .claim("family_name", "Lee")
                         .claim("email", "jordan@example.com")
                         .build();
-        UserEntity u = service().provisionFromJwt(jwt);
+        UserEntity u = service().createUserForOnboarding(jwt);
         assertEquals("Jordan Lee", u.getDisplayName());
     }
 
     @Test
     void fallsBackToGivenPlusFamily_whenNoNameClaim() {
         Jwt jwt = base().claim("given_name", "Jordan").claim("family_name", "Lee").build();
-        UserEntity u = service().provisionFromJwt(jwt);
+        UserEntity u = service().createUserForOnboarding(jwt);
         assertEquals("Jordan Lee", u.getDisplayName());
     }
 
     @Test
     void fallsBackToFamilyOnly_trimmed_whenGivenMissing() {
         Jwt jwt = base().claim("family_name", "Lee").build();
-        UserEntity u = service().provisionFromJwt(jwt);
+        UserEntity u = service().createUserForOnboarding(jwt);
         assertEquals("Lee", u.getDisplayName());
     }
 
     @Test
     void fallsBackToEmail_whenNoNameParts() {
         Jwt jwt = base().claim("email", "jordan@example.com").build();
-        UserEntity u = service().provisionFromJwt(jwt);
+        UserEntity u = service().createUserForOnboarding(jwt);
         assertEquals("jordan@example.com", u.getDisplayName());
     }
 
     @Test
     void fallsBackToNewUser_whenNothingIdentifying() {
-        UserEntity u = service().provisionFromJwt(base().build());
+        UserEntity u = service().createUserForOnboarding(base().build());
         assertEquals("New user", u.getDisplayName());
     }
 
     @Test
     void emailVerifiedFalse_whenClaimAbsentOrFalse() {
-        assertFalse(service().provisionFromJwt(base().build()).isEmailVerified());
+        assertFalse(service().createUserForOnboarding(base().build()).isEmailVerified());
         assertFalse(
                 service()
-                        .provisionFromJwt(base().claim("email_verified", false).build())
+                        .createUserForOnboarding(base().claim("email_verified", false).build())
                         .isEmailVerified());
     }
 
@@ -85,14 +85,14 @@ class UserProvisioningServiceTest {
     void emailVerifiedTrue_whenClaimTrue() {
         assertTrue(
                 service()
-                        .provisionFromJwt(base().claim("email_verified", true).build())
+                        .createUserForOnboarding(base().claim("email_verified", true).build())
                         .isEmailVerified());
     }
 
     @Test
     void setsBareAccountDefaultsAndSubject_butNoRole() {
         Jwt jwt = base().claim("email", "jordan@example.com").build();
-        UserEntity u = service().provisionFromJwt(jwt);
+        UserEntity u = service().createUserForOnboarding(jwt);
 
         assertEquals("google-sub-1", u.getOidcSubject());
         assertEquals("jordan@example.com", u.getEmail());
@@ -104,7 +104,8 @@ class UserProvisioningServiceTest {
     @Test
     void fallsBackToGivenNameOnly_whenFamilyMissing() {
         // given_name present, family_name absent → trimmed "First " == "First".
-        UserEntity u = service().provisionFromJwt(base().claim("given_name", "Jordan").build());
+        UserEntity u =
+                service().createUserForOnboarding(base().claim("given_name", "Jordan").build());
         assertEquals("Jordan", u.getDisplayName());
     }
 }

@@ -178,7 +178,7 @@ class OnboardingServiceTest {
         Jwt jwt = jwt("new-subject");
 
         when(onboardingAccounts.findAnyByOidcSubject("new-subject")).thenReturn(Optional.empty());
-        when(provisioning.provisionFromJwt(jwt)).thenReturn(created);
+        when(provisioning.createUserForOnboarding(jwt)).thenReturn(created);
         // Pre-mutation read: a freshly-provisioned row is roleless — if the integrity check ran
         // on this (it must not, per I12), it would throw ConflictException and fail this test.
         LockedOnboardingState preState = state(created, EnumSet.noneOf(UserRole.class), null, null);
@@ -247,7 +247,7 @@ class OnboardingServiceTest {
 
         OnboardingResponse response = service().onboardGuide(jwt, guideRequest());
 
-        verify(provisioning, never()).provisionFromJwt(any());
+        verify(provisioning, never()).createUserForOnboarding(any());
         verify(auditWriter, never())
                 .record(
                         org.mockito.ArgumentMatchers.eq("ACCOUNT_PROVISIONED"),
@@ -452,7 +452,7 @@ class OnboardingServiceTest {
 
         when(onboardingAccounts.findAnyByOidcSubject("new-participant-subject"))
                 .thenReturn(Optional.empty());
-        when(provisioning.provisionFromJwt(jwt)).thenReturn(created);
+        when(provisioning.createUserForOnboarding(jwt)).thenReturn(created);
         LockedOnboardingState preState = state(created, EnumSet.noneOf(UserRole.class), null, null);
         LockedOnboardingState postState =
                 state(

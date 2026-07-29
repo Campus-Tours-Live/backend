@@ -28,7 +28,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -42,10 +41,12 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
  * ACCOUNT_NOT_PROVISIONED} instead of a bare 401 (I10), and the resolver's whole-account validation
  * applies before the role check even runs.
  *
- * <p>Also covers {@link CurrentUser#resolve(String)} (the OAuth-callback provisioning path, kept
- * unchanged) and the {@code currentJwt()} rejection branches. {@code require()} was removed in Task
- * 6 — {@code SessionController.me()} was its only caller and now uses {@code requireProvisioned()}
- * directly ({@link CurrentUserAuthzTest} covers that method's full outcome matrix).
+ * <p>Also covers the private {@code currentJwt()} rejection branches (exercised through {@link
+ * CurrentUser#requireRole(UserRole)}, since the OAuth-time JIT-provisioning path was removed in
+ * CTL-97 — provisioning is onboarding-only now, see {@code UserProvisioningServiceTest} / {@code
+ * OnboardingServiceTest}). {@code require()} was removed in Task 6 — {@code SessionController.me()}
+ * was its only caller and now uses {@code requireProvisioned()} directly ({@link
+ * CurrentUserAuthzTest} covers that method's full outcome matrix).
  */
 @ExtendWith(MockitoExtension.class)
 class CurrentUserTest {
@@ -54,7 +55,6 @@ class CurrentUserTest {
     private static final String SUBJECT = "sub-1";
 
     @Mock UserRepository users;
-    @Mock UserProvisioningService provisioning;
     @Mock AccountResolver accountResolver;
     @Mock GuideProfileRepository guideProfiles;
     @Mock ParticipantProfileRepository participantProfiles;
@@ -73,8 +73,7 @@ class CurrentUserTest {
     }
 
     private CurrentUser currentUser() {
-        return new CurrentUser(
-                users, provisioning, accountResolver, guideProfiles, participantProfiles);
+        return new CurrentUser(users, accountResolver, guideProfiles, participantProfiles);
     }
 
     private static ProvisionedAccount provisionedAccount(UserRole... roles) {
@@ -151,88 +150,31 @@ class CurrentUserTest {
                                         .isEqualTo("ACCOUNT_STATE_INVALID"));
     }
 
-    // ---- resolve(intent) ------------------------------------------------------------------
+    // ---- currentJwt() rejection branches (exercised via requireRole/requireProvisioned) ------
 
     @Test
-    void resolve_returnsExisting_regardlessOfIntent() {
-        UserEntity u = new UserEntity();
-        u.setId(UUID.randomUUID());
-        when(users.findByOidcSubject("sub-1")).thenReturn(Optional.of(u));
-        authenticate("sub-1");
-
-        assertSame(u, currentUser().resolve("signin"));
-    }
-
-    @Test
-    void resolve_provisions_whenSignupAndNewSubject() {
-        UserEntity provisioned = new UserEntity();
-        provisioned.setId(UUID.randomUUID());
-        when(users.findByOidcSubject("sub-1")).thenReturn(Optional.empty());
-        when(provisioning.provisionFromJwt(any())).thenReturn(provisioned);
-        authenticate("sub-1");
-
-        assertSame(provisioned, currentUser().resolve("signup"));
-    }
-
-    @Test
-    void resolve_throws404_whenSigninAndNewSubject() {
-        when(users.findByOidcSubject("sub-1")).thenReturn(Optional.empty());
-        authenticate("sub-1");
-
-        RuntimeException ex =
-                assertThrows(RuntimeException.class, () -> currentUser().resolve("signin"));
-        assertInstanceOf(NotFoundException.class, ex);
-    }
-
-    @Test
-    void resolve_recoversFromProvisioningRace() {
-        UserEntity winnerRow = new UserEntity();
-        winnerRow.setId(UUID.randomUUID());
-        // empty on the first (resolve) lookup, then present on the post-race recovery lookup.
-        when(users.findByOidcSubject("sub-1")).thenReturn(Optional.empty(), Optional.of(winnerRow));
-        when(provisioning.provisionFromJwt(any()))
-                .thenThrow(new DataIntegrityViolationException("duplicate oidc_subject"));
-        authenticate("sub-1");
-
-        assertSame(winnerRow, currentUser().resolve("signup"));
-    }
-
-    // ---- currentJwt() rejection branches -------------------------------------------------
-
-    @Test
-    void resolve_throws401_whenNoAuthentication() {
+    void requireRole_throws401_whenNoAuthentication() {
         // No principal in the context (cleared by @AfterEach of the previous test / fresh thread).
         RuntimeException ex =
-                assertThrows(RuntimeException.class, () -> currentUser().resolve("signin"));
+                assertThrows(
+                        RuntimeException.class, () -> currentUser().requireRole(UserRole.GUIDE));
         assertInstanceOf(UnauthorizedException.class, ex);
     }
 
     @Test
-    void resolve_throws401_whenAuthenticationIsNotAuthenticated() {
+    void requireRole_throws401_whenAuthenticationIsNotAuthenticated() {
         // Present but not authenticated (2-arg token has isAuthenticated() == false).
         SecurityContextHolder.getContext()
                 .setAuthentication(new UsernamePasswordAuthenticationToken("u", "p"));
-        assertThrows(UnauthorizedException.class, () -> currentUser().resolve("signin"));
+        assertThrows(UnauthorizedException.class, () -> currentUser().requireRole(UserRole.GUIDE));
     }
 
     @Test
-    void resolve_throws401_whenPrincipalIsNotAJwt() {
+    void requireRole_throws401_whenPrincipalIsNotAJwt() {
         // Authenticated, but the principal is not a Jwt → still rejected.
         SecurityContextHolder.getContext()
                 .setAuthentication(
                         new UsernamePasswordAuthenticationToken("u", "p", Collections.emptyList()));
-        assertThrows(UnauthorizedException.class, () -> currentUser().resolve("signin"));
-    }
-
-    @Test
-    void resolve_rethrowsRaceError_whenRecoveryFindsNothing() {
-        // provisioning loses the race AND the recovery lookup also misses → the original
-        // DataIntegrityViolationException is rethrown (covers the orElseThrow lambda).
-        when(users.findByOidcSubject("sub-1")).thenReturn(Optional.empty(), Optional.empty());
-        when(provisioning.provisionFromJwt(any()))
-                .thenThrow(new DataIntegrityViolationException("dup"));
-        authenticate("sub-1");
-
-        assertThrows(DataIntegrityViolationException.class, () -> currentUser().resolve("signup"));
+        assertThrows(UnauthorizedException.class, () -> currentUser().requireRole(UserRole.GUIDE));
     }
 }

@@ -33,16 +33,19 @@ import org.junit.jupiter.api.io.TempDir;
  *       single-snapshot {@link com.CampusToursLive.security.AccountResolver} /{@link
  *       com.CampusToursLive.security.CurrentUser} gate instead of re-resolving it ad hoc (which is
  *       exactly the multi-snapshot bug the account-resolution redesign closed). The allowlist is
- *       {@code CurrentUser} (its {@code resolve(intent)} OAuth-callback path legitimately needs the
- *       raw, ACTIVE-only lookup), {@code AccountResolver} (listed for the identity-resolution layer
- *       even though it currently reads the richer account-projection query instead), and — as of
- *       CTL-97 Core-B Task 2 — {@code OnboardingAccountRepository} (the write-side,
- *       lifecycle-inclusive counterpart onboarding uses; see {@link
- *       com.CampusToursLive.domain.user.OnboardingAccountRepository}'s class javadoc). {@code
- *       OnboardingAccountRepository} is allowlisted BY TYPE even though its own method is named
- *       {@code findAnyByOidcSubject} — which would never trip {@link #FIND_BY_OIDC_SUBJECT} in the
- *       first place — precisely so the exception is an explicit, reviewable grant rather than an
- *       accident of naming that a future rename inside that file could silently defeat. {@link
+ *       {@code CurrentUser} (identity-resolution's own entry point — its OAuth-callback JIT
+ *       provisioning path was the original reason for the grant, and although that path was removed
+ *       in CTL-97 Task 11, {@code CurrentUser} stays listed as the account-resolution layer's
+ *       legitimate home for this lookup should a future read path need it), {@code AccountResolver}
+ *       (listed for the identity-resolution layer even though it currently reads the richer
+ *       account-projection query instead), and — as of CTL-97 Core-B Task 2 — {@code
+ *       OnboardingAccountRepository} (the write-side, lifecycle-inclusive counterpart onboarding
+ *       uses; see {@link com.CampusToursLive.domain.user.OnboardingAccountRepository}'s class
+ *       javadoc). {@code OnboardingAccountRepository} is allowlisted BY TYPE even though its own
+ *       method is named {@code findAnyByOidcSubject} — which would never trip {@link
+ *       #FIND_BY_OIDC_SUBJECT} in the first place — precisely so the exception is an explicit,
+ *       reviewable grant rather than an accident of naming that a future rename inside that file
+ *       could silently defeat. {@link
  *       #noClassOutsideAllowlistCallsFindByOidcSubject_allowlistIsNotVacuous} proves this entry
  *       doesn't gut the rule: a synthetic {@code OnboardingAccountRepository.java} calling the raw
  *       method is permitted, but a synthetic file under any other name with the exact same
