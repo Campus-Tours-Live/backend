@@ -32,20 +32,22 @@ import org.junit.jupiter.api.io.TempDir;
  *       lookup by OIDC subject — every other caller must resolve the current user through the
  *       single-snapshot {@link com.CampusToursLive.security.AccountResolver} /{@link
  *       com.CampusToursLive.security.CurrentUser} gate instead of re-resolving it ad hoc (which is
- *       exactly the multi-snapshot bug the account-resolution redesign closed). The allowlist is
- *       {@code CurrentUser} (identity-resolution's own entry point — its OAuth-callback JIT
- *       provisioning path was the original reason for the grant, and although that path was removed
- *       in CTL-97 Task 11, {@code CurrentUser} stays listed as the account-resolution layer's
- *       legitimate home for this lookup should a future read path need it), {@code AccountResolver}
- *       (listed for the identity-resolution layer even though it currently reads the richer
- *       account-projection query instead), and — as of CTL-97 Core-B Task 2 — {@code
- *       OnboardingAccountRepository} (the write-side, lifecycle-inclusive counterpart onboarding
- *       uses; see {@link com.CampusToursLive.domain.user.OnboardingAccountRepository}'s class
- *       javadoc). {@code OnboardingAccountRepository} is allowlisted BY TYPE even though its own
- *       method is named {@code findAnyByOidcSubject} — which would never trip {@link
- *       #FIND_BY_OIDC_SUBJECT} in the first place — precisely so the exception is an explicit,
- *       reviewable grant rather than an accident of naming that a future rename inside that file
- *       could silently defeat. {@link
+ *       exactly the multi-snapshot bug the account-resolution redesign closed). The allowlist is a
+ *       single entry — {@code OnboardingAccountRepository} (the write-side, lifecycle-inclusive
+ *       counterpart onboarding uses; see {@link
+ *       com.CampusToursLive.domain.user.OnboardingAccountRepository}'s class javadoc). {@code
+ *       CurrentUser} and {@code AccountResolver} were previously listed — {@code CurrentUser}
+ *       because its OAuth-callback JIT provisioning path once called the raw lookup, {@code
+ *       AccountResolver} as the identity-resolution layer's speculative home for it — but CTL-97
+ *       Task 11 removed the JIT path and neither class calls {@code findByOidcSubject} anymore
+ *       (they resolve through the richer account-projection query), so both grants were dropped as
+ *       of CTL-97 Core-B rather than left as vestigial permits: should a future read path in either
+ *       class genuinely need the raw lookup, re-adding the grant is a deliberate, reviewable change
+ *       — which is exactly what this guard is for. {@code OnboardingAccountRepository} is
+ *       allowlisted BY TYPE even though its own method is named {@code findAnyByOidcSubject} —
+ *       which would never trip {@link #FIND_BY_OIDC_SUBJECT} in the first place — precisely so the
+ *       exception is an explicit, reviewable grant rather than an accident of naming that a future
+ *       rename inside that file could silently defeat. {@link
  *       #noClassOutsideAllowlistCallsFindByOidcSubject_allowlistIsNotVacuous} proves this entry
  *       doesn't gut the rule: a synthetic {@code OnboardingAccountRepository.java} calling the raw
  *       method is permitted, but a synthetic file under any other name with the exact same
@@ -65,9 +67,9 @@ class ArchitectureGuardTest {
     private static final Pattern REQUIRE_NO_ARGS = Pattern.compile("\\.require\\(\\)");
     private static final Pattern FIND_BY_OIDC_SUBJECT = Pattern.compile("\\.findByOidcSubject\\(");
 
-    /** See the class javadoc for why each of these files is exempt. */
+    /** See the class javadoc for why this file is exempt. */
     private static final Set<String> FIND_BY_OIDC_SUBJECT_ALLOWLIST =
-            Set.of("CurrentUser.java", "AccountResolver.java", "OnboardingAccountRepository.java");
+            Set.of("OnboardingAccountRepository.java");
 
     @Test
     void noControllerCallsTheRemovedRequireGate() throws IOException {
@@ -101,10 +103,10 @@ class ArchitectureGuardTest {
 
         assertThat(violations)
                 .as(
-                        "only CurrentUser/AccountResolver/OnboardingAccountRepository may call the"
-                                + " raw UserRepository.findByOidcSubject(...) — every other caller"
-                                + " must go through the single-snapshot AccountResolver/CurrentUser"
-                                + " gate instead of re-resolving the current user ad hoc. Core-B's"
+                        "only OnboardingAccountRepository may call the raw"
+                                + " UserRepository.findByOidcSubject(...) — every other caller must go"
+                                + " through the single-snapshot AccountResolver/CurrentUser gate"
+                                + " instead of re-resolving the current user ad hoc. Core-B's"
                                 + " lifecycle-inclusive onboarding lookup belongs behind"
                                 + " OnboardingAccountRepository.findAnyByOidcSubject, not a stray"
                                 + " findByOidcSubject call elsewhere")
