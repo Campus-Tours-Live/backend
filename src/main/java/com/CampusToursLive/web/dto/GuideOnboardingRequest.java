@@ -49,10 +49,15 @@ public record GuideOnboardingRequest(
                 String major,
         @Pattern(regexp = "\\d{4}", message = "classYear must be a 4-digit year")
                 @Schema(
-                        description =
-                                "Class year. Free-text (no controlled vocabulary); typical values"
-                                        + " are Freshman/Sophomore/Junior/Senior/Graduate.",
-                        example = "2027",
+                        description = "Class year, as a 4-digit year (e.g. graduating class).",
+                        // Quoted so swagger-core's example resolver parses this as a JSON string,
+                        // not a JSON number -- an unquoted numeric-looking example (e.g. "2027")
+                        // gets silently coerced to a number by io.swagger.v3.core.util
+                        // .AnnotationsUtils#getExampleObject, which JSON-parses the example
+                        // string outright and fails the "type": "string" Spectral check
+                        // (oas3-valid-schema-example) once this schema is actually reachable from
+                        // an operation.
+                        example = "\"2027\"",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 String classYear,
         @NotBlank(message = "bio is required")

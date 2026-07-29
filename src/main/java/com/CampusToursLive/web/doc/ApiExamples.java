@@ -40,6 +40,15 @@ public interface ApiExamples {
             "{\"type\":\"about:blank\",\"title\":\"This resource was modified by another request —"
                     + " please retry\",\"status\":409}";
 
+    String PROBLEM_409_ROLE_ALREADY_GRANTED =
+            "{\"type\":\"about:blank\",\"title\":\"Role already granted: GUIDE\",\"status\":409,"
+                    + "\"code\":\"ROLE_ALREADY_GRANTED\",\"role\":\"GUIDE\","
+                    + "\"reconciliationRequired\":true}";
+
+    String PROBLEM_409_ROLE_NOT_ELIGIBLE =
+            "{\"type\":\"about:blank\",\"title\":\"Not eligible for role: GUIDE\",\"status\":409,"
+                    + "\"code\":\"ROLE_NOT_ELIGIBLE\",\"role\":\"GUIDE\"}";
+
     String PROBLEM_422 =
             "{\"type\":\"about:blank\",\"title\":\"Validation failed\",\"status\":422,"
                     + "\"detail\":\"One or more fields are invalid.\"}";
@@ -152,6 +161,42 @@ public interface ApiExamples {
                     + "\"email\":\"sam.rivera@example.com\",\"accountStatus\":\"ACTIVE\","
                     + "\"ageBand\":\"ADULT\",\"createdAt\":\"2026-01-15T09:30:00Z\"},"
                     + "\"roles\":[\"PARTICIPANT\"]},"
+                    + META
+                    + "}";
+
+    String ONBOARDING_GUIDE =
+            "{\"data\":{\"accountState\":\"PROVISIONED\","
+                    + "\"user\":{\"id\":\"22222222-0000-4000-8000-000000000001\","
+                    + "\"firstName\":\"Maya\",\"lastName\":\"Chen\",\"displayName\":\"Maya Chen\","
+                    + "\"email\":\"maya.chen@example.com\",\"accountStatus\":\"ACTIVE\","
+                    + "\"ageBand\":\"ADULT\",\"createdAt\":\"2026-07-24T09:30:00Z\"},"
+                    + "\"roles\":[\"GUIDE\"],\"acquiredRole\":\"GUIDE\","
+                    + "\"profile\":{\"guideStatus\":\"PENDING\","
+                    + "\"universities\":[{\"universityId\":"
+                    + "\"u1a2c3d4-0000-4000-8000-000000000003\","
+                    + "\"universityName\":\"North Coast University\","
+                    + "\"universityShortName\":\"NCU\",\"major\":\"Marine Biology\","
+                    + "\"degree\":\"Bachelor's Degree\",\"classYear\":\"2027\","
+                    + "\"entryYear\":2023,\"verificationStatus\":\"PENDING\"}],"
+                    + "\"bio\":\"Third-year student and campus tour lead.\","
+                    + "\"spokenLanguages\":[\"en-US\"],\"tourTopics\":[\"DORM_HOUSING\"]}},"
+                    + META
+                    + "}";
+
+    String ONBOARDING_PARTICIPANT =
+            "{\"data\":{\"accountState\":\"PROVISIONED\","
+                    + "\"user\":{\"id\":\"22222222-0000-4000-8000-000000000001\","
+                    + "\"firstName\":\"Sam\",\"lastName\":\"Rivera\",\"displayName\":\"Sam Rivera\","
+                    + "\"email\":\"sam.rivera@example.com\",\"accountStatus\":\"ACTIVE\","
+                    + "\"ageBand\":\"ADULT\",\"createdAt\":\"2026-07-24T09:30:00Z\"},"
+                    + "\"roles\":[\"PARTICIPANT\"],\"acquiredRole\":\"PARTICIPANT\","
+                    + "\"profile\":{\"participantStatus\":\"PENDING\","
+                    + "\"type\":\"PROSPECTIVE\",\"gradeLevel\":\"High school senior\","
+                    + "\"intendedMajor\":\"Computer Science\",\"guardianRequired\":false,"
+                    + "\"topicsOfInterest\":[\"DORM_HOUSING\"],"
+                    + "\"universitiesOfInterest\":[\"166683\"],"
+                    + "\"accessibilityPreferences\":null,\"preferredLanguage\":\"en-US\","
+                    + "\"timezone\":\"America/New_York\"}},"
                     + META
                     + "}";
 
