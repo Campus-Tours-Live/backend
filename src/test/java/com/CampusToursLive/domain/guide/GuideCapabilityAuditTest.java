@@ -233,6 +233,7 @@ class GuideCapabilityAuditTest {
             participant.setId(UUID.randomUUID());
             UUID offeringId = UUID.randomUUID();
             UUID guideProfileId = UUID.randomUUID();
+            UUID universityId = UUID.randomUUID();
 
             // The offering itself is ACTIVE (e.g. it was activated while the guide was VERIFIED,
             // then the guide's status later reverted to PENDING) -- the guide-level check must
@@ -240,6 +241,7 @@ class GuideCapabilityAuditTest {
             TourOfferingEntity o = new TourOfferingEntity();
             o.setId(offeringId);
             o.setGuideId(guideProfileId);
+            o.setUniversityId(universityId);
             o.setStatus(TourStatus.ACTIVE);
             when(offerings.findById(offeringId)).thenReturn(Optional.of(o));
 
@@ -248,6 +250,17 @@ class GuideCapabilityAuditTest {
             pendingGuide.setUserId(UUID.randomUUID());
             pendingGuide.setStatus(GuideStatus.PENDING);
             when(guides.findById(guideProfileId)).thenReturn(Optional.of(pendingGuide));
+
+            // The university is ACTIVE -- so the ONLY possible rejection source is the guide gate.
+            // If the guide_status == VERIFIED check were ever removed, requireActiveUniversity
+            // would pass and this test would fail to see the expected rejection
+            // (mutation-sensitive).
+            // Stubbed leniently: with the guide gate intact, execution never reaches this lookup.
+            UniversityEntity university = new UniversityEntity();
+            university.setId(universityId);
+            university.setName("Test University");
+            university.setStatus(UniversityStatus.ACTIVE);
+            lenient().when(universities.findById(universityId)).thenReturn(Optional.of(university));
 
             ValidationException ex =
                     assertThrows(
