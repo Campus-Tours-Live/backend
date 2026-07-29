@@ -25,7 +25,6 @@ import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.domain.user.UserRoleEntity;
 import com.CampusToursLive.domain.user.UserRoleRepository;
 import com.CampusToursLive.error.ConflictException;
-import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.security.OidcIdentity;
 import com.CampusToursLive.web.dto.GuideOnboardingRequest;
 import com.CampusToursLive.web.dto.OnboardingResponse;
@@ -88,17 +87,15 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * OidcIdentityLockIntegrationTest} for the dedicated raw-SQL lock-scope proofs this suite builds
  * on.
  *
- * <p><b>Case 4 caveat (documented, not "fixed").</b> {@link ParticipantService#updateProfile} and
- * {@link OnboardingService} enforce the SAME I13 exclusion but via DIFFERENT exception types:
- * {@code OnboardingService.onboardGuide}'s pre-check throws {@link ConflictException} ({@code
- * ROLE_NOT_ELIGIBLE}, HTTP 409), while {@code ParticipantService.updateProfile}'s own inline check
- * (hit on a direct PATCH&rarr;PARENT) throws {@link ValidationException} (HTTP 422). So depending
- * on which of the two racing calls loses, the loser's exception type differs — the Task 10 planning
- * doc says "the appropriate 409" for this case, which holds only when the guide-onboarding side
- * loses. This test asserts whichever branch actually occurred (see {@code
+ * <p><b>Case 4 (now consistent, CTL-97 Minor-3).</b> {@link ParticipantService#updateProfile} and
+ * {@link OnboardingService} enforce the SAME I13 exclusion and now both throw the SAME {@link
+ * ConflictException} ({@code ROLE_NOT_ELIGIBLE}, HTTP 409) regardless of which of the two racing
+ * calls loses: {@code ParticipantService.updateProfile}'s own inline check (hit on a direct
+ * PATCH&rarr;PARENT) was aligned to {@code OnboardingService.onboardGuide}'s pre-check, which
+ * previously threw a different exception type ({@code ValidationException}, HTTP 422) for the same
+ * rule. This test asserts the 409 on whichever branch actually occurred (see {@code
  * participantPatchToParent_concurrentWithOnboardGuide_i13ExclusionUpheld}) rather than force one
- * ordering or paper over the mismatch; this is a genuine production behavior, not a test bug —
- * flagged for follow-up, not silently "fixed" by inventing production code changes here.
+ * ordering.
  */
 @SpringBootTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -385,10 +382,12 @@ class OnboardingConcurrencyIntegrationTest {
         assertThat(patchSucceeded ^ guideSucceeded).isTrue();
 
         if (guideSucceeded) {
-            // The PATCH lost: ParticipantService.updateProfile's own inline I13 check throws
-            // ValidationException (422), not ConflictException -- see the class Javadoc's "case 4
-            // caveat". This is the actual, current production behavior for this ordering.
-            assertThat(race.first().error()).isInstanceOf(ValidationException.class);
+            // The PATCH lost: ParticipantService.updateProfile's own inline I13 check now throws
+            // the same ConflictException (409 ROLE_NOT_ELIGIBLE) as OnboardingService's pre-check
+            // (CTL-97 Minor-3 aligned the two).
+            assertThat(race.first().error()).isInstanceOf(ConflictException.class);
+            assertThat(((ConflictException) race.first().error()).code())
+                    .isEqualTo("ROLE_NOT_ELIGIBLE");
         } else {
             // The guide onboarding lost: OnboardingService's pre-check throws the documented 409.
             assertThat(race.second().error()).isInstanceOf(ConflictException.class);

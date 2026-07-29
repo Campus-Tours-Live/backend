@@ -49,6 +49,10 @@ public interface ApiExamples {
             "{\"type\":\"about:blank\",\"title\":\"Not eligible for role: GUIDE\",\"status\":409,"
                     + "\"code\":\"ROLE_NOT_ELIGIBLE\",\"role\":\"GUIDE\"}";
 
+    String PROBLEM_409_ROLE_NOT_ELIGIBLE_PARTICIPANT =
+            "{\"type\":\"about:blank\",\"title\":\"Not eligible for role: PARTICIPANT\","
+                    + "\"status\":409,\"code\":\"ROLE_NOT_ELIGIBLE\",\"role\":\"PARTICIPANT\"}";
+
     String PROBLEM_422 =
             "{\"type\":\"about:blank\",\"title\":\"Validation failed\",\"status\":422,"
                     + "\"detail\":\"One or more fields are invalid.\"}";

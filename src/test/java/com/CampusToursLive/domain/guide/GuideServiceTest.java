@@ -21,6 +21,7 @@ import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
+import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.security.GuideProfileSnapshot;
@@ -365,7 +366,7 @@ class GuideServiceTest {
     }
 
     @Test
-    void update_submit_422_whenParentParticipantBecomingGuide() {
+    void update_submit_409_roleNotEligible_whenParentParticipantBecomingGuide() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
         ParticipantProfileEntity parent = new ParticipantProfileEntity();
@@ -386,7 +387,10 @@ class GuideServiceTest {
                                                         null,
                                                         "me@school.edu",
                                                         true)));
-        assertInstanceOf(ValidationException.class, ex);
+        assertInstanceOf(ConflictException.class, ex);
+        ConflictException cex = (ConflictException) ex;
+        assertEquals("ROLE_NOT_ELIGIBLE", cex.code());
+        assertEquals("GUIDE", cex.properties().get("role"));
         verify(roleGrant, never()).grant(any(), any());
     }
 

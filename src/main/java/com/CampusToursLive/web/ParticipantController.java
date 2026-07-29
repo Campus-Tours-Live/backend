@@ -115,7 +115,10 @@ public class ParticipantController {
                     "Partially updates the current user's participant profile. All fields are"
                             + " optional. Requires the caller to already hold the PARTICIPANT role"
                             + " — this endpoint is EDIT-ONLY and never grants a role. To acquire"
-                            + " PARTICIPANT, use POST /v1/users/me/roles/participant instead.")
+                            + " PARTICIPANT, use POST /v1/users/me/roles/participant instead. Fails"
+                            + " 409 ROLE_NOT_ELIGIBLE if participantType=PARENT is set while the"
+                            + " caller already holds GUIDE (the same bidirectional GUIDE/PARENT"
+                            + " exclusion POST /v1/users/me/roles/participant enforces).")
     @ApiResponse(
             responseCode = "200",
             description = "The updated participant profile.",
@@ -159,6 +162,20 @@ public class ParticipantController {
                             mediaType = "application/json",
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @ApiResponse(
+            responseCode = "409",
+            description =
+                    "ROLE_NOT_ELIGIBLE: participantType=PARENT was set while the caller already"
+                            + " holds GUIDE (bidirectional GUIDE/PARENT exclusion).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples =
+                                    @ExampleObject(
+                                            value =
+                                                    ApiExamples
+                                                            .PROBLEM_409_ROLE_NOT_ELIGIBLE_PARTICIPANT)))
     @PatchMapping("/profile")
     public ApiEnvelope<ParticipantProfileResponse> updateProfile(
             @AuthenticationPrincipal Jwt jwt, @RequestBody ParticipantProfileUpdateRequest req) {

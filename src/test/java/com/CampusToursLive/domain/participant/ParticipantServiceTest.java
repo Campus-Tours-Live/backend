@@ -15,6 +15,7 @@ import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.domain.user.UserRoleRepository;
+import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.security.OidcIdentity;
 import com.CampusToursLive.security.OidcIdentityLock;
@@ -109,7 +110,7 @@ class ParticipantServiceTest {
     }
 
     @Test
-    void update_422_whenParentButAlreadyAGuide() {
+    void update_409_roleNotEligible_whenParentButAlreadyAGuide() {
         UUID uid = UUID.randomUUID();
         when(profiles.findByUserId(uid)).thenReturn(Optional.empty());
         when(userRoles.existsByUserIdAndRole(uid, UserRole.GUIDE)).thenReturn(true);
@@ -123,7 +124,10 @@ class ParticipantServiceTest {
                                                 user(uid),
                                                 IDENTITY,
                                                 req(null, null, "PARENT", null)));
-        assertInstanceOf(ValidationException.class, ex);
+        assertInstanceOf(ConflictException.class, ex);
+        ConflictException cex = (ConflictException) ex;
+        assertEquals("ROLE_NOT_ELIGIBLE", cex.code());
+        assertEquals("PARTICIPANT", cex.properties().get("role"));
         verify(roleGrant, never()).grant(any(), any());
     }
 
@@ -168,12 +172,16 @@ class ParticipantServiceTest {
         when(profiles.findByUserId(uid)).thenReturn(Optional.empty());
         when(userRoles.existsByUserIdAndRole(uid, UserRole.GUIDE)).thenReturn(true);
 
-        assertThrows(
-                ValidationException.class,
-                () ->
-                        service()
-                                .updateProfile(
-                                        user(uid), IDENTITY, req(null, null, "PARENT", null)));
+        ConflictException ex =
+                assertThrows(
+                        ConflictException.class,
+                        () ->
+                                service()
+                                        .updateProfile(
+                                                user(uid),
+                                                IDENTITY,
+                                                req(null, null, "PARENT", null)));
+        assertEquals("ROLE_NOT_ELIGIBLE", ex.code());
 
         InOrder inOrder = Mockito.inOrder(identityLock, userRoles);
         inOrder.verify(identityLock).acquire(IDENTITY);

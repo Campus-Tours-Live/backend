@@ -6,6 +6,7 @@ import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.domain.user.UserRoleRepository;
+import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.security.OidcIdentity;
 import com.CampusToursLive.security.OidcIdentityLock;
@@ -108,7 +109,7 @@ public class ParticipantService {
         // any concurrent GUIDE grant that had to finish committing first under the same lock.
         if (profile.getParticipantType() == ParticipantType.PARENT
                 && userRoles.existsByUserIdAndRole(user.getId(), UserRole.GUIDE)) {
-            throw new ValidationException("Guides cannot also be parent or guardian participants.");
+            throw ConflictException.roleNotEligible(UserRole.PARTICIPANT.name());
         }
         if (req.gradeLevel() != null) profile.setGradeLevel(req.gradeLevel());
         if (req.intendedMajor() != null) profile.setIntendedMajor(req.intendedMajor());

@@ -12,6 +12,7 @@ import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
+import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.security.GuideProfileSnapshot;
@@ -152,8 +153,7 @@ public class GuideService {
                     .ifPresent(
                             pp -> {
                                 if (pp.getParticipantType() == ParticipantType.PARENT) {
-                                    throw new ValidationException(
-                                            "Parent or guardian accounts cannot become guides.");
+                                    throw ConflictException.roleNotEligible(UserRole.GUIDE.name());
                                 }
                             });
 
