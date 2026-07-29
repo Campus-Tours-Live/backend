@@ -33,13 +33,15 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * GuideController — thin adapter over the typed role contexts (CTL-97 Core-A Task 5): {@code GET}
- * gates via {@link CurrentUser#requireGuide()} (pending -> 404 ACCOUNT_NOT_PROVISIONED, provisioned
- * without GUIDE -> 403 ROLE_REQUIRED, GUIDE held but profile missing -> 409
- * ROLE_PROFILE_STATE_INVALID, GUIDE held + profile present -> 200 built from the resolved {@link
- * GuideProfileSnapshot}); {@code PATCH} gates only via {@link CurrentUser#requireProvisioned()} (no
- * role check — PATCH is still today's onboarding-create path) and re-loads the managed {@link
- * UserEntity} by {@code account.userId()} for the unchanged {@code GuideService.updateProfile}.
+ * GuideController — thin adapter over the typed role contexts (CTL-97 Core-A Task 5, Core-B Task
+ * 8): both {@code GET} and {@code PATCH} gate via {@link CurrentUser#requireGuide()} (pending ->
+ * 404 ACCOUNT_NOT_PROVISIONED, provisioned without GUIDE -> 403 ROLE_REQUIRED, GUIDE held but
+ * profile missing -> 409 ROLE_PROFILE_STATE_INVALID, GUIDE held + profile present -> 200). {@code
+ * PATCH} is EDIT-ONLY (Core-B Task 8): role acquisition now happens exclusively via {@code
+ * OnboardingService} (POST /v1/users/me/roles/guide); PATCH re-loads the managed {@link UserEntity}
+ * by {@code account.userId()} and forces {@code submit=false} on the request before delegating to
+ * {@code GuideService.updateProfile}, so it can never grant a role or reset {@code guide_status}
+ * back to PENDING.
  */
 @ExtendWith(MockitoExtension.class)
 class GuideControllerTest {
@@ -143,22 +145,53 @@ class GuideControllerTest {
                                         .isEqualTo("ROLE_PROFILE_STATE_INVALID"));
     }
 
-    // ---- PATCH /guide/profile -------------------------------------------------------------
+    // ---- PATCH /guide/profile (Core-B Task 8: edit-only) -----------------------------------
 
     @Test
-    void updateProfile_provisionedCaller_loadsManagedEntityAndDelegates() {
-        ProvisionedAccount acc = account(); // no roles held yet — still the onboarding-create path
-        when(currentUser.requireProvisioned()).thenReturn(acc);
+    void updateProfile_holder_loadsManagedEntityAndDelegatesAsEditOnly() {
+        RoleAccountContext.Guide ctx =
+                new RoleAccountContext.Guide(account(UserRole.GUIDE), snapshot());
+        when(currentUser.requireGuide()).thenReturn(ctx);
         UserEntity managed = new UserEntity();
         managed.setId(USER_ID);
         when(users.findById(USER_ID)).thenReturn(Optional.of(managed));
+        // Client sends submit=true (e.g. a stale/adversarial client) — PATCH must still edit-only.
+        GuideProfileUpdateRequest req =
+                new GuideProfileUpdateRequest(
+                        "Maya", null, null, null, null, "bio", null, null, null, true, null, null);
+        GuideProfileResponse resp = response();
+        org.mockito.ArgumentCaptor<GuideProfileUpdateRequest> captor =
+                org.mockito.ArgumentCaptor.forClass(GuideProfileUpdateRequest.class);
+        when(guideService.updateProfile(org.mockito.ArgumentMatchers.eq(managed), captor.capture()))
+                .thenReturn(resp);
+
+        assertSame(resp, controller().updateProfile(req).data());
+
+        GuideProfileUpdateRequest delegated = captor.getValue();
+        assertThat(delegated.submit()).isFalse();
+        assertThat(delegated.firstName()).isEqualTo("Maya");
+        assertThat(delegated.bio()).isEqualTo("bio");
+    }
+
+    @Test
+    void updateProfile_provisionedNonHolder_propagates403RoleRequired() {
         GuideProfileUpdateRequest req =
                 new GuideProfileUpdateRequest(
                         null, null, null, null, null, null, null, null, null, null, null, null);
-        GuideProfileResponse resp = response();
-        when(guideService.updateProfile(managed, req)).thenReturn(resp);
+        when(currentUser.requireGuide())
+                .thenThrow(
+                        new ForbiddenException(
+                                "Missing required role: GUIDE",
+                                "ROLE_REQUIRED",
+                                Map.of("role", "GUIDE")));
 
-        assertSame(resp, controller().updateProfile(req).data());
+        assertThatThrownBy(() -> controller().updateProfile(req))
+                .isInstanceOf(ForbiddenException.class)
+                .satisfies(
+                        ex ->
+                                assertThat(((ForbiddenException) ex).code())
+                                        .isEqualTo("ROLE_REQUIRED"));
+        verify(users, never()).findById(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -166,7 +199,7 @@ class GuideControllerTest {
         GuideProfileUpdateRequest req =
                 new GuideProfileUpdateRequest(
                         null, null, null, null, null, null, null, null, null, null, null, null);
-        when(currentUser.requireProvisioned())
+        when(currentUser.requireGuide())
                 .thenThrow(
                         new NotFoundException(
                                 "Account not provisioned", "ACCOUNT_NOT_PROVISIONED"));
@@ -182,8 +215,9 @@ class GuideControllerTest {
 
     @Test
     void updateProfile_managedUserMissing_throwsAccountStateInvalid() {
-        ProvisionedAccount acc = account();
-        when(currentUser.requireProvisioned()).thenReturn(acc);
+        RoleAccountContext.Guide ctx =
+                new RoleAccountContext.Guide(account(UserRole.GUIDE), snapshot());
+        when(currentUser.requireGuide()).thenReturn(ctx);
         when(users.findById(USER_ID)).thenReturn(Optional.empty());
         GuideProfileUpdateRequest req =
                 new GuideProfileUpdateRequest(

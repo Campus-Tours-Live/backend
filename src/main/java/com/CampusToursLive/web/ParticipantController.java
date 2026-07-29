@@ -30,8 +30,9 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(
         name = "Participant profile",
         description =
-                "Participant profile. Any authenticated user may read/update their own participant"
-                        + " profile.")
+                "Participant profile. Reading and editing both require the caller to already hold"
+                        + " the PARTICIPANT role — acquiring PARTICIPANT happens via POST"
+                        + " /v1/users/me/roles/participant (onboarding), not here.")
 public class ParticipantController {
 
     private final CurrentUser currentUser;
@@ -109,7 +110,9 @@ public class ParticipantController {
             summary = "Update own participant profile",
             description =
                     "Partially updates the current user's participant profile. All fields are"
-                            + " optional.")
+                            + " optional. Requires the caller to already hold the PARTICIPANT role"
+                            + " — this endpoint is EDIT-ONLY and never grants a role. To acquire"
+                            + " PARTICIPANT, use POST /v1/users/me/roles/participant instead.")
     @ApiResponse(
             responseCode = "200",
             description = "The updated participant profile.",
@@ -135,6 +138,17 @@ public class ParticipantController {
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
     @ApiResponse(
+            responseCode = "403",
+            description =
+                    "The account is provisioned but does not hold the PARTICIPANT role"
+                            + " (ROLE_REQUIRED). Acquire the role first via POST"
+                            + " /v1/users/me/roles/participant.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
             responseCode = "422",
             description = "Invalid field values.",
             content =
@@ -145,18 +159,23 @@ public class ParticipantController {
     @PatchMapping("/profile")
     public ApiEnvelope<ParticipantProfileResponse> updateProfile(
             @RequestBody ParticipantProfileUpdateRequest req) {
-        ProvisionedAccount account = currentUser.requireProvisioned();
-        return ApiEnvelope.of(participantService.updateProfile(loadManagedUser(account), req));
+        RoleAccountContext.Participant context = currentUser.requireParticipant();
+        UserEntity managed = loadManagedUser(context.account());
+        return ApiEnvelope.of(participantService.updateProfile(managed, req));
     }
 
     /**
-     * PATCH keeps working for ANY provisioned caller (not just current PARTICIPANT holders): this
-     * is ALSO today's onboarding-create path (see {@link ParticipantService#updateProfile}, which
-     * grants PARTICIPANT once the profile is saved) — gating behind {@link
-     * CurrentUser#requireParticipant()} would 403 the very first onboarding edit. So both GET's
-     * managed-entity fallback and PATCH use {@link CurrentUser#requireProvisioned()} /-derived
-     * account here and re-load the MANAGED {@link UserEntity} by {@code account.userId()} — never
-     * the read-only {@link ProvisionedAccount} snapshot itself, which cannot be saved back.
+     * PATCH is EDIT-ONLY: the caller must already hold PARTICIPANT (gated via {@link
+     * CurrentUser#requireParticipant()} — a provisioned non-holder gets 403 {@code ROLE_REQUIRED},
+     * a pending identity gets 404 {@code ACCOUNT_NOT_PROVISIONED}). Account/role CREATION now lives
+     * exclusively in {@code OnboardingService} (via {@code POST /v1/users/me/roles/participant}),
+     * which calls the SAME {@link ParticipantService#updateProfile}. Unlike guide, participant's
+     * {@code updateProfile} has no submit/finalize branch to guard against — {@link
+     * com.CampusToursLive.domain.user.RoleGrantService#grant} is idempotent, so the redundant grant
+     * call it still makes here (the caller already holds PARTICIPANT, per the gate above) is a
+     * harmless no-op with no reset side effect. Re-loads the MANAGED {@link UserEntity} by {@code
+     * account.userId()} — never the read-only {@link ProvisionedAccount} snapshot itself, which
+     * cannot be saved back.
      */
     private UserEntity loadManagedUser(ProvisionedAccount account) {
         return users.findById(account.userId()).orElseThrow(ConflictException::accountStateInvalid);

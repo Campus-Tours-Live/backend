@@ -33,16 +33,15 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * ParticipantController — thin adapter over the typed role contexts (CTL-97 Core-A Task 5): {@code
- * GET} gates via {@link CurrentUser#requireParticipant()} (pending -> 404 ACCOUNT_NOT_PROVISIONED,
- * provisioned without PARTICIPANT -> 403 ROLE_REQUIRED, PARTICIPANT held but profile missing -> 409
- * ROLE_PROFILE_STATE_INVALID, held + profile present -> 200) and then re-loads the managed {@link
- * UserEntity} to delegate to the existing, unchanged {@code
- * ParticipantService.getProfile(UserEntity)} — the response also carries {@code
- * preferredLanguage}/{@code timezone}, which live on {@code users}, not on the {@link
- * ProvisionedAccount} snapshot. {@code PATCH} gates only via {@link
- * CurrentUser#requireProvisioned()} (no role check — PATCH is still today's onboarding-create path)
- * and likewise re-loads the managed entity by {@code account.userId()}.
+ * ParticipantController — thin adapter over the typed role contexts (CTL-97 Core-A Task 5, Core-B
+ * Task 8): both {@code GET} and {@code PATCH} gate via {@link CurrentUser#requireParticipant()}
+ * (pending -> 404 ACCOUNT_NOT_PROVISIONED, provisioned without PARTICIPANT -> 403 ROLE_REQUIRED,
+ * PARTICIPANT held but profile missing -> 409 ROLE_PROFILE_STATE_INVALID, held + profile present ->
+ * 200) and then re-loads the managed {@link UserEntity} to delegate to the existing, unchanged
+ * {@code ParticipantService} methods — the response also carries {@code preferredLanguage}/{@code
+ * timezone}, which live on {@code users}, not on the {@link ProvisionedAccount} snapshot. {@code
+ * PATCH} is EDIT-ONLY (Core-B Task 8): role acquisition now happens exclusively via {@code
+ * OnboardingService} (POST /v1/users/me/roles/participant).
  */
 @ExtendWith(MockitoExtension.class)
 class ParticipantControllerTest {
@@ -150,12 +149,13 @@ class ParticipantControllerTest {
                                         .isEqualTo("ROLE_PROFILE_STATE_INVALID"));
     }
 
-    // ---- PATCH /participant/profile --------------------------------------------------------
+    // ---- PATCH /participant/profile (Core-B Task 8: edit-only) -----------------------------
 
     @Test
-    void updateProfile_provisionedCaller_loadsManagedEntityAndDelegates() {
-        ProvisionedAccount acc = account(); // no roles held yet — still the onboarding-create path
-        when(currentUser.requireProvisioned()).thenReturn(acc);
+    void updateProfile_holder_loadsManagedEntityAndDelegates() {
+        RoleAccountContext.Participant ctx =
+                new RoleAccountContext.Participant(account(UserRole.PARTICIPANT), snapshot());
+        when(currentUser.requireParticipant()).thenReturn(ctx);
         UserEntity managed = new UserEntity();
         managed.setId(USER_ID);
         when(users.findById(USER_ID)).thenReturn(Optional.of(managed));
@@ -169,11 +169,32 @@ class ParticipantControllerTest {
     }
 
     @Test
+    void updateProfile_provisionedNonHolder_propagates403RoleRequired() {
+        ParticipantProfileUpdateRequest req =
+                new ParticipantProfileUpdateRequest(
+                        null, null, null, null, null, null, null, null, null, null, null);
+        when(currentUser.requireParticipant())
+                .thenThrow(
+                        new ForbiddenException(
+                                "Missing required role: PARTICIPANT",
+                                "ROLE_REQUIRED",
+                                Map.of("role", "PARTICIPANT")));
+
+        assertThatThrownBy(() -> controller().updateProfile(req))
+                .isInstanceOf(ForbiddenException.class)
+                .satisfies(
+                        ex ->
+                                assertThat(((ForbiddenException) ex).code())
+                                        .isEqualTo("ROLE_REQUIRED"));
+        verify(users, never()).findById(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void updateProfile_pending_propagates404AccountNotProvisioned() {
         ParticipantProfileUpdateRequest req =
                 new ParticipantProfileUpdateRequest(
                         null, null, null, null, null, null, null, null, null, null, null);
-        when(currentUser.requireProvisioned())
+        when(currentUser.requireParticipant())
                 .thenThrow(
                         new NotFoundException(
                                 "Account not provisioned", "ACCOUNT_NOT_PROVISIONED"));
@@ -189,8 +210,9 @@ class ParticipantControllerTest {
 
     @Test
     void updateProfile_managedUserMissing_throwsAccountStateInvalid() {
-        ProvisionedAccount acc = account();
-        when(currentUser.requireProvisioned()).thenReturn(acc);
+        RoleAccountContext.Participant ctx =
+                new RoleAccountContext.Participant(account(UserRole.PARTICIPANT), snapshot());
+        when(currentUser.requireParticipant()).thenReturn(ctx);
         when(users.findById(USER_ID)).thenReturn(Optional.empty());
         ParticipantProfileUpdateRequest req =
                 new ParticipantProfileUpdateRequest(

@@ -30,8 +30,9 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(
         name = "Guide profile",
         description =
-                "Guide application / profile. Any authenticated user may read/update their own"
-                        + " guide profile; submitting the update grants the GUIDE role.")
+                "Guide application / profile. Reading and editing both require the caller to"
+                        + " already hold the GUIDE role — acquiring GUIDE happens via POST"
+                        + " /v1/users/me/roles/guide (onboarding), not here.")
 public class GuideController {
 
     private final CurrentUser currentUser;
@@ -103,9 +104,11 @@ public class GuideController {
     @Operation(
             summary = "Update own guide profile",
             description =
-                    "Partially updates the guide application. When submit=true the application is"
-                            + " finalized: required fields are enforced, the GUIDE role is granted,"
-                            + " and status moves to PENDING.")
+                    "Partially updates the guide application. Requires the caller to already hold"
+                            + " the GUIDE role — this endpoint is EDIT-ONLY and never grants a role"
+                            + " or re-finalizes the application; any {@code submit} field in the"
+                            + " request body is ignored. To acquire GUIDE, use POST"
+                            + " /v1/users/me/roles/guide instead.")
     @ApiResponse(
             responseCode = "200",
             description = "The updated guide profile.",
@@ -131,8 +134,18 @@ public class GuideController {
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
     @ApiResponse(
+            responseCode = "403",
+            description =
+                    "The account is provisioned but does not hold the GUIDE role (ROLE_REQUIRED)."
+                            + " Acquire the role first via POST /v1/users/me/roles/guide.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
             responseCode = "422",
-            description = "Missing required fields on submit, or invalid values.",
+            description = "Invalid field values.",
             content =
                     @Content(
                             mediaType = "application/json",
@@ -141,20 +154,44 @@ public class GuideController {
     @PatchMapping("/profile")
     public ApiEnvelope<GuideProfileResponse> updateProfile(
             @RequestBody GuideProfileUpdateRequest req) {
-        ProvisionedAccount account = currentUser.requireProvisioned();
-        return ApiEnvelope.of(guideService.updateProfile(loadManagedUser(account), req));
+        RoleAccountContext.Guide context = currentUser.requireGuide();
+        UserEntity managed = loadManagedUser(context.account());
+        return ApiEnvelope.of(guideService.updateProfile(managed, asEdit(req)));
     }
 
     /**
-     * PATCH keeps working for ANY provisioned caller (not just current GUIDE holders): today,
-     * {@code submit=true} is ALSO the onboarding-create path (see {@link
-     * GuideService#updateProfile}, which grants GUIDE on submit) — gating this endpoint behind
-     * {@link CurrentUser#requireGuide()} would 403 the very first application. So PATCH uses {@link
-     * CurrentUser#requireProvisioned()} and re-loads the MANAGED {@link UserEntity} by {@code
-     * account.userId()} for the service call — never the read-only {@link ProvisionedAccount}
-     * snapshot itself, which cannot be saved back.
+     * PATCH is EDIT-ONLY: the caller must already hold GUIDE (gated via {@link
+     * CurrentUser#requireGuide()} — a provisioned non-holder gets 403 {@code ROLE_REQUIRED}, a
+     * pending identity gets 404 {@code ACCOUNT_NOT_PROVISIONED}). Account/role CREATION now lives
+     * exclusively in {@code OnboardingService} (via {@code POST /v1/users/me/roles/guide}), which
+     * calls the SAME {@link GuideService#updateProfile} with {@code submit=true}. To keep that
+     * create path working unchanged while making PATCH incapable of granting a role or re-running
+     * the submit-finalize branch (which would reset {@code guide_status} back to PENDING), {@link
+     * #asEdit} forces {@code submit=false} on the request regardless of what the client sent before
+     * it ever reaches the service.
      */
     private UserEntity loadManagedUser(ProvisionedAccount account) {
         return users.findById(account.userId()).orElseThrow(ConflictException::accountStateInvalid);
+    }
+
+    /**
+     * Returns a copy of {@code req} with {@code submit} forced to {@code false}, so PATCH can never
+     * reach {@link GuideService#updateProfile}'s submit-grant branch — see {@link
+     * #loadManagedUser}.
+     */
+    private static GuideProfileUpdateRequest asEdit(GuideProfileUpdateRequest req) {
+        return new GuideProfileUpdateRequest(
+                req.firstName(),
+                req.lastName(),
+                req.universityId(),
+                req.major(),
+                req.classYear(),
+                req.bio(),
+                req.spokenLanguages(),
+                req.tourTopics(),
+                req.verificationEmail(),
+                false,
+                req.degree(),
+                req.entryYear());
     }
 }
