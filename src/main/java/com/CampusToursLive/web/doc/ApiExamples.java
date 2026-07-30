@@ -169,7 +169,7 @@ public interface ApiExamples {
                     + "}";
 
     String ONBOARDING_GUIDE =
-            "{\"data\":{\"accountState\":\"PROVISIONED\","
+            "{\"data\":{"
                     + "\"user\":{\"id\":\"22222222-0000-4000-8000-000000000001\","
                     + "\"firstName\":\"Maya\",\"lastName\":\"Chen\",\"displayName\":\"Maya Chen\","
                     + "\"email\":\"maya.chen@example.com\",\"accountStatus\":\"ACTIVE\","
@@ -188,7 +188,7 @@ public interface ApiExamples {
                     + "}";
 
     String ONBOARDING_PARTICIPANT =
-            "{\"data\":{\"accountState\":\"PROVISIONED\","
+            "{\"data\":{"
                     + "\"user\":{\"id\":\"22222222-0000-4000-8000-000000000001\","
                     + "\"firstName\":\"Sam\",\"lastName\":\"Rivera\",\"displayName\":\"Sam Rivera\","
                     + "\"email\":\"sam.rivera@example.com\",\"accountStatus\":\"ACTIVE\","

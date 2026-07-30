@@ -163,7 +163,11 @@ class OnboardingControllerTest {
                                 .content(guideBody())
                                 .with(jwt()))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.accountState").doesNotExist())
+                // Core owns NO top-level state discriminator: provisioningStatus is the bff's
+                // session-scoped concept (PENDING/PROVISIONED), not Core's, and the account
+                // lifecycle is already on user.accountStatus. An earlier top-level field here was
+                // removed for both reasons -- do not reintroduce one under any name.
+                .andExpect(jsonPath("$.data.provisioningStatus").doesNotExist())
                 .andExpect(jsonPath("$.data.user.accountStatus").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.user.id").value(USER_ID))
                 .andExpect(jsonPath("$.data.roles[0]").value("GUIDE"))
@@ -245,7 +249,11 @@ class OnboardingControllerTest {
                                 .content(participantBody())
                                 .with(jwt()))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.accountState").doesNotExist())
+                // Core owns NO top-level state discriminator: provisioningStatus is the bff's
+                // session-scoped concept (PENDING/PROVISIONED), not Core's, and the account
+                // lifecycle is already on user.accountStatus. An earlier top-level field here was
+                // removed for both reasons -- do not reintroduce one under any name.
+                .andExpect(jsonPath("$.data.provisioningStatus").doesNotExist())
                 .andExpect(jsonPath("$.data.user.accountStatus").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.user.id").value(USER_ID))
                 .andExpect(jsonPath("$.data.roles[0]").value("PARTICIPANT"))
