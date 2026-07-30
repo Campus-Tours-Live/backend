@@ -202,8 +202,27 @@ class GuideOnboardingRequestTest {
                         valid().tourTopics(),
                         valid().verificationEmail(),
                         valid().degree(),
-                        null);
+                        valid().entryYear());
         assertThat(validator.validate(req)).isEmpty();
+    }
+
+    @Test
+    void omittedEntryYear_isInvalid() {
+        GuideOnboardingRequest req =
+                new GuideOnboardingRequest(
+                        valid().firstName(),
+                        valid().lastName(),
+                        valid().universityId(),
+                        valid().major(),
+                        valid().classYear(),
+                        valid().bio(),
+                        valid().spokenLanguages(),
+                        valid().tourTopics(),
+                        valid().verificationEmail(),
+                        valid().degree(),
+                        null);
+        assertThat(validator.validate(req))
+                .anyMatch(v -> v.getPropertyPath().toString().equals("entryYear"));
     }
 
     @Test
