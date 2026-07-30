@@ -151,6 +151,21 @@ public class GuideController {
                             mediaType = "application/json",
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @ApiResponse(
+            responseCode = "409",
+            description =
+                    "Concurrent edit: another request updated this guide's university affiliation"
+                            + " between the moment this one read it and the moment it wrote, so"
+                            + " this write lost the optimistic-lock (@Version) check and was not"
+                            + " applied. Re-read the profile with GET /v1/guide/profile and"
+                            + " resubmit the change on top of the current values. This is a"
+                            + " DIFFERENT condition from GET's 409 (ROLE_PROFILE_STATE_INVALID, a"
+                            + " GUIDE role with no guide profile), which retrying will not fix.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_409)))
     @PatchMapping("/profile")
     public ApiEnvelope<GuideProfileResponse> updateProfile(
             @RequestBody GuideProfileUpdateRequest req) {

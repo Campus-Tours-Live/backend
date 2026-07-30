@@ -140,7 +140,9 @@ public interface ApiExamples {
                     + "\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"universityName\":\"North Coast University\","
                     + "\"universityShortName\":\"NCU\",\"major\":\"Marine Biology\","
-                    + "\"degree\":\"Bachelor's Degree\",\"classYear\":\"Junior\","
+                    // A 4-digit year inside the window entryYear 2023 + Bachelor's Degree admits;
+                    // the old free-text "Junior" is a response the server can no longer produce.
+                    + "\"degree\":\"Bachelor's Degree\",\"classYear\":\"2027\","
                     + "\"entryYear\":2023,"
                     + "\"verificationStatus\":\"VERIFIED\"}],"
                     + "\"bio\":\"Third-year student and campus tour lead.\","

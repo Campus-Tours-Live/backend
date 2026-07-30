@@ -44,9 +44,13 @@ public record GuideProfileUpdateRequest(
                 String major,
         @Schema(
                         description =
-                                "Class year. Free-text (no controlled vocabulary); typical values"
-                                        + " are Freshman/Sophomore/Junior/Senior/Graduate.",
-                        example = "Junior",
+                                "Class year, as a 4-digit year (e.g. graduating class). Must fall"
+                                        + " inside the window derived from entryYear and degree —"
+                                        + " see GET /v1/meta/enrollment-years for that window.",
+                        // Quoted so swagger-core parses this as a JSON string rather than coercing
+                        // a numeric-looking example to a number and failing Spectral's
+                        // oas3-valid-schema-example check — see GuideOnboardingRequest.classYear.
+                        example = "\"2027\"",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 String classYear,
         @Schema(

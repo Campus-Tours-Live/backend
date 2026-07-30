@@ -42,14 +42,22 @@ public record GuideUniversityView(
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 String degree,
         @Schema(
-                        description = "Class year (free-form label).",
-                        example = "Junior",
+                        description =
+                                "Class year, as a 4-digit year (e.g. graduating class). Always"
+                                        + " inside the window derived from entryYear and degree —"
+                                        + " see GET /v1/meta/enrollment-years for that window.",
+                        // Quoted so swagger-core parses this as a JSON string rather than coercing
+                        // a numeric-looking example to a number and failing Spectral's
+                        // oas3-valid-schema-example check — see GuideOnboardingRequest.classYear.
+                        example = "\"2027\"",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 String classYear,
         @Schema(
                         description = "Year the guide entered this university, e.g. 2023.",
                         example = "2023",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                        // NOT NULL on guide_universities since CTL-97 — every affiliation row this
+                        // view is built from has one, so it is always present in the response.
+                        requiredMode = Schema.RequiredMode.REQUIRED)
                 Integer entryYear,
         @Schema(
                         description = "University-email verification status for this university.",

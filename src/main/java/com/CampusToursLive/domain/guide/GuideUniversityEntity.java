@@ -42,7 +42,15 @@ public class GuideUniversityEntity {
     @Column(name = "class_year")
     private String classYear;
 
-    /** Year the guide entered this university, e.g. 2023. Nullable. */
+    /**
+     * Year the guide entered this university, e.g. 2023. NOT NULL at the database layer — every
+     * stored row has one.
+     *
+     * <p>Kept as {@link Integer}, NOT {@code int}, deliberately: a primitive would default to 0 and
+     * silently write a garbage year past the NOT NULL constraint, and {@code
+     * GuideService.updateProfile} still needs {@code null} to mean "the PATCH did not supply this"
+     * when it merges the request against the stored row. Do not "fix" this to {@code int}.
+     */
     @Column(name = "entry_year")
     private Integer entryYear;
 
