@@ -77,6 +77,18 @@ class GuideServiceTest {
     /** A stable, always-valid university id for the entryYear/classYear tests below. */
     private static final String UNIVERSITY_ID = UUID.randomUUID().toString();
 
+    /**
+     * A valid entryYear under {@link #TEST_CLOCK} (window [2016, 2027]), carried by every request
+     * fixture that is not itself about the year rules.
+     *
+     * <p>entryYear is REQUIRED on the row updateProfile writes: the column is NOT NULL, and a
+     * request that supplies none — with no stored row to merge one from — is rejected with a 422
+     * rather than being allowed to reach the repository and fail the constraint as a 500. These
+     * fixtures used to pass {@code null} and survived only because the repository is a mock; the
+     * behaviour they pinned does not exist in production.
+     */
+    private static final int VALID_ENTRY_YEAR = 2023;
+
     private GuideService service() {
         return new GuideService(
                 guides,
@@ -115,7 +127,7 @@ class GuideServiceTest {
                 verificationEmail,
                 submit,
                 "Bachelor's Degree",
-                null);
+                VALID_ENTRY_YEAR);
     }
 
     /**
@@ -137,7 +149,7 @@ class GuideServiceTest {
                 "me@school.edu",
                 true,
                 "Bachelor's Degree",
-                null);
+                VALID_ENTRY_YEAR);
     }
 
     private static RuntimeException badRequest(Runnable r) {
@@ -859,7 +871,7 @@ class GuideServiceTest {
                         null,
                         false,
                         "Bachelor's Degree",
-                        null);
+                        VALID_ENTRY_YEAR);
 
         service().updateProfile(u, r);
 
@@ -955,7 +967,7 @@ class GuideServiceTest {
                         null,
                         false,
                         "Bachelor's Degree",
-                        null);
+                        VALID_ENTRY_YEAR);
 
         service().updateProfile(u, r);
 
@@ -1346,6 +1358,50 @@ class GuideServiceTest {
                 () -> service.updateProfile(user, guideRequestWith(null, null, "Master's Degree")));
     }
 
+    /**
+     * The merge can leave NO entryYear at all, and that must be a 422, not a 500.
+     *
+     * <p>The stored row is looked up by {@code (profileId, universityId)}, so a guide who already
+     * holds GUIDE and PATCHes a university they have no row for yet — the multi-school case — finds
+     * nothing to merge from. GuideProfileUpdateRequest has no {@code @NotNull} on entryYear, so the
+     * merged value is null; the year validation lets that through (a null entryYear skips its range
+     * check and a null classYear returns early), and the write would then INSERT a row with no
+     * entry_year into a NOT NULL column — a constraint violation no handler maps, i.e. a 500.
+     *
+     * <p>Asserting {@code never()).save(...)} is the point: the request must be rejected BEFORE the
+     * repository sees it, so this stays a validation failure rather than a database failure.
+     */
+    @Test
+    void
+            updateProfile_patchingAUniversityWithNoStoredRow_andNoEntryYear_is422NotAConstraintError() {
+        UUID uid = UUID.randomUUID();
+        UUID otherUniversity = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        // An established guide, but their only guide_universities row is for a DIFFERENT school.
+        GuideProfileEntity storedProfile = new GuideProfileEntity();
+        storedProfile.setId(UUID.randomUUID());
+        storedProfile.setUserId(uid);
+        GuideUniversityEntity otherRow = new GuideUniversityEntity();
+        otherRow.setId(UUID.randomUUID());
+        otherRow.setGuideProfileId(storedProfile.getId());
+        otherRow.setUniversityId(otherUniversity);
+        otherRow.setEntryYear(2020);
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(storedProfile));
+        when(guideUniversities.findByGuideProfileId(storedProfile.getId()))
+                .thenReturn(List.of(otherRow));
+
+        GuideProfileUpdateRequest r = guideRequestWith(null, null);
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class, () -> service().updateProfile(user(uid), r));
+        assertTrue(
+                ex.getMessage().contains("entryYear"),
+                "the 422 must name the missing field, but was: " + ex.getMessage());
+        verify(guideUniversities, never()).save(any());
+    }
+
     @Test
     void update_422_whenFirstNameHasInvalidCharacters() {
         // A digit in the name → NameRules rejects before any other field is looked at.
@@ -1389,7 +1445,7 @@ class GuideServiceTest {
                         null,
                         false,
                         "Bachelor's Degree",
-                        null);
+                        VALID_ENTRY_YEAR);
 
         service().updateProfile(u, r);
 
@@ -1420,7 +1476,7 @@ class GuideServiceTest {
                         null,
                         false,
                         "Bachelor's Degree",
-                        null);
+                        VALID_ENTRY_YEAR);
 
         GuideProfileResponse res = service().updateProfile(u, r);
 
@@ -1452,7 +1508,7 @@ class GuideServiceTest {
                         null,
                         false,
                         "Bachelor's Degree",
-                        null);
+                        VALID_ENTRY_YEAR);
 
         GuideProfileResponse res = service().updateProfile(u, r);
 
@@ -1580,7 +1636,7 @@ class GuideServiceTest {
                         null,
                         false,
                         "Bachelor's Degree",
-                        null);
+                        VALID_ENTRY_YEAR);
 
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> svc.updateProfile(user(uid), r));
     }

@@ -138,8 +138,11 @@ public class GuideService {
                                 });
 
         // The stored guide_universities row for THIS profile + university, if one already exists.
-        // Null on a first-time create (onboarding) — Task 3's @NotNull already guaranteed
-        // entryYear arrived in the request in that case.
+        // Null on a first-time create (onboarding), where Task 3's @NotNull on
+        // GuideOnboardingRequest guarantees entryYear arrived in the request — but ALSO null on
+        // PATCH, which has no such guarantee: GuideProfileUpdateRequest.entryYear is optional and
+        // the lookup is keyed on universityId, so any PATCH naming a university this guide has no
+        // row for lands here with nothing to merge against. See the mergedEntryYear guard below.
         GuideUniversityEntity existingUniversity =
                 findGuideUniversity(profile.getId(), universityId).orElse(null);
         Integer storedEntryYear =
@@ -159,6 +162,18 @@ public class GuideService {
         // Replaces Task 2's request-only call. There is exactly ONE validateYears call in this
         // method when this task is done.
         validateYears(mergedEntryYear, mergedClassYear, degree);
+        // entryYear is REQUIRED on the row that is about to be written, and the merge above is not
+        // enough to guarantee one. The reachable path: a guide who already holds GUIDE PATCHes with
+        // a universityId they have no guide_universities row for — the multi-school case, not a
+        // theoretical one — so storedEntryYear is null; the PATCH DTO has no @NotNull on entryYear,
+        // so req.entryYear() may be null too. validateYears lets that pass (a null entryYear skips
+        // the range check, and a null classYear returns early), writeGuideUniversity then INSERTs a
+        // fresh row with no entry_year, and the NOT NULL column rejects it as SQLSTATE 23502 —
+        // which no handler maps, so the caller sees a 500. Reject it here as the missing required
+        // field it is, so it surfaces as a 422 naming the field like every other one.
+        if (mergedEntryYear == null) {
+            throw new ValidationException("entryYear is required");
+        }
 
         if (req.bio() != null) profile.setBio(req.bio().trim());
         if (req.spokenLanguages() != null) {
