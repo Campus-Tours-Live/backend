@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
@@ -44,6 +45,17 @@ public class GuideUniversityEntity {
     /** Year the guide entered this university, e.g. 2023. Nullable. */
     @Column(name = "entry_year")
     private Integer entryYear;
+
+    /**
+     * Optimistic lock (spec D8/I3). entryYear and classYear are now INTERDEPENDENT — each is
+     * validated against the other — so two concurrent single-field PATCHes can each be valid
+     * against the snapshot they read while their combination is not. Per-request validation cannot
+     * see that; a version check can. The loser surfaces as OptimisticLockingFailureException, which
+     * GlobalExceptionHandler already maps to 409 (same treatment BookingEntity gets).
+     */
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     /** PII, never serialized. */
     @Column(name = "school_email")
