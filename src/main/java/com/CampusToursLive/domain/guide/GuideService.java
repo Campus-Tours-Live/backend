@@ -21,7 +21,6 @@ import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.CampusToursLive.web.dto.GuideUniversityView;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.time.Year;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -48,6 +47,7 @@ public class GuideService {
     private final SchoolDirectory schools;
     private final CampusImageUrls campusImages;
     private final ObjectMapper mapper;
+    private final EnrollmentYearRules rules;
 
     public GuideService(
             GuideProfileRepository guides,
@@ -58,7 +58,8 @@ public class GuideService {
             RoleGrantService roleGrant,
             SchoolDirectory schools,
             CampusImageUrls campusImages,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            EnrollmentYearRules rules) {
         this.guides = guides;
         this.guideUniversities = guideUniversities;
         this.universities = universities;
@@ -68,6 +69,7 @@ public class GuideService {
         this.schools = schools;
         this.campusImages = campusImages;
         this.mapper = mapper;
+        this.rules = rules;
     }
 
     @Transactional(readOnly = true)
@@ -123,7 +125,9 @@ public class GuideService {
         if (degree == null || degree.isEmpty()) {
             throw new ValidationException("degree is required");
         }
-        validateClassYear(req.classYear(), degree);
+        // TEMPORARY — request-only validation. Task 4 REPLACES this exact line with the
+        // merged-state version; the two must never coexist.
+        validateYears(req.entryYear(), req.classYear(), degree);
 
         GuideProfileEntity profile =
                 guides.findByUserId(user.getId())
@@ -346,38 +350,39 @@ public class GuideService {
     }
 
     /**
-     * Class year (expected graduation year) must, when present, be a 4-digit year inside a bounded
-     * window: 10 years back (recent alumni can guide) up to this year plus a per-degree buffer (a
-     * current student's remaining program length). Mirrors the client-side rule — defense in depth,
-     * since a direct API call bypasses the browser. Year granularity keeps term/quarter timing from
-     * ever making a year invalid.
+     * Range-checks both year fields (spec R1/R2). A null {@code entryYear} is a PATCH that is not
+     * touching it; the caller has already merged in the stored value, so a null reaching here means
+     * there is genuinely nothing to check — and {@code classYear} cannot be checked without it.
      */
-    private static void validateClassYear(String classYear, String degree) {
-        if (classYear == null || classYear.isBlank()) return;
+    private void validateYears(Integer entryYear, String classYear, String degree) {
+        if (entryYear != null) {
+            EnrollmentYearRules.YearRange entry = rules.entryYearRange();
+            if (entryYear < entry.min() || entryYear > entry.max()) {
+                throw new ValidationException(
+                        "entryYear must be between " + entry.min() + " and " + entry.max());
+            }
+        }
+        // null = "leave alone". BLANK is not the same thing and is rejected: treating "   " as
+        // absent makes a user who cleared the box get a silent no-op, and letting it through
+        // writes an empty string into class_year — a value that is neither a year nor null. The
+        // pre-existing code did the latter (`if (classYear != null) setClassYear(trim())`).
+        if (classYear == null) return;
+        if (classYear.isBlank()) {
+            throw new ValidationException("classYear must be a 4-digit year");
+        }
         String cy = classYear.trim();
         if (!cy.matches("\\d{4}")) {
             throw new ValidationException("classYear must be a 4-digit year");
         }
-        int year = Integer.parseInt(cy);
-        int current = Year.now().getValue();
-        int min = current - 10;
-        int max = current + gradYearBufferForDegree(degree);
-        if (year < min || year > max) {
-            throw new ValidationException("classYear must be between " + min + " and " + max);
+        if (entryYear == null) {
+            throw new ValidationException("entryYear is required to validate classYear");
         }
-    }
-
-    /**
-     * Upper-bound buffer (years past this year) for an expected graduation year, by degree level.
-     * Package-private so each per-level branch is unit-tested directly (see GuideServiceTest).
-     */
-    static int gradYearBufferForDegree(String degree) {
-        String t = degree == null ? "" : degree.toLowerCase();
-        if (t.contains("doctor") || t.contains("first professional")) return 9;
-        if (t.contains("master") || t.contains("post-baccalaureate")) return 3;
-        if (t.contains("bachelor")) return 6;
-        if (t.contains("associate") || t.contains("certificate") || t.contains("diploma")) return 3;
-        return 8;
+        EnrollmentYearRules.YearRange window = rules.classYearRange(entryYear, degree);
+        int year = Integer.parseInt(cy);
+        if (year < window.min() || year > window.max()) {
+            throw new ValidationException(
+                    "classYear must be between " + window.min() + " and " + window.max());
+        }
     }
 
     private GuideProfileResponse toResponse(GuideProfileEntity profile) {

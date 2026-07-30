@@ -30,7 +30,9 @@ import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.CampusToursLive.web.dto.GuideUniversityView;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -59,6 +61,18 @@ class GuideServiceTest {
     @Mock SchoolDirectory schools;
     private final CampusImageUrls campusImages = new CampusImageUrls("https://r2.example/");
 
+    /**
+     * Fixed at a single instant so the entryYear/classYear window tests are true regardless of what
+     * day this suite happens to run — see EnrollmentYearRulesTest for the same clock.
+     */
+    private static final Clock TEST_CLOCK =
+            Clock.fixed(Instant.parse("2026-07-29T12:00:00Z"), ZoneOffset.UTC);
+
+    private final EnrollmentYearRules rules = new EnrollmentYearRules(TEST_CLOCK);
+
+    /** A stable, always-valid university id for the entryYear/classYear tests below. */
+    private static final String UNIVERSITY_ID = UUID.randomUUID().toString();
+
     private GuideService service() {
         return new GuideService(
                 guides,
@@ -69,7 +83,8 @@ class GuideServiceTest {
                 roleGrant,
                 schools,
                 campusImages,
-                new ObjectMapper());
+                new ObjectMapper(),
+                rules);
     }
 
     private static UserEntity user(UUID id) {
@@ -123,6 +138,33 @@ class GuideServiceTest {
 
     private static RuntimeException badRequest(Runnable r) {
         return assertThrows(RuntimeException.class, r::run);
+    }
+
+    /** Defaults to a bachelor's degree — the common case for these tests. */
+    private static GuideProfileUpdateRequest guideRequestWith(Integer entryYear, String classYear) {
+        return guideRequestWith(entryYear, classYear, "Bachelor's Degree");
+    }
+
+    /**
+     * A complete, otherwise-valid guide profile request varying only the three inputs to the year
+     * rule. `degree` is one of them: it sets classYear's ceiling, so it belongs here rather than
+     * being fixed filler.
+     */
+    private static GuideProfileUpdateRequest guideRequestWith(
+            Integer entryYear, String classYear, String degree) {
+        return new GuideProfileUpdateRequest(
+                "Maya",
+                "Chen",
+                UNIVERSITY_ID,
+                "Marine Biology",
+                classYear,
+                "Third-year student and campus tour lead.",
+                List.of("en-US"),
+                List.of("DORM_HOUSING"),
+                "maya.chen@ncu.edu",
+                false,
+                degree,
+                entryYear);
     }
 
     // ---- updateProfile: field validation -------------------------------------------------
@@ -860,6 +902,8 @@ class GuideServiceTest {
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
 
+        // classYear is now anchored on entryYear (not on today), so an entryYear that puts 2026
+        // inside the Bachelor's window [entryYear+1, entryYear+6] must be supplied.
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
                         "Ada",
@@ -873,7 +917,7 @@ class GuideServiceTest {
                         null,
                         false,
                         "Bachelor's Degree",
-                        null);
+                        2023);
 
         service().updateProfile(u, r);
 
@@ -998,30 +1042,38 @@ class GuideServiceTest {
         assertInstanceOf(ValidationException.class, ex);
     }
 
+    /**
+     * classYear is anchored on entryYear now, not on today (see EnrollmentYearRules), so a
+     * "too-far-in-the-future" classYear must be expressed relative to a supplied entryYear rather
+     * than relative to the current year.
+     */
     @Test
     void update_422_whenClassYearOutOfRange() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
         when(universities.existsById(uni)).thenReturn(true);
-        String farFuture = String.valueOf(java.time.Year.now().getValue() + 50);
+        int entryYear = 2023;
+        String tooFarFuture =
+                String.valueOf(rules.classYearRange(entryYear, "Bachelor's Degree").max() + 1);
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
                         null,
                         null,
                         uni.toString(),
                         "CS",
-                        farFuture,
+                        tooFarFuture,
                         null,
                         null,
                         null,
                         null,
                         false,
                         "Bachelor's Degree",
-                        null);
+                        entryYear);
         var ex = badRequest(() -> service().updateProfile(user(uid), r));
         assertInstanceOf(ValidationException.class, ex);
     }
 
+    /** classYear within [entryYear+1, entryYear+6] (Bachelor's) is accepted. */
     @Test
     void update_acceptsValidClassYearWithinDegreeWindow() {
         UUID uid = UUID.randomUUID();
@@ -1030,7 +1082,8 @@ class GuideServiceTest {
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
         when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
-        String year = String.valueOf(java.time.Year.now().getValue() + 4); // within Bachelor's +6
+        int entryYear = 2023;
+        String year = String.valueOf(rules.classYearRange(entryYear, "Bachelor's Degree").min());
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
                         null,
@@ -1044,7 +1097,7 @@ class GuideServiceTest {
                         null,
                         false,
                         "Bachelor's Degree",
-                        null);
+                        entryYear);
 
         service().updateProfile(u, r);
 
@@ -1055,51 +1108,45 @@ class GuideServiceTest {
         assertEquals(year, captor.getValue().getClassYear());
     }
 
-    @Test
-    void gradYearBufferForDegree_mapsEachCredentialLevelAndDefault() {
-        assertEquals(9, GuideService.gradYearBufferForDegree("Doctoral Degree"));
-        assertEquals(9, GuideService.gradYearBufferForDegree("First Professional Degree"));
-        assertEquals(3, GuideService.gradYearBufferForDegree("Master's Degree"));
-        assertEquals(3, GuideService.gradYearBufferForDegree("Post-baccalaureate Certificate"));
-        assertEquals(6, GuideService.gradYearBufferForDegree("Bachelor's Degree"));
-        assertEquals(3, GuideService.gradYearBufferForDegree("Associate's Degree"));
-        assertEquals(3, GuideService.gradYearBufferForDegree("Undergraduate Certificate"));
-        assertEquals(3, GuideService.gradYearBufferForDegree("Diploma"));
-        assertEquals(8, GuideService.gradYearBufferForDegree("Some Other Credential"));
-    }
-
+    /**
+     * Below entryYear+1 is rejected — graduating in or before your own enrolment year is not a real
+     * case (see EnrollmentYearRules#classYearRange).
+     */
     @Test
     void update_422_whenClassYearBelowFloor() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
         when(universities.existsById(uni)).thenReturn(true);
-        String tooOld = String.valueOf(java.time.Year.now().getValue() - 20); // below the -10 floor
+        int entryYear = 2023;
+        String belowFloor =
+                String.valueOf(rules.classYearRange(entryYear, "Bachelor's Degree").min() - 1);
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
                         null,
                         null,
                         uni.toString(),
                         "CS",
-                        tooOld,
+                        belowFloor,
                         null,
                         null,
                         null,
                         null,
                         false,
                         "Bachelor's Degree",
-                        null);
+                        entryYear);
         var ex = badRequest(() -> service().updateProfile(user(uid), r));
         assertInstanceOf(ValidationException.class, ex);
     }
 
+    /**
+     * A blank classYear used to be silently accepted and stored as an empty string. It is now
+     * rejected outright — " " is neither "leave alone" (null) nor a year.
+     */
     @Test
-    void update_blankClassYearIsAcceptedWithoutRangeCheck() {
+    void update_blankClassYearIsRejected() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
-        UserEntity u = user(uid);
         when(universities.existsById(uni)).thenReturn(true);
-        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
-        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
                         null,
@@ -1114,13 +1161,100 @@ class GuideServiceTest {
                         false,
                         "Bachelor's Degree",
                         null);
+        var ex = badRequest(() -> service().updateProfile(user(uid), r));
+        assertInstanceOf(ValidationException.class, ex);
+    }
 
-        service().updateProfile(u, r);
+    // ---- updateProfile: entryYear range + classYear anchored on enrolment (CTL-97 Task 2) -----
 
-        ArgumentCaptor<GuideUniversityEntity> captor =
-                ArgumentCaptor.forClass(GuideUniversityEntity.class);
-        verify(guideUniversities).save(captor.capture());
-        assertEquals("", captor.getValue().getClassYear());
+    @Test
+    void updateProfile_rejectsEntryYearBelowTheFloor() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        GuideProfileUpdateRequest req =
+                guideRequestWith(/* entryYear */ 2015, /* classYear */ null);
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class, () -> service().updateProfile(user(uid), req));
+        assertTrue(ex.getMessage().contains("entryYear"));
+    }
+
+    @Test
+    void updateProfile_rejectsEntryYearAboveTheCeiling() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        GuideProfileUpdateRequest req = guideRequestWith(2028, null);
+        assertThrows(ValidationException.class, () -> service().updateProfile(user(uid), req));
+    }
+
+    @Test
+    void updateProfile_acceptsEntryYearExactlyAtBothBounds() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
+
+        service().updateProfile(user(uid), guideRequestWith(2016, null));
+        service().updateProfile(user(uid), guideRequestWith(2027, null));
+    }
+
+    @Test
+    void updateProfile_classYearIsAnchoredOnEntryYearNotToday() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
+
+        // entry 2023 + bachelor(6) → [2024, 2029].
+        service().updateProfile(user(uid), guideRequestWith(2023, "2024"));
+        service().updateProfile(user(uid), guideRequestWith(2023, "2029"));
+        assertThrows(
+                ValidationException.class,
+                () -> service().updateProfile(user(uid), guideRequestWith(2023, "2023")));
+        assertThrows(
+                ValidationException.class,
+                () -> service().updateProfile(user(uid), guideRequestWith(2023, "2030")));
+    }
+
+    /**
+     * Under the OLD current-year anchoring this passed: 2016 sits inside [currentYear-10,
+     * currentYear+6]. Anchored on enrolment it cannot — a 2025 enrollee did not graduate in 2016.
+     * This is the defect the re-anchoring exists to close.
+     */
+    @Test
+    void updateProfile_rejectsAGraduationYearBeforeEnrolment() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().updateProfile(user(uid), guideRequestWith(2025, "2016")));
+    }
+
+    @Test
+    void updateProfile_stillRejectsANonFourDigitClassYear() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().updateProfile(user(uid), guideRequestWith(2023, "24")));
+    }
+
+    /**
+     * A blank classYear is neither "leave alone" nor a year. Accepting it silently stored an empty
+     * string in class_year — a third state the rest of the system does not model.
+     */
+    @Test
+    void updateProfile_rejectsABlankClassYearRatherThanStoringAnEmptyString() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().updateProfile(user(uid), guideRequestWith(2023, "   ")));
     }
 
     @Test
@@ -1338,7 +1472,8 @@ class GuideServiceTest {
                         roleGrant,
                         schools,
                         campusImages,
-                        badMapper);
+                        badMapper,
+                        rules);
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
 
@@ -1380,7 +1515,8 @@ class GuideServiceTest {
                         roleGrant,
                         schools,
                         campusImages,
-                        badMapper);
+                        badMapper,
+                        rules);
         GuideProfileEntity profile = new GuideProfileEntity();
         profile.setSpokenLanguages("[\"en-US\"]"); // non-blank → readValue invoked → throws → []
         profile.setTourTopics("[\"GENERAL_CAMPUS\"]");
