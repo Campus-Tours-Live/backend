@@ -3,10 +3,14 @@ package com.CampusToursLive.web;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.CampusToursLive.domain.guide.EnrollmentYearRules;
 import com.CampusToursLive.domain.tour.TourFeatureCatalog;
 import com.CampusToursLive.domain.tour.TourTopic;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.web.MetaController.Option;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -44,9 +48,14 @@ class MetaControllerTest {
                 }
             };
 
+    /** These tests don't exercise the enrolment-year endpoint; a fixed clock is enough. */
+    private static final EnrollmentYearRules RULES =
+            new EnrollmentYearRules(
+                    Clock.fixed(Instant.parse("2026-07-29T12:00:00Z"), ZoneOffset.UTC));
+
     @Test
     void tourTopics_exposesEveryTopicByName() {
-        List<Option> topics = new MetaController(SCHOOLS).tourTopics().data();
+        List<Option> topics = new MetaController(SCHOOLS, RULES).tourTopics().data();
 
         assertEquals(TourTopic.values().length, topics.size());
         List<String> values = topics.stream().map(Option::value).toList();
@@ -57,7 +66,7 @@ class MetaControllerTest {
 
     @Test
     void tourTopics_mapsKnownTopicsToLabels() {
-        List<Option> topics = new MetaController(SCHOOLS).tourTopics().data();
+        List<Option> topics = new MetaController(SCHOOLS, RULES).tourTopics().data();
         Option general =
                 topics.stream()
                         .filter(o -> o.value().equals(TourTopic.GENERAL_CAMPUS.name()))
@@ -68,7 +77,8 @@ class MetaControllerTest {
 
     @Test
     void tourFeatures_exposesTenLabelledOptionsPerTopic() {
-        Map<String, List<Option>> byTopic = new MetaController(SCHOOLS).tourFeatures().data();
+        Map<String, List<Option>> byTopic =
+                new MetaController(SCHOOLS, RULES).tourFeatures().data();
 
         assertEquals(TourTopic.values().length, byTopic.size());
         for (TourTopic topic : TourTopic.values()) {
@@ -84,7 +94,7 @@ class MetaControllerTest {
 
     @Test
     void languages_exposeEnglishDisplayNames() {
-        List<Option> langs = new MetaController(SCHOOLS).languages().data();
+        List<Option> langs = new MetaController(SCHOOLS, RULES).languages().data();
         assertTrue(langs.size() >= 5);
         Option zh = langs.stream().filter(o -> o.value().equals("zh")).findFirst().orElseThrow();
         assertEquals("Chinese", zh.label());
@@ -94,7 +104,7 @@ class MetaControllerTest {
 
     @Test
     void universities_delegatesToTheLiveDirectory() {
-        List<Option> results = new MetaController(SCHOOLS).universities("stanford").data();
+        List<Option> results = new MetaController(SCHOOLS, RULES).universities("stanford").data();
         assertEquals(1, results.size());
         assertEquals("243744", results.get(0).value());
         assertTrue(results.get(0).label().startsWith("Stanford"));
@@ -102,13 +112,13 @@ class MetaControllerTest {
 
     @Test
     void majors_delegatesToTheLiveDirectory() {
-        List<Option> results = new MetaController(SCHOOLS).majors("243744").data();
+        List<Option> results = new MetaController(SCHOOLS, RULES).majors("243744").data();
         assertEquals("Computer Science", results.get(0).label());
     }
 
     @Test
     void degrees_delegatesToTheLiveDirectory() {
-        List<Option> results = new MetaController(SCHOOLS).degrees("243744").data();
+        List<Option> results = new MetaController(SCHOOLS, RULES).degrees("243744").data();
         assertEquals("Bachelor's Degree", results.get(0).label());
     }
 }

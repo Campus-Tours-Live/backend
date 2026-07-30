@@ -374,4 +374,17 @@ public interface ApiExamples {
                     + "\"endAt\":\"2026-07-14T11:00:00Z\"}],"
                     + META
                     + "}";
+
+    // --- Enrolment-year rules (CTL-97) ---
+
+    String ENROLLMENT_YEARS =
+            "{\"data\":{\"entryYear\":{\"min\":2016,\"max\":2027},"
+                    + "\"maxYearsToGraduate\":["
+                    + "{\"matches\":[\"doctor\",\"first professional\"],\"years\":9},"
+                    + "{\"matches\":[\"master\",\"post-baccalaureate\"],\"years\":3},"
+                    + "{\"matches\":[\"bachelor\"],\"years\":6},"
+                    + "{\"matches\":[\"associate\",\"certificate\",\"diploma\"],\"years\":3}],"
+                    + "\"defaultMaxYearsToGraduate\":8},"
+                    + META
+                    + "}";
 }
