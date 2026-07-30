@@ -5,7 +5,7 @@ import com.CampusToursLive.domain.guide.GuideService;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
-import com.CampusToursLive.web.dto.GuideDashboardStatsResponse;
+import com.CampusToursLive.web.dto.GuideEarningsResponse;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.CampusToursLive.web.dto.Problem;
@@ -105,18 +105,17 @@ public class GuideController {
     }
 
     @Operation(
-            summary = "Get guide dashboard stats",
+            summary = "Get guide earnings",
             description =
-                    "Returns the guide's aggregate rating, this-month earnings, and upcoming payout"
-                            + " from confirmed tours — the three stats shown on the guide dashboard"
-                            + " summary row.")
+                    "Returns the guide's this-month earnings and upcoming payout from confirmed"
+                            + " tours. Returns zero values when the guide has no bookings.")
     @ApiResponse(
             responseCode = "200",
-            description = "The guide's dashboard stats snapshot.",
+            description = "The guide's earnings snapshot.",
             content =
                     @Content(
                             mediaType = "application/json",
-                            examples = @ExampleObject(value = ApiExamples.GUIDE_DASHBOARD_STATS)))
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_EARNINGS)))
     @ApiResponse(
             responseCode = "401",
             description = "No valid principal / account not provisioned.",
@@ -125,16 +124,8 @@ public class GuideController {
                             mediaType = "application/json",
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
-    @ApiResponse(
-            responseCode = "404",
-            description = "The caller has not started guide onboarding.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(implementation = Problem.class),
-                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
-    @GetMapping("/dashboard/stats")
-    public ApiEnvelope<GuideDashboardStatsResponse> getDashboardStats() {
-        return ApiEnvelope.of(guideEarningsService.getStats(currentUser.require()));
+    @GetMapping("/earnings")
+    public ApiEnvelope<GuideEarningsResponse> getEarnings() {
+        return ApiEnvelope.of(guideEarningsService.getEarnings(currentUser.require()));
     }
 }

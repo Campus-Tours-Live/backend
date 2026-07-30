@@ -133,4 +133,34 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
                             + "AND b.status IN ('CONFIRMED', 'IN_PROGRESS')",
             nativeQuery = true)
     long sumGuideUpcomingPayout(@Param("guideId") UUID guideId);
+
+    /**
+     * Variant of {@link #sumGuideEarningsThisMonth} that accepts the guide's user UUID directly,
+     * joining through guide_profiles. Lets {@link
+     * com.CampusToursLive.domain.guide.GuideEarningsService} avoid a separate profile lookup.
+     */
+    @Query(
+            value =
+                    "SELECT COALESCE(SUM(b.guide_amount_cents), 0) FROM bookings b "
+                            + "JOIN guide_profiles gp ON gp.id = b.guide_id "
+                            + "WHERE gp.user_id = :userId "
+                            + "AND b.status = 'COMPLETED' "
+                            + "AND b.completed_at >= :from "
+                            + "AND b.completed_at < :to",
+            nativeQuery = true)
+    long sumGuideEarningsThisMonthByUserId(
+            @Param("userId") UUID userId, @Param("from") Instant from, @Param("to") Instant to);
+
+    /**
+     * Variant of {@link #sumGuideUpcomingPayout} that accepts the guide's user UUID directly,
+     * joining through guide_profiles.
+     */
+    @Query(
+            value =
+                    "SELECT COALESCE(SUM(b.guide_amount_cents), 0) FROM bookings b "
+                            + "JOIN guide_profiles gp ON gp.id = b.guide_id "
+                            + "WHERE gp.user_id = :userId "
+                            + "AND b.status IN ('CONFIRMED', 'IN_PROGRESS')",
+            nativeQuery = true)
+    long sumGuideUpcomingPayoutByUserId(@Param("userId") UUID userId);
 }

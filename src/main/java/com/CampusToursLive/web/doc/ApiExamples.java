@@ -114,9 +114,8 @@ public interface ApiExamples {
                     + META
                     + "}";
 
-    String GUIDE_DASHBOARD_STATS =
-            "{\"data\":{\"avgRating\":4.5,\"reviewCount\":12,"
-                    + "\"earningsThisMonthCents\":8400,\"upcomingPayoutCents\":4200,"
+    String GUIDE_EARNINGS =
+            "{\"data\":{\"earningsThisMonthCents\":8400,\"upcomingPayoutCents\":4200,"
                     + "\"currency\":\"USD\"},"
                     + META
                     + "}";
@@ -133,7 +132,8 @@ public interface ApiExamples {
                     + "\"languages\":[\"en-US\",\"zh-CN\"],\"specialties\":[\"DORM_HOUSING\"],"
                     + "\"basePriceCents\":4200,\"currency\":\"USD\","
                     + "\"applicationStatus\":\"APPROVED\",\"verificationStatus\":\"VERIFIED\","
-                    + "\"degree\":\"Bachelor's Degree\"},"
+                    + "\"degree\":\"Bachelor's Degree\","
+                    + "\"avgRating\":4.5,\"reviewCount\":12},"
                     + META
                     + "}";
 

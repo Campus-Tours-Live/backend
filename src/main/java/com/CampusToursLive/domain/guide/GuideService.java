@@ -391,7 +391,9 @@ public class GuideService {
                         : (profile.getVerificationStatus() != null
                                 ? profile.getVerificationStatus().name()
                                 : null),
-                profile == null ? null : profile.getDegree());
+                profile == null ? null : profile.getDegree(),
+                profile == null ? null : profile.getAvgRating(),
+                profile == null ? 0 : profile.getReviewCount());
     }
 
     private List<String> readArray(String json) {

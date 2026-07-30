@@ -1,6 +1,7 @@
 package com.CampusToursLive.web.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -116,4 +117,16 @@ public record GuideProfileResponse(
                                         + " title from GET /v1/meta/degrees).",
                         example = "Bachelor's Degree",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String degree) {}
+                String degree,
+        @Schema(
+                        description =
+                                "Average rating across all published reviews. Null when the guide"
+                                        + " has no reviews yet.",
+                        example = "4.5",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                BigDecimal avgRating,
+        @Schema(
+                        description = "Total published review count.",
+                        example = "12",
+                        requiredMode = Schema.RequiredMode.REQUIRED)
+                int reviewCount) {}

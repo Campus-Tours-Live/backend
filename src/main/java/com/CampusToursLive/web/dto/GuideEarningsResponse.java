@@ -1,27 +1,14 @@
 package com.CampusToursLive.web.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.math.BigDecimal;
 
-/** Dashboard stats snapshot for a guide: rating, monthly earnings, and upcoming payout. */
+/** Earnings snapshot for a guide: this-month earnings and upcoming payout from confirmed tours. */
 @Schema(
-        name = "GuideDashboardStatsResponse",
+        name = "GuideEarningsResponse",
         description =
-                "Snapshot stats for the guide dashboard — aggregate rating, this-month earnings,"
-                        + " and upcoming payout from confirmed tours.")
-public record GuideDashboardStatsResponse(
-        @Schema(
-                        description =
-                                "Average rating across all published reviews. Null when the guide"
-                                        + " has no reviews yet.",
-                        example = "4.5",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                BigDecimal avgRating,
-        @Schema(
-                        description = "Total published review count.",
-                        example = "12",
-                        requiredMode = Schema.RequiredMode.REQUIRED)
-                int reviewCount,
+                "Guide earnings snapshot — this-month earnings and upcoming payout from confirmed"
+                        + " tours.")
+public record GuideEarningsResponse(
         @Schema(
                         description =
                                 "Sum of guide_amount_cents for tours COMPLETED in the current UTC"

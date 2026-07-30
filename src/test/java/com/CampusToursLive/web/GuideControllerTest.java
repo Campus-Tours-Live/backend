@@ -7,7 +7,7 @@ import com.CampusToursLive.domain.guide.GuideEarningsService;
 import com.CampusToursLive.domain.guide.GuideService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.security.CurrentUser;
-import com.CampusToursLive.web.dto.GuideDashboardStatsResponse;
+import com.CampusToursLive.web.dto.GuideEarningsResponse;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import org.junit.jupiter.api.Test;
@@ -34,11 +34,11 @@ class GuideControllerTest {
     private static GuideProfileResponse profileResponse() {
         return new GuideProfileResponse(
                 "uid", null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null);
+                null, null, null, null, null, null, 0);
     }
 
-    private static GuideDashboardStatsResponse statsResponse() {
-        return new GuideDashboardStatsResponse(null, 0, 0L, 0L, "USD");
+    private static GuideEarningsResponse earningsResponse() {
+        return new GuideEarningsResponse(0L, 0L, "USD");
     }
 
     @Test
@@ -65,12 +65,12 @@ class GuideControllerTest {
     }
 
     @Test
-    void getDashboardStats_delegatesAndWrapsInEnvelope() {
+    void getEarnings_delegatesAndWrapsInEnvelope() {
         UserEntity u = new UserEntity();
-        GuideDashboardStatsResponse stats = statsResponse();
+        GuideEarningsResponse earnings = earningsResponse();
         when(currentUser.require()).thenReturn(u);
-        when(guideEarningsService.getStats(u)).thenReturn(stats);
+        when(guideEarningsService.getEarnings(u)).thenReturn(earnings);
 
-        assertSame(stats, controller().getDashboardStats().data());
+        assertSame(earnings, controller().getEarnings().data());
     }
 }
