@@ -1402,6 +1402,143 @@ class GuideServiceTest {
         verify(guideUniversities, never()).save(any());
     }
 
+    // ---- updateProfile: the entryYear window applies to a NEW value, not a stored one ----------
+
+    /**
+     * Wires the mocks so {@code updateProfile} sees an already-stored {@code guide_universities}
+     * row for {@link #UNIVERSITY_ID} carrying {@code storedEntryYear} / {@code storedClassYear}.
+     *
+     * <p>Built directly rather than by calling {@code updateProfile} first (as {@link
+     * #stubStoredState}) does, because the state these tests are about — an entry year that has
+     * since aged out of the window — is precisely the state {@code updateProfile} refuses to write.
+     * A real database holds plenty of it: every row was in range on the day it was saved.
+     */
+    private void stubStoredYears(UUID uid, Integer storedEntryYear, String storedClassYear) {
+        GuideProfileEntity storedProfile = new GuideProfileEntity();
+        storedProfile.setId(UUID.randomUUID());
+        storedProfile.setUserId(uid);
+        GuideUniversityEntity row = new GuideUniversityEntity();
+        row.setId(UUID.randomUUID());
+        row.setGuideProfileId(storedProfile.getId());
+        row.setUniversityId(UUID.fromString(UNIVERSITY_ID));
+        row.setEntryYear(storedEntryYear);
+        row.setClassYear(storedClassYear);
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(storedProfile));
+        when(guideUniversities.findByGuideProfileId(storedProfile.getId()))
+                .thenReturn(List.of(row));
+    }
+
+    /** One year older than the floor — derived, so it stays "aged out" if TEST_CLOCK is revised. */
+    private int agedOutEntryYear() {
+        return rules.entryYearRange().min() - 1;
+    }
+
+    /**
+     * THE BUG. The window {@code [serverYear − 10, serverYear + 1]} advances every 1 January; a
+     * stored entry year does not. The edit form now sends every server-required field on every
+     * PATCH, so a guide who enrolled 11+ years ago resends their own true, previously-accepted year
+     * — and, before this fix, was told it "must be between …" and could not save any profile change
+     * at all, with classYear disabled beside it and no way out.
+     */
+    @Test
+    void updateProfile_resendingAStoredEntryYearThatHasAgedOut_isAccepted() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        int agedOut = agedOutEntryYear();
+        stubStoredYears(uid, agedOut, null);
+
+        assertDoesNotThrow(
+                () -> service().updateProfile(user(uid), guideRequestWith(agedOut, null)));
+    }
+
+    /** The same stored value, this time simply not mentioned by the request. */
+    @Test
+    void updateProfile_omittingAnAgedOutStoredEntryYear_isAccepted() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        stubStoredYears(uid, agedOutEntryYear(), null);
+
+        assertDoesNotThrow(() -> service().updateProfile(user(uid), guideRequestWith(null, null)));
+    }
+
+    /**
+     * The exemption is for a value that is already stored, not for the number itself: with no row
+     * to carry it, an aged-out year is a NEW value and the window still applies. Onboarding must
+     * not become the way to put an out-of-window year into the database.
+     */
+    @Test
+    void updateProfile_supplyingAnAgedOutEntryYearWithNothingStored_isStillRejected() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () ->
+                                service()
+                                        .updateProfile(
+                                                user(uid),
+                                                guideRequestWith(agedOutEntryYear(), null)));
+        assertTrue(ex.getMessage().contains("entryYear"));
+        verify(guideUniversities, never()).save(any());
+    }
+
+    /** A genuine edit is a new value, wherever it started from. */
+    @Test
+    void updateProfile_editingAValidStoredEntryYearToAnOutOfWindowOne_isStillRejected() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        stubStoredYears(uid, VALID_ENTRY_YEAR, null);
+
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .updateProfile(
+                                        user(uid), guideRequestWith(agedOutEntryYear(), null)));
+    }
+
+    /** Being exempt does not freeze the field: an aged-out row can still be corrected. */
+    @Test
+    void updateProfile_editingAnAgedOutStoredEntryYearToAnInWindowOne_isAccepted() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        stubStoredYears(uid, agedOutEntryYear(), null);
+        int inWindow = rules.entryYearRange().min();
+
+        assertDoesNotThrow(
+                () -> service().updateProfile(user(uid), guideRequestWith(inWindow, null)));
+    }
+
+    /**
+     * Scope: the exemption covers the entry-year WINDOW only. classYear's window is still derived
+     * from the merged entry year, so an aged-out enrolment simply yields a graduation window in the
+     * past — correct, and still enforced in both directions.
+     */
+    @Test
+    void updateProfile_classYearIsStillCheckedAgainstAnExemptStoredEntryYear() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        int agedOut = agedOutEntryYear();
+        stubStoredYears(uid, agedOut, null);
+        EnrollmentYearRules.YearRange window = rules.classYearRange(agedOut, "Bachelor's Degree");
+
+        assertDoesNotThrow(
+                () ->
+                        service()
+                                .updateProfile(
+                                        user(uid),
+                                        guideRequestWith(agedOut, String.valueOf(window.max()))));
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .updateProfile(
+                                        user(uid),
+                                        guideRequestWith(
+                                                agedOut, String.valueOf(window.max() + 1))));
+    }
+
     @Test
     void update_422_whenFirstNameHasInvalidCharacters() {
         // A digit in the name → NameRules rejects before any other field is looked at.

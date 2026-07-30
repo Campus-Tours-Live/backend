@@ -23,6 +23,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -160,8 +161,10 @@ public class GuideService {
         Integer mergedEntryYear = req.entryYear() != null ? req.entryYear() : storedEntryYear;
         String mergedClassYear = req.classYear() != null ? req.classYear() : storedClassYear;
         // Replaces Task 2's request-only call. There is exactly ONE validateYears call in this
-        // method when this task is done.
-        validateYears(mergedEntryYear, mergedClassYear, degree);
+        // method when this task is done. storedEntryYear rides along so validateYears can tell a
+        // newly supplied entry year from one that is merely being carried forward — see its
+        // javadoc.
+        validateYears(mergedEntryYear, storedEntryYear, mergedClassYear, degree);
         // entryYear is REQUIRED on the row that is about to be written, and the merge above is not
         // enough to guarantee one. The reachable path: a guide who already holds GUIDE PATCHes with
         // a universityId they have no guide_universities row for — the multi-school case, not a
@@ -399,9 +402,31 @@ public class GuideService {
      * Range-checks both year fields (spec R1/R2). A null {@code entryYear} is a PATCH that is not
      * touching it; the caller has already merged in the stored value, so a null reaching here means
      * there is genuinely nothing to check — and {@code classYear} cannot be checked without it.
+     *
+     * <p><b>The entry-year window applies to a NEWLY SUPPLIED value, not to one that is already
+     * stored</b> (spec D1a). {@code storedEntryYear} is the value currently on the {@code
+     * guide_universities} row (null when there is no row yet), and this comparison is the ONE place
+     * that decides whether the window is enforced. The reason: the window is {@code [serverYear −
+     * 10, serverYear + 1]} and it ADVANCES every 1 January, while a stored entry year does not. Any
+     * stored value therefore ages out of it within ten years. Re-measuring an unchanged value
+     * against a window that has moved underneath it locks the guide out of saving ANY profile
+     * change — the edit form sends every server-required field on every PATCH, so the year comes
+     * back on requests that are not about it — and the rejection is about a fact that is true and
+     * was in range on the day it was entered.
+     *
+     * <p>Skipping the check when nothing changed does not open a way in: setting a value is always
+     * a difference (onboarding compares against a null stored value; a real edit against the old
+     * one), so an out-of-window year can never be WRITTEN — an existing one merely survives.
+     * Compared with {@link Objects#equals} because these are boxed {@code Integer}s: {@code ==}
+     * would hold inside the {@code -128..127} cache and fail for every real year.
+     *
+     * <p>Scope: this exemption is for the entry-year window ONLY. {@code classYear} is still
+     * checked against the window derived from the merged entry year, exactly as before — an
+     * aged-out enrolment simply yields a graduation window that lies in the past, which is correct.
      */
-    private void validateYears(Integer entryYear, String classYear, String degree) {
-        if (entryYear != null) {
+    private void validateYears(
+            Integer entryYear, Integer storedEntryYear, String classYear, String degree) {
+        if (entryYear != null && !Objects.equals(entryYear, storedEntryYear)) {
             EnrollmentYearRules.YearRange entry = rules.entryYearRange();
             if (entryYear < entry.min() || entryYear > entry.max()) {
                 throw new ValidationException(
