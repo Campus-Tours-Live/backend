@@ -1,5 +1,6 @@
 package com.CampusToursLive.domain.guide;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -36,8 +37,11 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -1611,5 +1615,115 @@ class GuideServiceTest {
 
         assertEquals(List.of(), res.spokenLanguages());
         assertEquals(List.of(), res.tourTopics());
+    }
+
+    // ---- I1: the published rules and the enforced windows cannot disagree (CTL-97 Task 7) -----
+
+    /**
+     * I1: every boundary the endpoint PUBLISHES is a boundary GuideService ENFORCES.
+     *
+     * <p>Deliberately drives the SERVICE, not the rules component. Re-deriving a window from the
+     * same component it came from proves only that a method is consistent with itself, and would
+     * keep passing if the service had its own hardcoded copy — the exact defect this design
+     * removes.
+     *
+     * <p>Nested here (rather than a standalone {@code EnrollmentYearRulesAgreementTest}) so it
+     * reads the outer class's {@code TEST_CLOCK}-backed {@code rules}, {@code service()}, {@code
+     * user(uid)}, and {@code guideRequestWith(...)} fixtures directly instead of duplicating them
+     * into a second file that could drift out of sync with this one.
+     */
+    @Nested
+    class PublishedRulesAgreeWithEnforcedWindows {
+
+        /**
+         * One case per real credential title the Scorecard vocabulary produces, run as a
+         * {@code @ParameterizedTest} rather than a {@code for} loop over a shared instance: each
+         * invocation gets its own fresh JUnit test instance, and therefore fresh {@code @Mock}
+         * repositories (see {@link GuideServiceTest} field declarations). A plain loop would reuse
+         * the same mocks across degrees, so whatever an {@code assertThrows} case above it left
+         * behind — an incremented version, a captured save, a stubbed lookup — would leak into the
+         * next degree's assertions. This design requires validate-before-mutate (Task 4); a test
+         * that only passes because a previous iteration happened to leave compatible state proves
+         * nothing about the boundary it claims to check. Parameterizing also names the failing
+         * degree instead of aborting the whole run at the first mismatch.
+         */
+        @ParameterizedTest(name = "{0}")
+        @ValueSource(
+                strings = {
+                    "Doctoral Degree",
+                    "First Professional Degree",
+                    "Master's Degree",
+                    "Post-baccalaureate Certificate",
+                    "Bachelor's Degree",
+                    "Associate's Degree",
+                    "Undergraduate Certificate",
+                    "Diploma",
+                    "Some Other Credential"
+                })
+        void theServiceAcceptsExactlyTheWindowTheRulesPublish(String degree) {
+            UUID uid = UUID.randomUUID();
+            when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+            GuideService svc = service();
+            UserEntity actor = user(uid);
+
+            // Same rules instance the endpoint serves from, on the fixed TEST_CLOCK.
+            EnrollmentYearRules.YearRange entry = rules.entryYearRange();
+            // DERIVED, not a literal: a hardcoded year would drift out of the window as years
+            // pass and turn this test red for a reason that has nothing to do with the boundary
+            // it checks. One below the ceiling leaves room on both sides forever.
+            int entryYear = entry.max() - 1;
+            EnrollmentYearRules.YearRange w = rules.classYearRange(entryYear, degree);
+
+            assertDoesNotThrow(
+                    () ->
+                            svc.updateProfile(
+                                    actor,
+                                    guideRequestWith(entryYear, String.valueOf(w.min()), degree)),
+                    degree + " should accept its published min " + w.min());
+            assertDoesNotThrow(
+                    () ->
+                            svc.updateProfile(
+                                    actor,
+                                    guideRequestWith(entryYear, String.valueOf(w.max()), degree)),
+                    degree + " should accept its published max " + w.max());
+            assertThrows(
+                    ValidationException.class,
+                    () ->
+                            svc.updateProfile(
+                                    actor,
+                                    guideRequestWith(
+                                            entryYear, String.valueOf(w.min() - 1), degree)),
+                    degree + " should reject one below its published min");
+            assertThrows(
+                    ValidationException.class,
+                    () ->
+                            svc.updateProfile(
+                                    actor,
+                                    guideRequestWith(
+                                            entryYear, String.valueOf(w.max() + 1), degree)),
+                    degree + " should reject one above its published max");
+        }
+
+        /**
+         * The entryYear window itself (not per-degree), at both published edges and one outside
+         * each.
+         */
+        @Test
+        void theServiceAcceptsExactlyTheEntryYearWindowTheRulesPublish() {
+            when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+            GuideService svc = service();
+            UserEntity actor = user(UUID.randomUUID());
+
+            EnrollmentYearRules.YearRange entry = rules.entryYearRange();
+
+            assertDoesNotThrow(() -> svc.updateProfile(actor, guideRequestWith(entry.min(), null)));
+            assertDoesNotThrow(() -> svc.updateProfile(actor, guideRequestWith(entry.max(), null)));
+            assertThrows(
+                    ValidationException.class,
+                    () -> svc.updateProfile(actor, guideRequestWith(entry.min() - 1, null)));
+            assertThrows(
+                    ValidationException.class,
+                    () -> svc.updateProfile(actor, guideRequestWith(entry.max() + 1, null)));
+        }
     }
 }
