@@ -9,7 +9,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.CampusToursLive.domain.onboarding.OnboardingService;
-import com.CampusToursLive.domain.user.AccountStatus;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
@@ -99,11 +98,7 @@ class OnboardingControllerTest {
                         List.of("en-US"),
                         List.of("DORM_HOUSING"));
         return new OnboardingResponse(
-                AccountStatus.ACTIVE,
-                userSummary(),
-                List.of(UserRole.GUIDE),
-                UserRole.GUIDE,
-                profile);
+                userSummary(), List.of(UserRole.GUIDE), UserRole.GUIDE, profile);
     }
 
     private static OnboardingResponse participantOnboardingResponse() {
@@ -120,11 +115,7 @@ class OnboardingControllerTest {
                         null,
                         null);
         return new OnboardingResponse(
-                AccountStatus.ACTIVE,
-                userSummary(),
-                List.of(UserRole.PARTICIPANT),
-                UserRole.PARTICIPANT,
-                profile);
+                userSummary(), List.of(UserRole.PARTICIPANT), UserRole.PARTICIPANT, profile);
     }
 
     private static String guideBody() {
@@ -172,7 +163,8 @@ class OnboardingControllerTest {
                                 .content(guideBody())
                                 .with(jwt()))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.accountState").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.accountState").doesNotExist())
+                .andExpect(jsonPath("$.data.user.accountStatus").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.user.id").value(USER_ID))
                 .andExpect(jsonPath("$.data.roles[0]").value("GUIDE"))
                 .andExpect(jsonPath("$.data.acquiredRole").value("GUIDE"))
@@ -253,7 +245,8 @@ class OnboardingControllerTest {
                                 .content(participantBody())
                                 .with(jwt()))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.accountState").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.accountState").doesNotExist())
+                .andExpect(jsonPath("$.data.user.accountStatus").value("ACTIVE"))
                 .andExpect(jsonPath("$.data.user.id").value(USER_ID))
                 .andExpect(jsonPath("$.data.roles[0]").value("PARTICIPANT"))
                 .andExpect(jsonPath("$.data.acquiredRole").value("PARTICIPANT"))

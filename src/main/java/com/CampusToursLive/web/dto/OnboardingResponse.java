@@ -1,6 +1,5 @@
 package com.CampusToursLive.web.dto;
 
-import com.CampusToursLive.domain.user.AccountStatus;
 import com.CampusToursLive.domain.user.UserRole;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
@@ -21,12 +20,10 @@ import java.util.List;
                         + " profile were created in one call. No currentRole — that is bff-owned.")
 public record OnboardingResponse(
         @Schema(
-                        description = "Account-level lifecycle state.",
-                        example = "ACTIVE",
-                        requiredMode = Schema.RequiredMode.REQUIRED)
-                AccountStatus accountState,
-        @Schema(
-                        description = "Account-level identity.",
+                        description =
+                                "Account-level identity (includes the account lifecycle status as"
+                                        + " user.accountStatus — there is no separate top-level"
+                                        + " lifecycle field).",
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 UserSummary user,
         @Schema(

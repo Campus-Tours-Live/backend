@@ -218,7 +218,9 @@ class OnboardingServiceTest {
         assertThat(response.acquiredRole()).isEqualTo(UserRole.GUIDE);
         assertThat(response.roles()).containsExactly(UserRole.GUIDE);
         assertThat(response.profile()).isSameAs(profileResponse);
-        assertThat(response.accountState()).isEqualTo(AccountStatus.ACTIVE);
+        // The account lifecycle status now lives ONLY on user.accountStatus (the redundant
+        // top-level accountState was removed) — assert it's still surfaced, from user.
+        assertThat(response.user().accountStatus()).isEqualTo("ACTIVE");
         assertThat(response.user().id()).isEqualTo(userId.toString());
     }
 

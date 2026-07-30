@@ -259,7 +259,6 @@ public class OnboardingService {
     private static OnboardingResponse buildResponse(
             LockedOnboardingState state, UserRole acquiredRole, Object profile) {
         return new OnboardingResponse(
-                state.user().getAccountStatus(),
                 UserSummary.of(state.user()),
                 rolesInFixedOrder(state.roles()),
                 acquiredRole,
