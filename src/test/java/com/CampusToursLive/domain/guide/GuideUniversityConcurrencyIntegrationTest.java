@@ -161,14 +161,26 @@ class GuideUniversityConcurrencyIntegrationTest {
                 hasCause(loser, OptimisticLockingFailureException.class),
                 "loser must fail on optimistic locking, but was: " + loser);
 
-        // And what landed is a legal pair — this is the assertion the whole task exists for.
+        // The two assertions above are the load-bearing ones: the exclusive-or (exactly one writer
+        // must lose) and the cause-chain check (it lost with OptimisticLockingFailureException
+        // specifically). What follows is NOT "the assertion the whole task exists for" — without
+        // @DynamicUpdate the winner writes every column from its own consistent snapshot, so the
+        // surviving pair is legal by construction and a legality check alone could not fail.
+        //
+        // What it CAN catch is the winner's edit not landing at all: a bug that rolled both
+        // transactions back while still bumping the version would satisfy everything above. So
+        // assert the exact surviving row is one of the two intended outcomes — A's (entryYear 2023
+        // over the stored classYear 2024) or B's (classYear 2021 over the stored entryYear 2020).
+        // Naming the outcomes also keeps the bachelor's-window arithmetic out of this file; a
+        // hardcoded `entry + 6` here would be a second copy of a rule that lives in
+        // EnrollmentYearRules, which is exactly the drift invariant I1 forbids.
         GuideUniversityEntity row = reloadGuideUniversity();
-        int entry = row.getEntryYear();
-        if (row.getClassYear() != null) {
-            int cls = Integer.parseInt(row.getClassYear());
-            assertTrue(cls >= entry + 1, "classYear " + cls + " precedes entryYear " + entry);
-            assertTrue(cls <= entry + 6, "classYear " + cls + " beyond the bachelor window");
-        }
+        String survivor = row.getEntryYear() + "/" + row.getClassYear();
+        assertTrue(
+                survivor.equals("2023/2024") || survivor.equals("2020/2021"),
+                "the winner's edit must have landed: expected 2023/2024 (A won) or 2020/2021"
+                        + " (B won), but the row holds "
+                        + survivor);
         assertEquals(1L, row.getVersion());
     }
 

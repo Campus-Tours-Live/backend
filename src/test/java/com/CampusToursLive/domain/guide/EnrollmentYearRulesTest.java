@@ -7,6 +7,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.Locale;
 import org.junit.jupiter.api.Test;
 
 class EnrollmentYearRulesTest {
@@ -55,6 +56,38 @@ class EnrollmentYearRulesTest {
         EnrollmentYearRules r = at(MID_2026);
         assertEquals(6, r.maxYearsToGraduate("  BACHELOR'S DEGREE  "));
         assertEquals(6, r.maxYearsToGraduate("bachelor's degree"));
+    }
+
+    /**
+     * Spec §8: the {@code Locale.ROOT} in {@code maxYearsToGraduate} is load-bearing, not defensive
+     * decoration, and this is the only case that can tell the difference. Turkish maps uppercase
+     * {@code I} to a DOTLESS {@code ı}, so a naive default-locale {@code toLowerCase()} turns
+     * "FIRST PROFESSIONAL DEGREE" into "fırst professıonal degree" and "DIPLOMA" into "dıploma" —
+     * neither contains its keyword any more, so both fall through to the default 8 instead of 9 and
+     * 3. The case-insensitivity test above cannot catch that: none of its strings carry an {@code
+     * I}.
+     *
+     * <p>Casing matters as much as the locale — a lowercase "First Professional Degree" is
+     * unaffected by the Turkish mapping (only the uppercase {@code I} is remapped), so the inputs
+     * here are deliberately uppercase.
+     *
+     * <p>{@code Locale.setDefault} is JVM-global and surefire reuses the JVM across classes, so the
+     * restore lives in a {@code finally}: leaking a Turkish default out of this method would make
+     * unrelated tests elsewhere in the suite fail in ways that point nowhere near here. Done with
+     * plain try/finally rather than a locale JUnit extension so this adds no test dependency.
+     */
+    @Test
+    void maxYearsToGraduate_usesLocaleRoot_soATurkishDefaultCannotBreakIBearingKeywords() {
+        Locale original = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            EnrollmentYearRules r = at(MID_2026);
+            assertEquals(9, r.maxYearsToGraduate("FIRST PROFESSIONAL DEGREE"));
+            assertEquals(3, r.maxYearsToGraduate("DIPLOMA"));
+            assertEquals(3, r.maxYearsToGraduate("UNDERGRADUATE CERTIFICATE"));
+        } finally {
+            Locale.setDefault(original);
+        }
     }
 
     /**
