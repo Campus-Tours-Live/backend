@@ -120,17 +120,17 @@ class EnrollmentYearRulesTest {
 
         EnrollmentYearRules.EnrollmentYearSnapshot snap = at(straddling).snapshot();
 
-        // Whichever side of midnight the single read landed on, the two halves must agree:
-        // a 2026 window pairs with an age of at most 1 second; a 2027 window pairs with the
-        // ceiling. What must never appear is a 2026 window beside a full-day age.
-        if (snap.entryYear().equals(new EnrollmentYearRules.YearRange(2016, 2027))) {
-            assertTrue(
-                    snap.cacheMaxAgeSeconds() <= 1,
-                    "2026 window must expire at the boundary, got " + snap.cacheMaxAgeSeconds());
-        } else {
-            assertEquals(new EnrollmentYearRules.YearRange(2017, 2028), snap.entryYear());
-            assertEquals(86_400L, snap.cacheMaxAgeSeconds());
-        }
+        // A single read sees the FIRST instant this clock returns, so the 2026 window is the only
+        // correct answer — there is no "other side of midnight" case for correct code to land in.
+        // An instant-then-year double read reports (2017, 2028) and fails here.
+        assertEquals(new EnrollmentYearRules.YearRange(2016, 2027), snap.entryYear());
+
+        // Non-negative catches the opposite double read (year first, instant second), whose
+        // countdown starts AFTER the boundary and goes negative; <= 1 catches everything that is
+        // not the sub-second remainder a single read at 23:59:59.999Z must produce.
+        assertTrue(
+                snap.cacheMaxAgeSeconds() >= 0 && snap.cacheMaxAgeSeconds() <= 1,
+                "expected a sub-second age at the boundary, got " + snap.cacheMaxAgeSeconds());
     }
 
     /** A clock whose every read is 1ms later than the last — the opposite of Clock.fixed. */
