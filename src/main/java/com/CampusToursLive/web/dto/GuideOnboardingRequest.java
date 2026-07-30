@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import java.util.List;
 
@@ -102,8 +103,9 @@ public record GuideOnboardingRequest(
                         example = "Bachelor's Degree",
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 String degree,
-        @Schema(
+        @NotNull(message = "entryYear is required")
+                @Schema(
                         description = "Year the guide entered this university, e.g. 2023.",
                         example = "2023",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                        requiredMode = Schema.RequiredMode.REQUIRED)
                 Integer entryYear) {}

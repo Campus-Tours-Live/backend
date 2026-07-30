@@ -1,6 +1,7 @@
 package com.CampusToursLive.web;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -128,7 +129,8 @@ class OnboardingControllerTest {
                   "bio": "Third-year student and campus tour lead.",
                   "tourTopics": ["DORM_HOUSING"],
                   "verificationEmail": "maya.chen@ncu.edu",
-                  "degree": "Bachelor's Degree"
+                  "degree": "Bachelor's Degree",
+                  "entryYear": 2023
                 }
                 """;
     }
@@ -141,6 +143,21 @@ class OnboardingControllerTest {
                   "bio": "Third-year student and campus tour lead.",
                   "tourTopics": ["DORM_HOUSING"],
                   "verificationEmail": "maya.chen@ncu.edu"
+                }
+                """;
+    }
+
+    private static String guideBodyMissingEntryYear() {
+        return """
+                {
+                  "firstName": "Maya",
+                  "lastName": "Chen",
+                  "universityId": "u1a2c3d4-0000-4000-8000-000000000003",
+                  "major": "Marine Biology",
+                  "bio": "Third-year student and campus tour lead.",
+                  "tourTopics": ["DORM_HOUSING"],
+                  "verificationEmail": "maya.chen@ncu.edu",
+                  "degree": "Bachelor's Degree"
                 }
                 """;
     }
@@ -215,6 +232,17 @@ class OnboardingControllerTest {
                                 .with(jwt()))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void onboardGuide_missingEntryYear_returns422() throws Exception {
+        mvc.perform(
+                        post("/users/me/roles/guide")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(guideBodyMissingEntryYear())
+                                .with(jwt()))
+                .andExpect(status().isUnprocessableEntity());
+        verify(onboardingService, never()).onboardGuide(any(), any());
     }
 
     @Test
