@@ -98,7 +98,12 @@ public record GuideProfileUpdateRequest(
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 String degree,
         @Schema(
-                        description = "Year the guide entered this university, e.g. 2023.",
+                        description =
+                                "Year the guide entered this university, e.g. 2023. Optional only"
+                                        + " when the guide already has an affiliation row for this"
+                                        + " universityId, whose stored value is then reused;"
+                                        + " naming a university the guide is not yet affiliated"
+                                        + " with requires it, and omitting it there is a 422.",
                         example = "2023",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 Integer entryYear) {}
