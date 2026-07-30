@@ -1539,6 +1539,48 @@ class GuideServiceTest {
                                                 agedOut, String.valueOf(window.max() + 1))));
     }
 
+    /**
+     * Pins the exemption to the {@code (guide_profile_id, university_id)} ROW named by this
+     * request, not to a property of the profile as a whole — every other test in this section
+     * stores its aged-out row under {@link #UNIVERSITY_ID}, the same university every request in
+     * this suite targets, so none of them can tell "per profile" from "per row" apart. Here the
+     * stored aged-out entryYear belongs to a DIFFERENT university: {@code findGuideUniversity}
+     * finds no row for {@link #UNIVERSITY_ID}, so {@code storedEntryYear} is null for THIS request
+     * and the merged value is a NEW one — checked, and rejected. A guide with a passing history at
+     * one school gets no exemption when the request is about a school they have no row for yet.
+     *
+     * <p>This is exactly the distinction the frontend's mirror of this rule got wrong (spec D1a):
+     * it keyed the exemption off a property of the profile rather than the row named by the
+     * request, so a guide switching university with an aged-out year passed client validation and
+     * then got a 422 from here.
+     */
+    @Test
+    void agedOutEntryYear_storedForADifferentUniversity_isStillRejected() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        int agedOut = agedOutEntryYear();
+
+        GuideProfileEntity storedProfile = new GuideProfileEntity();
+        storedProfile.setId(UUID.randomUUID());
+        storedProfile.setUserId(uid);
+        GuideUniversityEntity rowAtAnotherUniversity = new GuideUniversityEntity();
+        rowAtAnotherUniversity.setId(UUID.randomUUID());
+        rowAtAnotherUniversity.setGuideProfileId(storedProfile.getId());
+        rowAtAnotherUniversity.setUniversityId(UUID.randomUUID()); // NOT UNIVERSITY_ID
+        rowAtAnotherUniversity.setEntryYear(agedOut);
+        rowAtAnotherUniversity.setClassYear(null);
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(storedProfile));
+        when(guideUniversities.findByGuideProfileId(storedProfile.getId()))
+                .thenReturn(List.of(rowAtAnotherUniversity));
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().updateProfile(user(uid), guideRequestWith(agedOut, null)));
+        assertTrue(ex.getMessage().contains("entryYear"));
+        verify(guideUniversities, never()).save(any());
+    }
+
     @Test
     void update_422_whenFirstNameHasInvalidCharacters() {
         // A digit in the name → NameRules rejects before any other field is looked at.
