@@ -2003,6 +2003,12 @@ CREATE TABLE public.guide_universities (
   major                text,
   degree               text,
   class_year           text,
+  -- entry_year NOT NULL and the version column were added by EDITING this already-applied
+  -- migration (CTL-97), not by a new V<n> -- a deliberate exception taken while nothing was
+  -- deployed and every database was disposable. A database that applied the earlier V1 will
+  -- fail Flyway validation on checksum drift; recover with `docker compose down -v && docker
+  -- compose up -d`. Do NOT use flyway:repair -- it realigns the checksum WITHOUT re-running
+  -- this file, leaving entry_year nullable and version missing under code that requires both.
   entry_year           integer NOT NULL,
   version              bigint NOT NULL DEFAULT 0,
   school_email         public.citext,                          -- PII, never serialized
