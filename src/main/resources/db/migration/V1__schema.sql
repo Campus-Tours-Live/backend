@@ -2003,7 +2003,8 @@ CREATE TABLE public.guide_universities (
   major                text,
   degree               text,
   class_year           text,
-  entry_year           integer,
+  entry_year           integer NOT NULL,
+  version              bigint NOT NULL DEFAULT 0,
   school_email         public.citext,                          -- PII, never serialized
   verification_status  public.guide_verification_status NOT NULL DEFAULT 'NOT_SUBMITTED',
   verification_sent_at timestamptz,

@@ -56,6 +56,7 @@ class GuideUniversitiesMigrationTest {
                         "degree",
                         "class_year",
                         "entry_year",
+                        "version",
                         "school_email",
                         "verification_status",
                         "verification_sent_at",
@@ -76,7 +77,11 @@ class GuideUniversitiesMigrationTest {
         assertThat(byName.get("degree").get("data_type")).isEqualTo("text");
         assertThat(byName.get("class_year").get("data_type")).isEqualTo("text");
         assertThat(byName.get("entry_year").get("data_type")).isEqualTo("integer");
-        assertThat(byName.get("entry_year").get("is_nullable")).isEqualTo("YES");
+        assertThat(byName.get("entry_year").get("is_nullable")).isEqualTo("NO");
+
+        assertThat(byName.get("version").get("data_type")).isEqualTo("bigint");
+        assertThat(byName.get("version").get("is_nullable")).isEqualTo("NO");
+        assertThat((String) byName.get("version").get("column_default")).contains("0");
 
         assertThat(byName.get("school_email").get("udt_name")).isEqualTo("citext");
         assertThat(byName.get("school_email").get("is_nullable")).isEqualTo("YES");

@@ -78,6 +78,7 @@ class GuideUniversityRepositoryTest {
         offering.setMajor("Computer Science");
         offering.setDegree("BS");
         offering.setClassYear("Junior");
+        offering.setEntryYear(2022);
         offering.setSchoolEmail("jane@school.edu");
         offering.setVerificationStatus(GuideVerificationStatus.NOT_SUBMITTED);
         guideUniversities.save(offering);
@@ -97,6 +98,7 @@ class GuideUniversityRepositoryTest {
         row.setId(UUID.randomUUID());
         row.setGuideProfileId(guideProfileId);
         row.setUniversityId(universityId);
+        row.setEntryYear(2022);
         guideUniversities.save(row);
 
         UserEntity otherUser = new UserEntity();
@@ -119,6 +121,7 @@ class GuideUniversityRepositoryTest {
         otherRow.setId(UUID.randomUUID());
         otherRow.setGuideProfileId(otherGuide.getId());
         otherRow.setUniversityId(universityId);
+        otherRow.setEntryYear(2022);
         guideUniversities.save(otherRow);
 
         // A third guide profile, deliberately NOT in the requested id set — must be excluded.
@@ -142,6 +145,7 @@ class GuideUniversityRepositoryTest {
         excludedRow.setId(UUID.randomUUID());
         excludedRow.setGuideProfileId(excludedGuide.getId());
         excludedRow.setUniversityId(universityId);
+        excludedRow.setEntryYear(2022);
         guideUniversities.save(excludedRow);
 
         List<GuideUniversityEntity> found =
