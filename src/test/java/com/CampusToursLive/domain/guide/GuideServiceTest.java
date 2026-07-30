@@ -1257,6 +1257,91 @@ class GuideServiceTest {
                 () -> service().updateProfile(user(uid), guideRequestWith(2023, "   ")));
     }
 
+    // ---- updateProfile: PATCH validates the merged pair, not just the sent half (CTL-97 Task 4)
+
+    /**
+     * Captures the entities the immediately-preceding {@code updateProfile} call persisted, and
+     * wires the mocks so the NEXT call sees them as the already-stored row — simulating a real
+     * PATCH against previously-saved state without a real database.
+     */
+    private GuideUniversityEntity stubStoredState(UUID uid) {
+        ArgumentCaptor<GuideProfileEntity> profileCaptor =
+                ArgumentCaptor.forClass(GuideProfileEntity.class);
+        verify(guides, org.mockito.Mockito.atLeastOnce()).save(profileCaptor.capture());
+        GuideProfileEntity storedProfile = profileCaptor.getValue();
+
+        ArgumentCaptor<GuideUniversityEntity> rowCaptor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities, org.mockito.Mockito.atLeastOnce()).save(rowCaptor.capture());
+        GuideUniversityEntity storedRow = rowCaptor.getValue();
+
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(storedProfile));
+        when(guideUniversities.findByGuideProfileId(storedProfile.getId()))
+                .thenReturn(List.of(storedRow));
+        return storedRow;
+    }
+
+    @Test
+    void updateProfile_changingOnlyEntryYear_validatesAgainstTheStoredClassYear() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        UserEntity user = user(uid);
+        GuideService service = service();
+
+        // Stored: entry 2023, class 2027 (inside [2024, 2029]).
+        service.updateProfile(user, guideRequestWith(2023, "2027"));
+        stubStoredState(uid);
+
+        // Moving enrolment to 2026 makes the STORED 2027 illegal ([2027, 2032] starts at 2027 —
+        // so pick 2016, whose window [2017, 2022] excludes it outright).
+        GuideProfileUpdateRequest onlyEntryYear = guideRequestWith(2016, null);
+        assertThrows(ValidationException.class, () -> service.updateProfile(user, onlyEntryYear));
+    }
+
+    @Test
+    void updateProfile_changingOnlyClassYear_validatesAgainstTheStoredEntryYear() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        UserEntity user = user(uid);
+        GuideService service = service();
+
+        service.updateProfile(user, guideRequestWith(2023, "2027"));
+        stubStoredState(uid);
+
+        // 2035 is outside [2024, 2029] derived from the STORED entry year.
+        assertThrows(
+                ValidationException.class,
+                () -> service.updateProfile(user, guideRequestWith(null, "2035")));
+
+        // 2028 is inside it, and must be accepted without resending entryYear.
+        service.updateProfile(user, guideRequestWith(null, "2028"));
+    }
+
+    /**
+     * classYear's ceiling is entryYear + maxYearsToGraduate(DEGREE), so degree is the third input
+     * to the same rule. Narrowing the degree can invalidate a stored pair that never changed:
+     * bachelor's (2020, 2026) is legal at +6, and the same years under a master's (+3) are not.
+     *
+     * <p>This passes because {@code degree} is REQUIRED on this path — GuideService rejects a
+     * missing one before validation, so the request always carries it and there is nothing to
+     * merge. If degree ever becomes genuinely optional, the merge in this method must widen from a
+     * pair to a triple, and this test is what will fail first.
+     */
+    @Test
+    void updateProfile_narrowingTheDegree_revalidatesTheStoredYearsAgainstIt() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        UserEntity user = user(uid);
+        GuideService service = service();
+
+        service.updateProfile(user, guideRequestWith(2020, "2026", "Bachelor's Degree"));
+        stubStoredState(uid);
+
+        assertThrows(
+                ValidationException.class,
+                () -> service.updateProfile(user, guideRequestWith(null, null, "Master's Degree")));
+    }
+
     @Test
     void update_422_whenFirstNameHasInvalidCharacters() {
         // A digit in the name → NameRules rejects before any other field is looked at.

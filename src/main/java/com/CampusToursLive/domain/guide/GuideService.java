@@ -23,6 +23,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -125,9 +126,6 @@ public class GuideService {
         if (degree == null || degree.isEmpty()) {
             throw new ValidationException("degree is required");
         }
-        // TEMPORARY — request-only validation. Task 4 REPLACES this exact line with the
-        // merged-state version; the two must never coexist.
-        validateYears(req.entryYear(), req.classYear(), degree);
 
         GuideProfileEntity profile =
                 guides.findByUserId(user.getId())
@@ -138,6 +136,29 @@ public class GuideService {
                                     p.setUserId(user.getId());
                                     return p;
                                 });
+
+        // The stored guide_universities row for THIS profile + university, if one already exists.
+        // Null on a first-time create (onboarding) — Task 3's @NotNull already guaranteed
+        // entryYear arrived in the request in that case.
+        GuideUniversityEntity existingUniversity =
+                findGuideUniversity(profile.getId(), universityId).orElse(null);
+        Integer storedEntryYear =
+                existingUniversity == null ? null : existingUniversity.getEntryYear();
+        String storedClassYear =
+                existingUniversity == null ? null : existingUniversity.getClassYear();
+
+        // Partial update: a null field means "leave alone", so validate the pair that will EXIST
+        // after the write, not just the half the request carried. Without this, editing entryYear
+        // alone can leave a stored classYear outside its window (spec I3).
+        //
+        // `??`-style merging is only sound because null unambiguously means "leave alone" for both
+        // fields — neither has a "clear it" representation. If classYear ever gains one, this merge
+        // must move to explicit presence tracking; see spec D7.
+        Integer mergedEntryYear = req.entryYear() != null ? req.entryYear() : storedEntryYear;
+        String mergedClassYear = req.classYear() != null ? req.classYear() : storedClassYear;
+        // Replaces Task 2's request-only call. There is exactly ONE validateYears call in this
+        // method when this task is done.
+        validateYears(mergedEntryYear, mergedClassYear, degree);
 
         if (req.bio() != null) profile.setBio(req.bio().trim());
         if (req.spokenLanguages() != null) {
@@ -224,9 +245,7 @@ public class GuideService {
             String classYear,
             Integer entryYear) {
         GuideUniversityEntity entry =
-                guideUniversities.findByGuideProfileId(profile.getId()).stream()
-                        .filter(g -> universityId.equals(g.getUniversityId()))
-                        .findFirst()
+                findGuideUniversity(profile.getId(), universityId)
                         .orElseGet(
                                 () -> {
                                     GuideUniversityEntity g = new GuideUniversityEntity();
@@ -240,6 +259,18 @@ public class GuideService {
         if (classYear != null) entry.setClassYear(classYear.trim());
         if (entryYear != null) entry.setEntryYear(entryYear);
         return entry;
+    }
+
+    /**
+     * The existing {@code guide_universities} row for this profile + university (single school
+     * today, keyed by {@code (guide_profile_id, university_id)}), if one exists yet. Shared by the
+     * merged-validation read in {@link #updateProfile} and the upsert in {@link
+     * #writeGuideUniversity} so the lookup logic lives in exactly one place.
+     */
+    private Optional<GuideUniversityEntity> findGuideUniversity(UUID profileId, UUID universityId) {
+        return guideUniversities.findByGuideProfileId(profileId).stream()
+                .filter(g -> universityId.equals(g.getUniversityId()))
+                .findFirst();
     }
 
     /**
