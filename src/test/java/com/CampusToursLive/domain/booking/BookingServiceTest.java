@@ -1732,4 +1732,155 @@ class BookingServiceTest {
 
         return b;
     }
+
+    // ── listBookings ─────────────────────────────────────────────────────────
+
+    @Test
+    void listBookings_withEmptyFilter_usesAllNonDraftStatuses() {
+        UUID uid = UUID.randomUUID();
+        when(bookings.findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(
+                        eq(uid), eq(BookingService.ALL_NON_DRAFT_STATUSES)))
+                .thenReturn(List.of());
+
+        assertTrue(service().listBookings(uid, List.of()).isEmpty());
+
+        verify(bookings)
+                .findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(
+                        uid, BookingService.ALL_NON_DRAFT_STATUSES);
+    }
+
+    @Test
+    void listBookings_withNullFilter_usesAllNonDraftStatuses() {
+        UUID uid = UUID.randomUUID();
+        when(bookings.findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(
+                        eq(uid), eq(BookingService.ALL_NON_DRAFT_STATUSES)))
+                .thenReturn(List.of());
+
+        service().listBookings(uid, null);
+
+        verify(bookings)
+                .findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(
+                        uid, BookingService.ALL_NON_DRAFT_STATUSES);
+    }
+
+    @Test
+    void listBookings_withStatusFilter_passesFilterToRepo() {
+        UUID uid = UUID.randomUUID();
+        List<BookingStatus> filter = List.of(BookingStatus.CONFIRMED);
+        when(bookings.findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(uid, filter))
+                .thenReturn(List.of());
+
+        service().listBookings(uid, filter);
+
+        verify(bookings).findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(uid, filter);
+    }
+
+    @Test
+    void listBookings_mapsToDtoForEachResult() {
+        UUID uid = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UUID guideUserId = UUID.randomUUID();
+        UUID offeringId = UUID.randomUUID();
+        UUID universityId = UUID.randomUUID();
+        Instant start = Instant.parse("2026-08-10T10:00:00Z");
+        Instant end = start.plus(60, ChronoUnit.MINUTES);
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        offeringId,
+                        universityId,
+                        BookingStatus.CONFIRMED,
+                        start,
+                        end);
+        b.setParticipantUserId(uid);
+
+        when(bookings.findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(eq(uid), any()))
+                .thenReturn(List.of(b));
+        when(offerings.findById(offeringId))
+                .thenReturn(Optional.of(offering(offeringId, "Campus Tour")));
+        when(guides.findById(guideProfileId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(users.findById(guideUserId)).thenReturn(Optional.of(user(guideUserId, "Alex Guide")));
+        when(universities.findById(universityId))
+                .thenReturn(Optional.of(university(universityId, "Test University")));
+
+        List<BookingDetailResponse> results = service().listBookings(uid, List.of());
+        assertEquals(1, results.size());
+        assertEquals("CONFIRMED", results.get(0).status());
+        assertEquals("Campus Tour", results.get(0).offeringTitle());
+    }
+
+    @Test
+    void allNonDraftStatuses_doesNotContainDraft() {
+        assertFalse(BookingService.ALL_NON_DRAFT_STATUSES.contains(BookingStatus.DRAFT));
+        assertEquals(
+                BookingStatus.values().length - 1, BookingService.ALL_NON_DRAFT_STATUSES.size());
+    }
+
+    // ── getBookingById ────────────────────────────────────────────────────────
+
+    @Test
+    void getBookingById_returnsMappedDto_whenOwned() {
+        UUID uid = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UUID guideUserId = UUID.randomUUID();
+        UUID offeringId = UUID.randomUUID();
+        UUID universityId = UUID.randomUUID();
+        Instant start = Instant.parse("2026-09-01T14:00:00Z");
+        Instant end = start.plus(60, ChronoUnit.MINUTES);
+        BookingEntity b =
+                booking(
+                        bookingId,
+                        guideProfileId,
+                        offeringId,
+                        universityId,
+                        BookingStatus.CONFIRMED,
+                        start,
+                        end);
+        b.setParticipantUserId(uid);
+
+        UserEntity participant = user(uid, "Participant");
+        when(bookings.findByIdAndParticipantUserId(bookingId, uid)).thenReturn(Optional.of(b));
+        when(offerings.findById(offeringId))
+                .thenReturn(Optional.of(offering(offeringId, "North Campus Walk")));
+        when(guides.findById(guideProfileId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(users.findById(guideUserId)).thenReturn(Optional.of(user(guideUserId, "Dana Guide")));
+        when(universities.findById(universityId))
+                .thenReturn(Optional.of(university(universityId, "State University")));
+
+        BookingDetailResponse resp = service().getBookingById(participant, bookingId);
+        assertEquals(bookingId.toString(), resp.id());
+        assertEquals("CONFIRMED", resp.status());
+        assertEquals("North Campus Walk", resp.offeringTitle());
+        assertEquals("Dana Guide", resp.guideName());
+        assertEquals("State University", resp.universityName());
+    }
+
+    @Test
+    void getBookingById_throws404_whenNotFound() {
+        UUID uid = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        UserEntity participant = user(uid, "Participant");
+        when(bookings.findByIdAndParticipantUserId(bookingId, uid)).thenReturn(Optional.empty());
+
+        assertThrows(
+                com.CampusToursLive.error.NotFoundException.class,
+                () -> service().getBookingById(participant, bookingId));
+    }
+
+    @Test
+    void getBookingById_throws404_whenOwnedByAnotherParticipant() {
+        UUID uid = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        UserEntity participant = user(uid, "Participant");
+        // findByIdAndParticipantUserId already scopes by userId, so a mismatch returns empty
+        when(bookings.findByIdAndParticipantUserId(bookingId, uid)).thenReturn(Optional.empty());
+
+        assertThrows(
+                com.CampusToursLive.error.NotFoundException.class,
+                () -> service().getBookingById(participant, bookingId));
+    }
 }

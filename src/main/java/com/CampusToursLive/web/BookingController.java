@@ -1,7 +1,9 @@
 package com.CampusToursLive.web;
 
 import com.CampusToursLive.domain.booking.BookingService;
+import com.CampusToursLive.domain.booking.BookingStatus;
 import com.CampusToursLive.domain.user.UserRole;
+import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
@@ -11,6 +13,7 @@ import com.CampusToursLive.web.dto.CreateBookingRequest;
 import com.CampusToursLive.web.dto.PendingActionsResponse;
 import com.CampusToursLive.web.dto.Problem;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -23,6 +26,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -46,6 +50,100 @@ public class BookingController {
     public BookingController(CurrentUser currentUser, BookingService bookingService) {
         this.currentUser = currentUser;
         this.bookingService = bookingService;
+    }
+
+    /** All non-DRAFT bookings for the caller, newest first, with an optional status filter. */
+    @Operation(
+            summary = "List my bookings",
+            description =
+                    "Returns the participant's booking history (all non-DRAFT bookings), newest"
+                            + " first. Pass one or more status values to narrow the results; omit"
+                            + " for the full history. DRAFT (cart) items are excluded — use"
+                            + " GET /cart for those.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The participant's bookings.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.BOOKING_LIST)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the PARTICIPANT role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "422",
+            description = "Unknown status value.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @GetMapping
+    public ApiEnvelope<List<BookingDetailResponse>> list(
+            @Parameter(
+                            description =
+                                    "Filter by internal booking status codes (repeatable). Omit for"
+                                            + " all non-DRAFT bookings.")
+                    @RequestParam(name = "status", required = false)
+                    List<String> status) {
+        var user = currentUser.requireRole(UserRole.PARTICIPANT);
+        return ApiEnvelope.of(bookingService.listBookings(user.getId(), parseStatuses(status)));
+    }
+
+    /** Fetch a single booking by id — must be owned by the caller. */
+    @Operation(
+            summary = "Get a booking",
+            description =
+                    "Returns the full detail for a single booking owned by the current participant.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The booking detail.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.BOOKING_DETAIL)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the PARTICIPANT role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "Booking not found, or not owned by the caller.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @GetMapping("/{id}")
+    public ApiEnvelope<BookingDetailResponse> get(
+            @Parameter(description = "Booking id (UUID).") @PathVariable UUID id) {
+        var user = currentUser.requireRole(UserRole.PARTICIPANT);
+        return ApiEnvelope.of(bookingService.getBookingById(user, id));
     }
 
     /** The soonest upcoming CONFIRMED booking. Returns {@code null} data if none exists. */
@@ -214,6 +312,28 @@ public class BookingController {
     public ApiEnvelope<BookingDetailResponse> create(@RequestBody CreateBookingRequest req) {
         var user = currentUser.requireRole(UserRole.PARTICIPANT);
         return ApiEnvelope.of(bookingService.createBooking(user, req));
+    }
+
+    private static List<BookingStatus> parseStatuses(List<String> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return List.of();
+        }
+        return raw.stream()
+                .map(
+                        s -> {
+                            try {
+                                BookingStatus parsed =
+                                        BookingStatus.valueOf(s.trim().toUpperCase());
+                                if (parsed == BookingStatus.DRAFT) {
+                                    throw new ValidationException(
+                                            "DRAFT bookings are managed via /cart");
+                                }
+                                return parsed;
+                            } catch (IllegalArgumentException e) {
+                                throw new ValidationException("Unknown booking status: " + s);
+                            }
+                        })
+                .toList();
     }
 
     /** Cancel the participant's own upcoming booking. The body (a reason) is optional. */

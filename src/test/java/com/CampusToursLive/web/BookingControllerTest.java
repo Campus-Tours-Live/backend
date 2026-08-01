@@ -4,8 +4,10 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import com.CampusToursLive.domain.booking.BookingService;
+import com.CampusToursLive.domain.booking.BookingStatus;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
+import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.dto.BookingDetailResponse;
 import com.CampusToursLive.web.dto.CancelBookingRequest;
@@ -53,6 +55,58 @@ class BookingControllerTest {
                 60,
                 5000L,
                 "USD");
+    }
+
+    // ── list ─────────────────────────────────────────────────────────────────
+
+    @Test
+    void list_requiresParticipantRole_andWrapsListInEnvelope() {
+        UserEntity u = participantUser();
+        List<BookingDetailResponse> bookings = List.of(mockDetail(), mockDetail());
+        when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
+        when(bookingService.listBookings(u.getId(), List.of())).thenReturn(bookings);
+
+        assertSame(bookings, controller().list(null).data());
+    }
+
+    @Test
+    void list_parsesStatusFilter_andPassesToService() {
+        UserEntity u = participantUser();
+        List<BookingDetailResponse> bookings = List.of(mockDetail());
+        when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
+        when(bookingService.listBookings(u.getId(), List.of(BookingStatus.CONFIRMED)))
+                .thenReturn(bookings);
+
+        assertSame(bookings, controller().list(List.of("CONFIRMED")).data());
+    }
+
+    @Test
+    void list_rejects_unknownStatus() {
+        UserEntity u = participantUser();
+        when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
+
+        assertThrows(ValidationException.class, () -> controller().list(List.of("NOT_A_STATUS")));
+    }
+
+    @Test
+    void list_rejects_draftStatus() {
+        UserEntity u = participantUser();
+        when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
+
+        assertThrows(ValidationException.class, () -> controller().list(List.of("DRAFT")));
+    }
+
+    // ── get ───────────────────────────────────────────────────────────────────
+
+    @Test
+    void get_requiresParticipantRole_andWrapsDetailInEnvelope() {
+        UserEntity u = participantUser();
+        UUID bookingId = UUID.randomUUID();
+        BookingDetailResponse detail = mockDetail();
+        when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
+        when(bookingService.getBookingById(u, bookingId)).thenReturn(detail);
+
+        assertSame(detail, controller().get(bookingId).data());
     }
 
     // ── getNextTour ──────────────────────────────────────────────────────────
