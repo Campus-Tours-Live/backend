@@ -1772,8 +1772,7 @@ class BookingServiceTest {
 
         service().listBookings(uid, filter);
 
-        verify(bookings)
-                .findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(uid, filter);
+        verify(bookings).findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(uid, filter);
     }
 
     @Test
@@ -1796,8 +1795,7 @@ class BookingServiceTest {
                         end);
         b.setParticipantUserId(uid);
 
-        when(bookings.findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(
-                        eq(uid), any()))
+        when(bookings.findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(eq(uid), any()))
                 .thenReturn(List.of(b));
         when(offerings.findById(offeringId))
                 .thenReturn(Optional.of(offering(offeringId, "Campus Tour")));
@@ -1816,7 +1814,8 @@ class BookingServiceTest {
     @Test
     void allNonDraftStatuses_doesNotContainDraft() {
         assertFalse(BookingService.ALL_NON_DRAFT_STATUSES.contains(BookingStatus.DRAFT));
-        assertEquals(BookingStatus.values().length - 1, BookingService.ALL_NON_DRAFT_STATUSES.size());
+        assertEquals(
+                BookingStatus.values().length - 1, BookingService.ALL_NON_DRAFT_STATUSES.size());
     }
 
     // ── getBookingById ────────────────────────────────────────────────────────
