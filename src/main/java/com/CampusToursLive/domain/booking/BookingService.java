@@ -53,6 +53,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class BookingService {
 
+    /** All non-DRAFT statuses — the default set for the booking history list. */
+    static final List<BookingStatus> ALL_NON_DRAFT_STATUSES =
+            java.util.Arrays.stream(BookingStatus.values())
+                    .filter(s -> s != BookingStatus.DRAFT)
+                    .toList();
+
     /** Statuses considered "upcoming" for the participant dashboard list. */
     private static final List<BookingStatus> UPCOMING_STATUSES =
             List.of(
@@ -177,6 +183,37 @@ public class BookingService {
                         participantUserId, List.of(BookingStatus.PENDING_GUIDE_ACCEPTANCE));
         long reviewsToWrite = bookings.countCompletedWithoutReview(participantUserId);
         return new PendingActionsResponse(paymentsToFinish, waitingForGuide, reviewsToWrite);
+    }
+
+    /**
+     * The participant's booking history: all non-DRAFT bookings, newest first. Callers may pass a
+     * non-empty {@code statuses} list to narrow the results; passing an empty list returns every
+     * non-DRAFT status (the full history). DRAFT is always excluded — cart items are managed by the
+     * cart endpoints.
+     */
+    @Transactional(readOnly = true)
+    public List<BookingDetailResponse> listBookings(
+            UUID participantUserId, List<BookingStatus> statuses) {
+        List<BookingStatus> filter =
+                statuses == null || statuses.isEmpty() ? ALL_NON_DRAFT_STATUSES : statuses;
+        return bookings
+                .findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(
+                        participantUserId, filter)
+                .stream()
+                .map(this::toDetailResponse)
+                .toList();
+    }
+
+    /**
+     * Fetch a single booking by id, scoped to the caller's own bookings. Throws {@link
+     * NotFoundException} (404) if the id does not exist or belongs to another participant.
+     */
+    @Transactional(readOnly = true)
+    public BookingDetailResponse getBookingById(UserEntity participant, UUID bookingId) {
+        BookingEntity b =
+                bookings.findByIdAndParticipantUserId(bookingId, participant.getId())
+                        .orElseThrow(() -> new NotFoundException("Booking not found"));
+        return toDetailResponse(b);
     }
 
     // ---------------------------------------------------------------------------

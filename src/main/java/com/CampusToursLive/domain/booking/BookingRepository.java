@@ -44,6 +44,13 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
     List<BookingEntity> findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
             UUID participantUserId, BookingStatus status);
 
+    /**
+     * All of a participant's bookings in any of the given statuses, most recent first. Used for the
+     * "My Bookings" history list — callers exclude DRAFT (cart items) from the status set.
+     */
+    List<BookingEntity> findByParticipantUserIdAndStatusInOrderByScheduledStartAtDesc(
+            UUID participantUserId, List<BookingStatus> statuses);
+
     /** Cart size, for the max-items cap. */
     long countByParticipantUserIdAndStatus(UUID participantUserId, BookingStatus status);
 
