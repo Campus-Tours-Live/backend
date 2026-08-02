@@ -1,8 +1,10 @@
 package com.CampusToursLive.domain.tour;
 
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
+import com.CampusToursLive.domain.guide.GuideUniversityRepository;
+import com.CampusToursLive.domain.guide.GuideVerificationStatus;
 import com.CampusToursLive.domain.university.CampusImageUrls;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.user.UserEntity;
@@ -23,7 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
  * Tour offerings — a guide's supply-side products. This is the first endpoint set that actually
  * exercises the role/approval gates: - creating a DRAFT is allowed while the application is still
  * pending (preparing unpublished content is not a "live" action); - activating (going live,
- * DRAFT→ACTIVE) requires application_status == APPROVED. The caller already enforced the GUIDE role
+ * DRAFT→ACTIVE) requires guide_status == VERIFIED. The caller already enforced the GUIDE role
  * (controller: requireRole(GUIDE)).
  */
 @Service
@@ -35,6 +37,7 @@ public class TourOfferingService {
 
     private final TourOfferingRepository offerings;
     private final GuideProfileRepository guides;
+    private final GuideUniversityRepository guideUniversities;
     private final UniversityRepository universities;
     private final CampusImageUrls campusImages;
     private final ObjectMapper mapper;
@@ -42,11 +45,13 @@ public class TourOfferingService {
     public TourOfferingService(
             TourOfferingRepository offerings,
             GuideProfileRepository guides,
+            GuideUniversityRepository guideUniversities,
             UniversityRepository universities,
             CampusImageUrls campusImages,
             ObjectMapper mapper) {
         this.offerings = offerings;
         this.guides = guides;
+        this.guideUniversities = guideUniversities;
         this.universities = universities;
         this.campusImages = campusImages;
         this.mapper = mapper;
@@ -62,7 +67,12 @@ public class TourOfferingService {
     public TourOfferingResponse create(UserEntity user, CreateOfferingRequest req) {
         GuideProfileEntity guide = requireGuideProfile(user);
 
-        UUID universityId = parseUniversity(req.universityId());
+        UUID universityId = parseUuid(req.universityId());
+        if (!isGuidesVerifiedUniversity(guide, universityId)) {
+            throw new ValidationException(
+                    "universityId must be a university you are verified for (verification_status"
+                            + " must be VERIFIED)");
+        }
         // Backfill the campus image on first use if the university has none yet (idempotent).
         universities
                 .findById(universityId)
@@ -120,9 +130,9 @@ public class TourOfferingService {
     public TourOfferingResponse activate(UserEntity user, UUID offeringId) {
         GuideProfileEntity guide = requireGuideProfile(user);
 
-        // Live-action gate: publishing a draft (DRAFT -> ACTIVE) requires an APPROVED guide
+        // Live-action gate: publishing a draft (DRAFT -> ACTIVE) requires a VERIFIED guide
         // application.
-        if (guide.getApplicationStatus() != GuideApplicationStatus.APPROVED) {
+        if (guide.getStatus() != GuideStatus.VERIFIED) {
             throw new ForbiddenException(
                     "Your guide application must be approved before you can publish offerings");
         }
@@ -149,20 +159,29 @@ public class TourOfferingService {
                                         "No guide profile — complete guide onboarding first"));
     }
 
-    private UUID parseUniversity(String raw) {
+    private static UUID parseUuid(String raw) {
         if (raw == null || raw.isBlank()) {
             throw new ValidationException("universityId is required");
         }
-        UUID id;
         try {
-            id = UUID.fromString(raw.trim());
+            return UUID.fromString(raw.trim());
         } catch (IllegalArgumentException ex) {
             throw new ValidationException("Invalid universityId: " + raw);
         }
-        if (!universities.existsById(id)) {
-            throw new ValidationException("Unknown universityId: " + raw);
-        }
-        return id;
+    }
+
+    /**
+     * Whether {@code id} is a university the guide is verified for: a {@code guide_universities}
+     * row exists for {@code (guide.id, id)} with {@code verification_status == VERIFIED}. A guide
+     * may hold several schools; only a VERIFIED membership counts.
+     */
+    private boolean isGuidesVerifiedUniversity(GuideProfileEntity guide, UUID id) {
+        return guideUniversities.findByGuideProfileId(guide.getId()).stream()
+                .anyMatch(
+                        g ->
+                                id.equals(g.getUniversityId())
+                                        && g.getVerificationStatus()
+                                                == GuideVerificationStatus.VERIFIED);
     }
 
     private TourTopic parseTopic(String raw) {

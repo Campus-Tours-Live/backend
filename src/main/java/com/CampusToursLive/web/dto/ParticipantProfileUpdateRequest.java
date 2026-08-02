@@ -59,34 +59,29 @@ public record ParticipantProfileUpdateRequest(
                         arraySchema =
                                 @Schema(
                                         description =
-                                                "University ids the participant is interested in.",
+                                                "College Scorecard school ids the participant is"
+                                                        + " interested in, as returned by GET"
+                                                        + " /v1/meta/universities.",
                                         requiredMode = Schema.RequiredMode.NOT_REQUIRED),
                         schema =
                                 @Schema(
-                                        description = "University id (UUID).",
-                                        example = "u1a2c3d4-0000-4000-8000-000000000003"))
+                                        description = "College Scorecard school id (string).",
+                                        example = "166683"))
                 List<String> universitiesOfInterest,
         @ArraySchema(
                         arraySchema =
                                 @Schema(
                                         description =
-                                                "Tour topic codes the participant is interested"
-                                                        + " in (controlled vocabulary).",
+                                                "Topics the participant is interested in."
+                                                        + " Free-form text — no fixed vocabulary;"
+                                                        + " any string is accepted (unlike the"
+                                                        + " onboarding command's controlled 8-code"
+                                                        + " set).",
                                         requiredMode = Schema.RequiredMode.NOT_REQUIRED),
                         schema =
                                 @Schema(
-                                        description = "Tour topic code.",
-                                        example = "DORM_HOUSING",
-                                        allowableValues = {
-                                            "GENERAL_CAMPUS",
-                                            "DORM_HOUSING",
-                                            "DINING_STUDENT_LIFE",
-                                            "MAJOR_SPECIFIC",
-                                            "INTERNATIONAL_STUDENT",
-                                            "PARENT_FOCUSED",
-                                            "FRESHMAN",
-                                            "TRANSFER"
-                                        }))
+                                        description = "Free-text topic of interest.",
+                                        example = "DORM_HOUSING"))
                 List<String> topicsOfInterest,
         @Schema(
                         description = "Preferred BCP-47 language tag.",

@@ -25,7 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Public marketplace catalog (BFF maps /v1/tours → here). Returns only ACTIVE offerings from
- * APPROVED guides at active universities. Genuinely public: these routes are {@code permitAll} in
+ * VERIFIED guides at active universities. Genuinely public: these routes are {@code permitAll} in
  * {@code SecurityConfig}, so anonymous callers are served and no token is required.
  */
 @RestController
@@ -33,7 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(
         name = "Tours",
         description =
-                "Public marketplace catalog. Returns only ACTIVE offerings from APPROVED guides at"
+                "Public marketplace catalog. Returns only ACTIVE offerings from VERIFIED guides at"
                         + " active universities; no role required beyond a valid platform JWT.")
 public class TourController {
 

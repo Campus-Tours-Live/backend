@@ -10,9 +10,8 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * Maps the {@code guide_availability_occurrences} table (V4__availability_engine_v2.sql) — the
- * materialized, coalesced, net-available projection of a guide's rules + exceptions into concrete
- * UTC instants.
+ * Maps the {@code guide_availability_occurrences} table (V1__schema.sql) — the materialized,
+ * coalesced, net-available projection of a guide's rules + exceptions into concrete UTC instants.
  *
  * <p>This is a DERIVED cache (spec "(G)"): wholesale re-computed and replaced by the persistence
  * layer whenever a rule, exception, or the guide's settings timezone changes — never edited

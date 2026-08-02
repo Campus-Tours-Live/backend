@@ -20,9 +20,16 @@ public interface SchoolDirectory {
     /** The distinct majors (CIP-4 program titles) a school offers → { value = label = title }. */
     List<Option> majorsForSchool(String schoolId);
 
+    /**
+     * The distinct degree levels a school awards, derived from its CIP-4 programs' credential
+     * titles → { value = label = credential title, e.g. "Bachelor's Degree" }, ordered lowest →
+     * highest.
+     */
+    List<Option> degreesForSchool(String schoolId);
+
     /** Fetch one school's identity by id (for upsert on guide onboarding); null if not found. */
     SchoolRef getSchool(String schoolId);
 
     /** A school's core identity from the directory. */
-    record SchoolRef(String id, String name, String city, String state) {}
+    record SchoolRef(String id, String name, String shortName, String city, String state) {}
 }
