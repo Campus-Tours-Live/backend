@@ -133,6 +133,17 @@ class ParticipantServiceTest {
     }
 
     @Test
+    void update_422_whenFirstNameHasInvalidCharacters() {
+        UUID uid = UUID.randomUUID();
+        // A digit in the name → NameRules rejects (server-side defense; the client also blocks it).
+        var ex =
+                assertThrows(
+                        RuntimeException.class,
+                        () -> service().updateProfile(user(uid), req("Ann3", null, null, null)));
+        assertInstanceOf(ValidationException.class, ex);
+    }
+
+    @Test
     void update_explicitDisplayNameWinsOverFirstLastSync() {
         UUID uid = UUID.randomUUID();
         UserEntity u = user(uid);
@@ -233,7 +244,7 @@ class ParticipantServiceTest {
                         "HIGH_SCHOOL",
                         "JUNIOR",
                         "Biology",
-                        List.of("MIT"),
+                        List.of("166683"), // College Scorecard school id (MIT)
                         List.of("DORM_HOUSING"),
                         "es",
                         "America/New_York",
@@ -250,7 +261,7 @@ class ParticipantServiceTest {
         assertEquals("JUNIOR", res.gradeLevel());
         assertEquals("Biology", res.intendedMajor());
         assertEquals(List.of("DORM_HOUSING"), res.topicsOfInterest());
-        assertEquals(List.of("MIT"), res.universitiesOfInterest());
+        assertEquals(List.of("166683"), res.universitiesOfInterest());
         assertEquals("Wheelchair access", res.accessibilityPreferences());
     }
 
@@ -318,7 +329,7 @@ class ParticipantServiceTest {
                         null,
                         null,
                         null,
-                        List.of("Stanford"),
+                        List.of("243744"), // College Scorecard school id (Stanford)
                         null,
                         null,
                         null,
@@ -326,7 +337,7 @@ class ParticipantServiceTest {
 
         ParticipantProfileResponse res = service().updateProfile(user(uid), r);
 
-        assertEquals(List.of("Stanford"), res.universitiesOfInterest());
+        assertEquals(List.of("243744"), res.universitiesOfInterest());
         assertEquals("Sign language", res.accessibilityPreferences());
     }
 
@@ -358,14 +369,15 @@ class ParticipantServiceTest {
         existing.setId(UUID.randomUUID());
         existing.setUserId(uid);
         existing.setParticipantType(ParticipantType.PROSPECTIVE);
-        existing.setInterests("{\"topics\":[\"ATHLETICS\"],\"universities\":[\"UCLA\"]}");
+        // universities: College Scorecard school id (UCLA)
+        existing.setInterests("{\"topics\":[\"ATHLETICS\"],\"universities\":[\"110662\"]}");
         when(profiles.findByUserId(uid)).thenReturn(Optional.of(existing));
 
         ParticipantProfileResponse res =
                 service().updateProfile(user(uid), req(null, null, null, null));
 
         assertEquals(List.of("ATHLETICS"), res.topicsOfInterest());
-        assertEquals(List.of("UCLA"), res.universitiesOfInterest());
+        assertEquals(List.of("110662"), res.universitiesOfInterest());
     }
 
     // ---- readInterests: catch block (malformed JSON via mock mapper) ----

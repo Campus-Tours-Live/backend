@@ -59,12 +59,14 @@ public record ParticipantProfileUpdateRequest(
                         arraySchema =
                                 @Schema(
                                         description =
-                                                "University ids the participant is interested in.",
+                                                "College Scorecard school ids the participant is"
+                                                        + " interested in, as returned by GET"
+                                                        + " /v1/meta/universities.",
                                         requiredMode = Schema.RequiredMode.NOT_REQUIRED),
                         schema =
                                 @Schema(
-                                        description = "University id (UUID).",
-                                        example = "u1a2c3d4-0000-4000-8000-000000000003"))
+                                        description = "College Scorecard school id (string).",
+                                        example = "166683"))
                 List<String> universitiesOfInterest,
         @ArraySchema(
                         arraySchema =

@@ -109,4 +109,11 @@ public record GuideProfileResponse(
                         description = "University-email verification status.",
                         example = "VERIFIED",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String verificationStatus) {}
+                String verificationStatus,
+        @Schema(
+                        description =
+                                "Degree level (free-form; e.g. the College Scorecard credential"
+                                        + " title from GET /v1/meta/degrees).",
+                        example = "Bachelor's Degree",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String degree) {}
