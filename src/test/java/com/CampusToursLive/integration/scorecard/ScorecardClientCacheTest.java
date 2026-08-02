@@ -34,6 +34,8 @@ class ScorecardClientCacheTest {
     private static final List<Option> HITS =
             List.of(new Option("243744", "Stanford University — Stanford, CA"));
     private static final List<Option> MAJORS = List.of(new Option("Biology", "Biology"));
+    private static final List<Option> DEGREES =
+            List.of(new Option("Bachelor's Degree", "Bachelor's Degree"));
 
     @MockitoBean private ScorecardApi api;
 
@@ -148,6 +150,36 @@ class ScorecardClientCacheTest {
         verify(api, never()).majorsForSchool(any());
     }
 
+    // --- degreesForSchool -------------------------------------------------------------------
+
+    @Test
+    void degreesAreCachedPerSchoolId() {
+        given(api.degreesForSchool("243744")).willReturn(DEGREES);
+
+        assertThat(client.degreesForSchool("243744")).isEqualTo(DEGREES);
+        assertThat(client.degreesForSchool("  243744  ")).isEqualTo(DEGREES);
+
+        verify(api, times(1)).degreesForSchool(anyString());
+    }
+
+    @Test
+    void emptyDegreesAreNotCached() {
+        given(api.degreesForSchool("999")).willReturn(List.of());
+
+        client.degreesForSchool("999");
+        client.degreesForSchool("999");
+
+        verify(api, times(2)).degreesForSchool("999");
+    }
+
+    @Test
+    void nullOrBlankSchoolIdShortCircuitsDegreesWithoutNpe() {
+        assertThat(client.degreesForSchool(null)).isEmpty();
+        assertThat(client.degreesForSchool(" ")).isEmpty();
+
+        verify(api, never()).degreesForSchool(any());
+    }
+
     // --- getSchool (cached, and rate-limited) ------------------------------------------------
 
     @Test
@@ -189,6 +221,7 @@ class ScorecardClientCacheTest {
     void unregisteredCacheNameIsRejectedRatherThanLazilyCreatedUnbounded() {
         assertThat(caches.getCache(CacheConfig.SCORECARD_UNIVERSITIES)).isNotNull();
         assertThat(caches.getCache(CacheConfig.SCORECARD_MAJORS)).isNotNull();
+        assertThat(caches.getCache(CacheConfig.SCORECARD_DEGREES)).isNotNull();
         assertThat(caches.getCache(CacheConfig.SCORECARD_SCHOOLS)).isNotNull();
 
         // Left dynamic, CaffeineCacheManager would lazily build an UNBOUNDED, TTL-less cache for

@@ -60,7 +60,8 @@ class AdminControllerTest {
                                 null,
                                 null,
                                 "APPROVED",
-                                "VERIFIED"));
+                                "VERIFIED",
+                                null));
 
         var envelope = controller().decide(guideUserId, new GuideDecisionRequest("APPROVED"));
 

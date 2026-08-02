@@ -33,6 +33,11 @@ class MetaControllerTest {
                 }
 
                 @Override
+                public List<Option> degreesForSchool(String schoolId) {
+                    return List.of(new Option("Bachelor's Degree", "Bachelor's Degree"));
+                }
+
+                @Override
                 public SchoolDirectory.SchoolRef getSchool(String schoolId) {
                     return new SchoolDirectory.SchoolRef(
                             schoolId, "Stanford University", "Stanford", "CA");
@@ -99,5 +104,11 @@ class MetaControllerTest {
     void majors_delegatesToTheLiveDirectory() {
         List<Option> results = new MetaController(SCHOOLS).majors("243744").data();
         assertEquals("Computer Science", results.get(0).label());
+    }
+
+    @Test
+    void degrees_delegatesToTheLiveDirectory() {
+        List<Option> results = new MetaController(SCHOOLS).degrees("243744").data();
+        assertEquals("Bachelor's Degree", results.get(0).label());
     }
 }
