@@ -12,6 +12,7 @@ import com.CampusToursLive.domain.tour.TourOfferingService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.error.ForbiddenException;
+import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.dto.TourOfferingResponse;
@@ -89,6 +90,31 @@ class GuideOfferingControllerTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.status").value(403))
                 .andExpect(jsonPath("$.title").value("Missing required role: GUIDE"));
+    }
+
+    // CTL-97 Task 6: requireRole(GUIDE) is gated by requireProvisioned() — pending -> coded 404
+    // (never a bare 401, I10), provisioned non-holder -> coded 403.
+
+    @Test
+    void list_404_withCode_whenPendingCaller() throws Exception {
+        when(currentUser.requireRole(UserRole.GUIDE))
+                .thenThrow(
+                        new NotFoundException(
+                                "Account not provisioned", "ACCOUNT_NOT_PROVISIONED"));
+
+        mvc.perform(get("/guide/offerings"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_NOT_PROVISIONED"));
+    }
+
+    @Test
+    void list_403_withCode_whenProvisionedNonHolder() throws Exception {
+        when(currentUser.requireRole(UserRole.GUIDE))
+                .thenThrow(new ForbiddenException("Missing required role: GUIDE", "ROLE_REQUIRED"));
+
+        mvc.perform(get("/guide/offerings"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ROLE_REQUIRED"));
     }
 
     @Test

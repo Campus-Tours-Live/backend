@@ -3,9 +3,9 @@ package com.CampusToursLive.domain.booking;
 import com.CampusToursLive.domain.availability.GuideAvailabilityOccurrenceRepository;
 import com.CampusToursLive.domain.availability.GuideBookingSettingsEntity;
 import com.CampusToursLive.domain.availability.GuideBookingSettingsRepository;
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.tour.TourOfferingEntity;
 import com.CampusToursLive.domain.tour.TourOfferingRepository;
 import com.CampusToursLive.domain.tour.TourStatus;
@@ -184,7 +184,7 @@ public class BookingService {
     // ---------------------------------------------------------------------------
 
     /**
-     * Create a booking for a bookable offering (ACTIVE offering, APPROVED guide, ACTIVE
+     * Create a booking for a bookable offering (ACTIVE offering, VERIFIED guide, ACTIVE
      * university). The offering's duration and price are snapshotted onto the booking; the booking
      * starts in PENDING_GUIDE_ACCEPTANCE with a 90-minute guide response window (MANUAL acceptance
      * — see the class javadoc for the MVP policy). Overlaps are pre-checked here and enforced
@@ -544,7 +544,7 @@ public class BookingService {
 
     private GuideProfileEntity requireApprovedGuide(UUID guideProfileId) {
         return guides.findById(guideProfileId)
-                .filter(g -> g.getApplicationStatus() == GuideApplicationStatus.APPROVED)
+                .filter(g -> g.getStatus() == GuideStatus.VERIFIED)
                 .orElseThrow(() -> new ValidationException("This tour is not currently bookable"));
     }
 

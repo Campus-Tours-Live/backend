@@ -1,11 +1,13 @@
 package com.CampusToursLive.web;
 
+import com.CampusToursLive.domain.guide.EnrollmentYearRules;
 import com.CampusToursLive.domain.tour.SupportedLanguages;
 import com.CampusToursLive.domain.tour.TourFeatureCatalog;
 import com.CampusToursLive.domain.tour.TourTopic;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
+import com.CampusToursLive.web.dto.EnrollmentYearRulesResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
@@ -15,6 +17,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -34,9 +38,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class MetaController {
 
     private final SchoolDirectory schools;
+    private final EnrollmentYearRules rules;
 
-    public MetaController(SchoolDirectory schools) {
+    public MetaController(SchoolDirectory schools, EnrollmentYearRules rules) {
         this.schools = schools;
+        this.rules = rules;
     }
 
     @Schema(name = "Option", description = "A { value, label } option for a controlled vocabulary.")
@@ -186,5 +192,45 @@ public class MetaController {
     @GetMapping("/degrees")
     public ApiEnvelope<List<Option>> degrees(@RequestParam("schoolId") String schoolId) {
         return ApiEnvelope.of(schools.degreesForSchool(schoolId));
+    }
+
+    @Operation(
+            summary = "Enrolment-year validation rules",
+            description =
+                    "The acceptable enrolment-year window (from the server's UTC clock) and the"
+                            + " ordered degree → longest-time-to-graduate table used to derive the"
+                            + " expected graduation-year window. Served so the browser never"
+                            + " hardcodes these numbers or reads its own clock. Cacheable, but the"
+                            + " max-age contracts to expire when the server's year turns over.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The current enrolment-year rules.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.ENROLLMENT_YEARS)))
+    @GetMapping("/enrollment-years")
+    public ResponseEntity<ApiEnvelope<EnrollmentYearRulesResponse>> enrollmentYears() {
+        // ONE snapshot for the whole response. Calling entryYearRange() and a separate
+        // cacheMaxAgeSeconds() would read the clock twice and can, across midnight UTC, emit a
+        // body describing one year beside a header computed for the next.
+        EnrollmentYearRules.EnrollmentYearSnapshot snap = rules.snapshot();
+        EnrollmentYearRules.YearRange entry = snap.entryYear();
+        List<EnrollmentYearRulesResponse.DegreeRuleView> table =
+                rules.degreeRules().stream()
+                        .map(
+                                r ->
+                                        new EnrollmentYearRulesResponse.DegreeRuleView(
+                                                r.matches(), r.years()))
+                        .toList();
+        EnrollmentYearRulesResponse body =
+                new EnrollmentYearRulesResponse(
+                        new EnrollmentYearRulesResponse.YearRangeView(entry.min(), entry.max()),
+                        table,
+                        rules.defaultMaxYearsToGraduate());
+        // Same snapshot as the body above — contracts to the year boundary, ceiling 24h.
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "public, max-age=" + snap.cacheMaxAgeSeconds())
+                .body(ApiEnvelope.of(body));
     }
 }

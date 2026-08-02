@@ -203,12 +203,95 @@ class ScorecardApiTest {
                         withSuccess(
                                 """
                                 {"results":[{"id":243744,"school.name":"Stanford University",
+                                 "school.alias":"Stanford, LSJU",
                                  "school.city":"Stanford","school.state":"CA"}]}
                                 """,
                                 MediaType.APPLICATION_JSON));
 
         assertThat(f.api().getSchool("  243744  "))
-                .isEqualTo(new SchoolRef("243744", "Stanford University", "Stanford", "CA"));
+                .isEqualTo(
+                        new SchoolRef(
+                                "243744", "Stanford University", "Stanford", "Stanford", "CA"));
+    }
+
+    @Test
+    void getSchool_shortNameIsFirstCommaTrimmedAliasToken() {
+        Fixture f = fixture("KEY");
+        f.server()
+                .expect(requestTo(Matchers.containsString("id=166683")))
+                .andRespond(
+                        withSuccess(
+                                """
+                                {"results":[{"id":166683,"school.name":
+                                 "Massachusetts Institute of Technology",
+                                 "school.alias":"MIT, M.I.T.",
+                                 "school.city":"Cambridge","school.state":"MA"}]}
+                                """,
+                                MediaType.APPLICATION_JSON));
+
+        assertThat(f.api().getSchool("166683").shortName()).isEqualTo("MIT");
+    }
+
+    @Test
+    void getSchool_shortNameToleratesASingleAliasWithNoComma() {
+        Fixture f = fixture("KEY");
+        f.server()
+                .expect(requestTo(Matchers.containsString("id=243744")))
+                .andRespond(
+                        withSuccess(
+                                """
+                                {"results":[{"id":243744,"school.name":"Stanford University",
+                                 "school.alias":"Stanford",
+                                 "school.city":"Stanford","school.state":"CA"}]}
+                                """,
+                                MediaType.APPLICATION_JSON));
+
+        assertThat(f.api().getSchool("243744").shortName()).isEqualTo("Stanford");
+    }
+
+    @Test
+    void getSchool_shortNameSkipsLeadingBlankTokens() {
+        Fixture f = fixture("KEY");
+        f.server()
+                .expect(requestTo(Matchers.containsString("id=243744")))
+                .andRespond(
+                        withSuccess(
+                                """
+                                {"results":[{"id":243744,"school.name":"Stanford University",
+                                 "school.alias":" , MIT",
+                                 "school.city":"Stanford","school.state":"CA"}]}
+                                """,
+                                MediaType.APPLICATION_JSON));
+
+        assertThat(f.api().getSchool("243744").shortName()).isEqualTo("MIT");
+    }
+
+    @Test
+    void getSchool_shortNameIsNullWhenAliasAbsentOrAllBlank() {
+        Fixture absent = fixture("KEY");
+        absent.server()
+                .expect(requestTo(Matchers.containsString("id=243744")))
+                .andRespond(
+                        withSuccess(
+                                """
+                                {"results":[{"id":243744,"school.name":"Stanford University",
+                                 "school.city":"Stanford","school.state":"CA"}]}
+                                """,
+                                MediaType.APPLICATION_JSON));
+        assertThat(absent.api().getSchool("243744").shortName()).isNull();
+
+        Fixture allBlank = fixture("KEY");
+        allBlank.server()
+                .expect(requestTo(Matchers.containsString("id=243744")))
+                .andRespond(
+                        withSuccess(
+                                """
+                                {"results":[{"id":243744,"school.name":"Stanford University",
+                                 "school.alias":" , , ",
+                                 "school.city":"Stanford","school.state":"CA"}]}
+                                """,
+                                MediaType.APPLICATION_JSON));
+        assertThat(allBlank.api().getSchool("243744").shortName()).isNull();
     }
 
     @Test
