@@ -47,6 +47,14 @@
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
 		</dependency>
 
+		<!-- Bean Validation (Hibernate Validator impl). Needed so @Valid @RequestBody actually
+		     enforces jakarta.validation constraints (@NotNull/@NotBlank/@Size/@Email/...) on
+		     request DTOs — jakarta.validation-api alone (already transitive) has no implementation. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-validation</artifactId>
+		</dependency>
+
 		<!-- Actuator: health/info endpoints + k8s liveness/readiness probes + Micrometer metrics -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

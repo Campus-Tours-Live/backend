@@ -1,5 +1,6 @@
 package com.CampusToursLive.domain.guide;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -16,37 +17,47 @@ import com.CampusToursLive.domain.participant.ParticipantType;
 import com.CampusToursLive.domain.university.CampusImageUrls;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
+import com.CampusToursLive.domain.university.UniversityStatus;
 import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
-import com.CampusToursLive.error.NotFoundException;
+import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
+import com.CampusToursLive.security.GuideProfileSnapshot;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
+import com.CampusToursLive.web.dto.GuideUniversityView;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * GuideService — guide onboarding (updateProfile) and admin review (reviewApplication). Covers
- * field validation (university, major, price, specialty topics), the draft-vs-submit split, the
- * bidirectional parent/guide exclusion, the GUIDE-role grant on submit, and the approve/reject
- * state machine that makes APPROVED reachable for the live-action gate.
+ * GuideService — guide onboarding (updateProfile). Covers field validation (university, major,
+ * price, tour topics), the draft-vs-submit split, the bidirectional parent/guide exclusion, and the
+ * GUIDE-role grant on submit. guideStatus is verification-driven — VERIFIED is set outside this
+ * service (the stubbed email-verify flow), so it's exercised here only via getProfile mapping the
+ * stored enum through to the response.
  */
 @ExtendWith(MockitoExtension.class)
 class GuideServiceTest {
 
     @Mock GuideProfileRepository guides;
-    @Mock GuideVerificationRepository verifications;
+    @Mock GuideUniversityRepository guideUniversities;
     @Mock UniversityRepository universities;
     @Mock ParticipantProfileRepository participants;
     @Mock UserRepository users;
@@ -54,17 +65,42 @@ class GuideServiceTest {
     @Mock SchoolDirectory schools;
     private final CampusImageUrls campusImages = new CampusImageUrls("https://r2.example/");
 
+    /**
+     * Fixed at a single instant so the entryYear/classYear window tests are true regardless of what
+     * day this suite happens to run — see EnrollmentYearRulesTest for the same clock.
+     */
+    private static final Clock TEST_CLOCK =
+            Clock.fixed(Instant.parse("2026-07-29T12:00:00Z"), ZoneOffset.UTC);
+
+    private final EnrollmentYearRules rules = new EnrollmentYearRules(TEST_CLOCK);
+
+    /** A stable, always-valid university id for the entryYear/classYear tests below. */
+    private static final String UNIVERSITY_ID = UUID.randomUUID().toString();
+
+    /**
+     * A valid entryYear under {@link #TEST_CLOCK} (window [2016, 2027]), carried by every request
+     * fixture that is not itself about the year rules.
+     *
+     * <p>entryYear is REQUIRED on the row updateProfile writes: the column is NOT NULL, and a
+     * request that supplies none — with no stored row to merge one from — is rejected with a 422
+     * rather than being allowed to reach the repository and fail the constraint as a 500. These
+     * fixtures used to pass {@code null} and survived only because the repository is a mock; the
+     * behaviour they pinned does not exist in production.
+     */
+    private static final int VALID_ENTRY_YEAR = 2023;
+
     private GuideService service() {
         return new GuideService(
                 guides,
-                verifications,
+                guideUniversities,
                 universities,
                 participants,
                 users,
                 roleGrant,
                 schools,
                 campusImages,
-                new ObjectMapper());
+                new ObjectMapper(),
+                rules);
     }
 
     private static UserEntity user(UUID id) {
@@ -76,8 +112,7 @@ class GuideServiceTest {
     private static GuideProfileUpdateRequest req(
             String universityId,
             String major,
-            List<String> specialties,
-            Long basePriceCents,
+            List<String> tourTopics,
             String verificationEmail,
             Boolean submit) {
         return new GuideProfileUpdateRequest(
@@ -88,20 +123,20 @@ class GuideServiceTest {
                 null,
                 null,
                 null,
-                specialties,
-                basePriceCents,
+                tourTopics,
                 verificationEmail,
                 submit,
-                "Bachelor's Degree");
+                "Bachelor's Degree",
+                VALID_ENTRY_YEAR);
     }
 
     /**
-     * A complete submit=true request — includes the now-required bio + specialties (and a valid
+     * A complete submit=true request — includes the now-required bio + tourTopics (and a valid
      * verification email) so submit reaches finalization instead of tripping a required-field
      * guard.
      */
     private static GuideProfileUpdateRequest submitReq(
-            String universityId, String bio, List<String> specialties) {
+            String universityId, String bio, List<String> tourTopics) {
         return new GuideProfileUpdateRequest(
                 null,
                 null,
@@ -110,15 +145,42 @@ class GuideServiceTest {
                 null,
                 bio,
                 null,
-                specialties,
-                null,
+                tourTopics,
                 "me@school.edu",
                 true,
-                "Bachelor's Degree");
+                "Bachelor's Degree",
+                VALID_ENTRY_YEAR);
     }
 
     private static RuntimeException badRequest(Runnable r) {
         return assertThrows(RuntimeException.class, r::run);
+    }
+
+    /** Defaults to a bachelor's degree — the common case for these tests. */
+    private static GuideProfileUpdateRequest guideRequestWith(Integer entryYear, String classYear) {
+        return guideRequestWith(entryYear, classYear, "Bachelor's Degree");
+    }
+
+    /**
+     * A complete, otherwise-valid guide profile request varying only the three inputs to the year
+     * rule. `degree` is one of them: it sets classYear's ceiling, so it belongs here rather than
+     * being fixed filler.
+     */
+    private static GuideProfileUpdateRequest guideRequestWith(
+            Integer entryYear, String classYear, String degree) {
+        return new GuideProfileUpdateRequest(
+                "Maya",
+                "Chen",
+                UNIVERSITY_ID,
+                "Marine Biology",
+                classYear,
+                "Third-year student and campus tour lead.",
+                List.of("en-US"),
+                List.of("DORM_HOUSING"),
+                "maya.chen@ncu.edu",
+                false,
+                degree,
+                entryYear);
     }
 
     // ---- updateProfile: field validation -------------------------------------------------
@@ -131,7 +193,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(UUID.randomUUID()),
-                                                req(null, "CS", null, null, null, false)));
+                                                req(null, "CS", null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
         verifyNoInteractions(roleGrant);
     }
@@ -144,7 +206,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(UUID.randomUUID()),
-                                                req("not-a-uuid", "CS", null, null, null, false)));
+                                                req("not-a-uuid", "CS", null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
     }
 
@@ -156,20 +218,18 @@ class GuideServiceTest {
         when(schools.getSchool("243744"))
                 .thenReturn(
                         new SchoolDirectory.SchoolRef(
-                                "243744", "Stanford University", "Stanford", "CA"));
+                                "243744", "Stanford University", "Stanford", "Stanford", "CA"));
         when(universities.save(org.mockito.ArgumentMatchers.any(UniversityEntity.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
 
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(
-                () ->
-                        service()
-                                .updateProfile(
-                                        user(uid), req("243744", "CS", null, null, null, false)));
+                () -> service().updateProfile(user(uid), req("243744", "CS", null, null, false)));
 
         ArgumentCaptor<UniversityEntity> saved = ArgumentCaptor.forClass(UniversityEntity.class);
         verify(universities).save(saved.capture());
         assertEquals("sc-243744", saved.getValue().getSlug());
         assertEquals("Stanford University", saved.getValue().getName());
+        assertEquals("Stanford", saved.getValue().getShortName());
         assertEquals("America/Los_Angeles", saved.getValue().getTimezone()); // CA → Pacific
     }
 
@@ -179,7 +239,7 @@ class GuideServiceTest {
         when(schools.getSchool("166027"))
                 .thenReturn(
                         new SchoolDirectory.SchoolRef(
-                                "166027", "Harvard University", "Cambridge", "MA"));
+                                "166027", "Harvard University", "Harvard", "Cambridge", "MA"));
         ArgumentCaptor<UniversityEntity> saved = ArgumentCaptor.forClass(UniversityEntity.class);
         when(universities.save(saved.capture())).thenAnswer(i -> i.getArgument(0));
 
@@ -195,6 +255,91 @@ class GuideServiceTest {
     }
 
     @Test
+    void upsertFromDirectory_absorbsExistingUniversityByName_reKeyingSlugAndShortName() {
+        // A legacy seed row ("foo" slug, null shortName) shares the Scorecard school's name.
+        // Absorption must REUSE that row (re-key its slug into the sc-<id> namespace and fill in
+        // the Scorecard shortName) instead of inserting a brand-new sc-X row.
+        UUID existingId = UUID.randomUUID();
+        UniversityEntity existing = new UniversityEntity();
+        existing.setId(existingId);
+        existing.setSlug("foo");
+        existing.setName("University of Foo");
+        existing.setShortName(null);
+        existing.setCity("Foo City");
+        existing.setRegion("CA");
+        existing.setTimezone("America/Los_Angeles");
+        existing.setStatus(UniversityStatus.ACTIVE);
+        existing.setImageUrl("https://existing.example/foo.png");
+
+        when(universities.findBySlug("sc-X")).thenReturn(Optional.empty());
+        when(schools.getSchool("X"))
+                .thenReturn(
+                        new SchoolDirectory.SchoolRef(
+                                "X", "University of Foo", "Foo", "Foo City", "CA"));
+        when(universities.findFirstByName("University of Foo")).thenReturn(Optional.of(existing));
+        when(universities.save(org.mockito.ArgumentMatchers.any(UniversityEntity.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        UUID result = service().resolveUniversityForTest("X");
+
+        assertEquals(existingId, result);
+        assertEquals("sc-X", existing.getSlug());
+        assertEquals("Foo", existing.getShortName());
+        // Absorption must not overwrite the existing row's city/region/imageUrl.
+        assertEquals("Foo City", existing.getCity());
+        assertEquals("CA", existing.getRegion());
+        assertEquals("https://existing.example/foo.png", existing.getImageUrl());
+        verify(universities).save(existing);
+    }
+
+    @Test
+    void upsertFromDirectory_absorb_doesNotWipeExistingShortName_whenScorecardAliasIsNull() {
+        UUID existingId = UUID.randomUUID();
+        UniversityEntity existing = new UniversityEntity();
+        existing.setId(existingId);
+        existing.setSlug("foo");
+        existing.setName("University of Foo");
+        existing.setShortName("Legacy");
+        existing.setCity("Foo City");
+        existing.setRegion("CA");
+        existing.setTimezone("America/Los_Angeles");
+        existing.setStatus(UniversityStatus.ACTIVE);
+
+        when(universities.findBySlug("sc-X")).thenReturn(Optional.empty());
+        when(schools.getSchool("X"))
+                .thenReturn(
+                        new SchoolDirectory.SchoolRef(
+                                "X", "University of Foo", null, "Foo City", "CA"));
+        when(universities.findFirstByName("University of Foo")).thenReturn(Optional.of(existing));
+        when(universities.save(org.mockito.ArgumentMatchers.any(UniversityEntity.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        UUID result = service().resolveUniversityForTest("X");
+
+        assertEquals(existingId, result);
+        assertEquals("sc-X", existing.getSlug());
+        assertEquals("Legacy", existing.getShortName()); // not wiped by a null Scorecard alias
+    }
+
+    @Test
+    void upsertFromDirectory_noNameMatch_createsNewRow() {
+        when(universities.findBySlug("sc-Y")).thenReturn(Optional.empty());
+        when(schools.getSchool("Y"))
+                .thenReturn(
+                        new SchoolDirectory.SchoolRef(
+                                "Y", "Brand New University", "BNU", "Nowhere", "TX"));
+        when(universities.findFirstByName("Brand New University")).thenReturn(Optional.empty());
+        ArgumentCaptor<UniversityEntity> saved = ArgumentCaptor.forClass(UniversityEntity.class);
+        when(universities.save(saved.capture())).thenAnswer(i -> i.getArgument(0));
+
+        service().resolveUniversityForTest("Y");
+
+        assertEquals("sc-Y", saved.getValue().getSlug());
+        assertEquals("Brand New University", saved.getValue().getName());
+        assertEquals("BNU", saved.getValue().getShortName());
+    }
+
+    @Test
     void update_422_whenUniversityUnknown() {
         UUID uni = UUID.randomUUID();
         when(universities.existsById(uni)).thenReturn(false);
@@ -204,13 +349,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(UUID.randomUUID()),
-                                                req(
-                                                        uni.toString(),
-                                                        "CS",
-                                                        null,
-                                                        null,
-                                                        null,
-                                                        false)));
+                                                req(uni.toString(), "CS", null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
     }
 
@@ -224,35 +363,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(UUID.randomUUID()),
-                                                req(
-                                                        uni.toString(),
-                                                        "  ",
-                                                        null,
-                                                        null,
-                                                        null,
-                                                        false)));
-        assertInstanceOf(ValidationException.class, ex);
-    }
-
-    @Test
-    void update_422_whenPriceOutOfBounds() {
-        UUID uid = UUID.randomUUID();
-        UUID uni = UUID.randomUUID();
-        when(universities.existsById(uni)).thenReturn(true);
-        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
-        var ex =
-                badRequest(
-                        () ->
-                                service()
-                                        .updateProfile(
-                                                user(uid),
-                                                req(
-                                                        uni.toString(),
-                                                        "CS",
-                                                        null,
-                                                        100L,
-                                                        null,
-                                                        false)));
+                                                req(uni.toString(), "  ", null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
     }
 
@@ -273,7 +384,6 @@ class GuideServiceTest {
                                                         "CS",
                                                         List.of("NOT_A_TOPIC"),
                                                         null,
-                                                        null,
                                                         false)));
         assertInstanceOf(ValidationException.class, ex);
     }
@@ -287,11 +397,11 @@ class GuideServiceTest {
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
 
-        service().updateProfile(user(uid), req(uni.toString(), "CS", null, 5000L, null, false));
+        service().updateProfile(user(uid), req(uni.toString(), "CS", null, null, false));
 
         verify(guides).save(any());
         verify(users).save(any());
-        verifyNoInteractions(roleGrant, verifications); // draft: no role, no verification record
+        verifyNoInteractions(roleGrant); // draft: no role granted
     }
 
     @Test
@@ -308,13 +418,13 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(uid),
-                                                req(uni.toString(), "CS", null, null, null, true)));
+                                                req(uni.toString(), "CS", null, null, true)));
         assertInstanceOf(ValidationException.class, ex);
         verify(roleGrant, never()).grant(any(), any());
     }
 
     @Test
-    void update_submit_422_whenParentParticipantBecomingGuide() {
+    void update_submit_409_roleNotEligible_whenParentParticipantBecomingGuide() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
         ParticipantProfileEntity parent = new ParticipantProfileEntity();
@@ -333,15 +443,17 @@ class GuideServiceTest {
                                                         uni.toString(),
                                                         "CS",
                                                         null,
-                                                        null,
                                                         "me@school.edu",
                                                         true)));
-        assertInstanceOf(ValidationException.class, ex);
+        assertInstanceOf(ConflictException.class, ex);
+        ConflictException cex = (ConflictException) ex;
+        assertEquals("ROLE_NOT_ELIGIBLE", cex.code());
+        assertEquals("GUIDE", cex.properties().get("role"));
         verify(roleGrant, never()).grant(any(), any());
     }
 
     @Test
-    void update_submit_grantsGuideRoleAndSetsPendingReview() {
+    void update_submit_grantsGuideRoleAndSetsPending() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
         UserEntity u = user(uid);
@@ -358,10 +470,133 @@ class GuideServiceTest {
                                         "I lead weekly campus tours for prospective students.",
                                         List.of("GENERAL_CAMPUS")));
 
-        assertEquals("PENDING_REVIEW", res.applicationStatus());
-        verify(verifications).save(any()); // a UNIVERSITY_EMAIL verification record is created
+        assertEquals("PENDING", res.guideStatus());
         verify(roleGrant).grant(u, UserRole.GUIDE);
         verify(users).save(u);
+    }
+
+    @Test
+    void update_submit_upsertsGuideUniversityRow_withSchoolEmailAndPendingStatus() {
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        UserEntity u = user(uid);
+        when(universities.existsById(uni)).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(participants.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
+
+        service()
+                .updateProfile(
+                        u,
+                        submitReq(
+                                uni.toString(),
+                                "I lead weekly campus tours for prospective students.",
+                                List.of("GENERAL_CAMPUS")));
+
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        GuideUniversityEntity saved = captor.getValue();
+        assertEquals(uni, saved.getUniversityId());
+        assertEquals("CS", saved.getMajor());
+        assertEquals("Bachelor's Degree", saved.getDegree());
+        assertEquals("me@school.edu", saved.getSchoolEmail());
+        assertEquals(GuideVerificationStatus.PENDING, saved.getVerificationStatus());
+        org.junit.jupiter.api.Assertions.assertNotNull(saved.getGuideProfileId());
+    }
+
+    @Test
+    void update_submit_updatesExistingGuideUniversityRow_matchingUniversityId() {
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        UUID profileId = UUID.randomUUID();
+        UserEntity u = user(uid);
+        GuideProfileEntity existing = new GuideProfileEntity();
+        existing.setId(profileId);
+        existing.setUserId(uid);
+        when(universities.existsById(uni)).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(existing));
+        when(participants.findByUserId(uid)).thenReturn(Optional.empty());
+
+        UUID rowId = UUID.randomUUID();
+        GuideUniversityEntity existingRow = new GuideUniversityEntity();
+        existingRow.setId(rowId);
+        existingRow.setGuideProfileId(profileId);
+        existingRow.setUniversityId(uni);
+        existingRow.setMajor("Old Major");
+        when(guideUniversities.findByGuideProfileId(profileId)).thenReturn(List.of(existingRow));
+
+        service()
+                .updateProfile(
+                        u,
+                        submitReq(
+                                uni.toString(),
+                                "I lead weekly campus tours for prospective students.",
+                                List.of("GENERAL_CAMPUS")));
+
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        GuideUniversityEntity saved = captor.getValue();
+        assertEquals(rowId, saved.getId()); // reused the existing row, not a new insert
+        assertEquals("CS", saved.getMajor());
+        assertEquals("me@school.edu", saved.getSchoolEmail());
+        assertEquals(GuideVerificationStatus.PENDING, saved.getVerificationStatus());
+    }
+
+    @Test
+    void update_draft_upsertsGuideUniversityRow_withoutSchoolEmail() {
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        when(universities.existsById(uni)).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
+
+        service().updateProfile(user(uid), req(uni.toString(), "CS", null, null, false));
+
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        GuideUniversityEntity saved = captor.getValue();
+        assertEquals(uni, saved.getUniversityId());
+        assertEquals("CS", saved.getMajor());
+        org.junit.jupiter.api.Assertions.assertNull(saved.getSchoolEmail());
+        assertEquals(GuideVerificationStatus.NOT_SUBMITTED, saved.getVerificationStatus());
+    }
+
+    @Test
+    void getProfile_doesNotExposeSchoolEmail() {
+        // Regression guard: schoolEmail (PII) lives only on guide_universities and must never
+        // leak through GuideProfileResponse or GuideUniversityView.
+        List<String> responseFields =
+                java.util.Arrays.stream(GuideProfileResponse.class.getRecordComponents())
+                        .map(java.lang.reflect.RecordComponent::getName)
+                        .toList();
+        org.junit.jupiter.api.Assertions.assertFalse(responseFields.contains("schoolEmail"));
+        List<String> universityViewFields =
+                java.util.Arrays.stream(GuideUniversityView.class.getRecordComponents())
+                        .map(java.lang.reflect.RecordComponent::getName)
+                        .toList();
+        org.junit.jupiter.api.Assertions.assertFalse(universityViewFields.contains("schoolEmail"));
+    }
+
+    @Test
+    void getProfile_flatUniversityFieldsAreGone_replacedByUniversitiesArray() {
+        // Regression guard for this task: the Phase-1 flat universityId/major/classYear/degree/
+        // verificationStatus fields are removed from GuideProfileResponse — replaced by
+        // universities[]. Would fail to compile if they came back.
+        List<String> fieldNames =
+                java.util.Arrays.stream(GuideProfileResponse.class.getRecordComponents())
+                        .map(java.lang.reflect.RecordComponent::getName)
+                        .toList();
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("universityId"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("universityName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("universityShortName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("major"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("classYear"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("degree"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("verificationStatus"));
+        org.junit.jupiter.api.Assertions.assertTrue(fieldNames.contains("universities"));
     }
 
     @Test
@@ -425,87 +660,22 @@ class GuideServiceTest {
         verify(roleGrant, never()).grant(any(), any());
     }
 
-    // ---- reviewApplication ----------------------------------------------------------------
-
-    @Test
-    void review_approve_setsApprovedAndVerified() {
-        UUID guideUserId = UUID.randomUUID();
-        GuideProfileEntity profile = new GuideProfileEntity();
-        profile.setId(UUID.randomUUID());
-        profile.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
-        when(guides.findByUserId(guideUserId)).thenReturn(Optional.of(profile));
-        when(users.findById(guideUserId)).thenReturn(Optional.of(user(guideUserId)));
-
-        GuideProfileResponse res = service().reviewApplication(guideUserId, "approved");
-
-        assertEquals("APPROVED", res.applicationStatus());
-        assertEquals(GuideApplicationStatus.APPROVED, profile.getApplicationStatus());
-        assertEquals(GuideVerificationStatus.VERIFIED, profile.getVerificationStatus());
-    }
-
-    @Test
-    void review_reject_setsRejectedWithoutVerifying() {
-        UUID guideUserId = UUID.randomUUID();
-        GuideProfileEntity profile = new GuideProfileEntity();
-        profile.setId(UUID.randomUUID());
-        profile.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
-        profile.setVerificationStatus(GuideVerificationStatus.PENDING); // submitted, under review
-        when(guides.findByUserId(guideUserId)).thenReturn(Optional.of(profile));
-        when(users.findById(guideUserId)).thenReturn(Optional.of(user(guideUserId)));
-
-        service().reviewApplication(guideUserId, "REJECTED");
-
-        assertEquals(GuideApplicationStatus.REJECTED, profile.getApplicationStatus());
-        // reject must NOT flip the verification to VERIFIED — it stays where it was.
-        org.junit.jupiter.api.Assertions.assertEquals(
-                GuideVerificationStatus.PENDING, profile.getVerificationStatus());
-    }
-
-    @Test
-    void review_422_whenDecisionNotApproveOrReject() {
-        var ex = badRequest(() -> service().reviewApplication(UUID.randomUUID(), "MAYBE"));
-        assertInstanceOf(ValidationException.class, ex);
-        verifyNoInteractions(guides, users);
-    }
-
-    @Test
-    void review_404_whenNoGuideApplication() {
-        UUID guideUserId = UUID.randomUUID();
-        when(guides.findByUserId(guideUserId)).thenReturn(Optional.empty());
-        var ex = badRequest(() -> service().reviewApplication(guideUserId, "APPROVED"));
-        assertInstanceOf(NotFoundException.class, ex);
-    }
-
-    @Test
-    void review_404_whenUserRowMissing() {
-        UUID guideUserId = UUID.randomUUID();
-        GuideProfileEntity profile = new GuideProfileEntity();
-        profile.setId(UUID.randomUUID());
-        when(guides.findByUserId(guideUserId)).thenReturn(Optional.of(profile));
-        when(users.findById(guideUserId)).thenReturn(Optional.empty());
-        var ex = badRequest(() -> service().reviewApplication(guideUserId, "APPROVED"));
-        assertInstanceOf(NotFoundException.class, ex);
-    }
-
     // ---- getProfile -----------------------------------------------------------------------
 
     @Test
     void getProfile_withExistingProfile_mapsAllFields() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
+        UUID profileId = UUID.randomUUID();
         UserEntity u = user(uid);
         u.setEmail("g@school.edu");
         u.setAccountStatus(com.CampusToursLive.domain.user.AccountStatus.ACTIVE);
         GuideProfileEntity profile = new GuideProfileEntity();
-        profile.setUniversityId(uni);
-        profile.setMajor("CS");
-        profile.setClassYear("2026");
+        profile.setId(profileId);
         profile.setBio("hi");
-        profile.setLanguages("[\"en-US\"]");
-        profile.setSpecialties("[\"GENERAL_CAMPUS\"]");
-        profile.setBasePriceCents(5000L);
-        profile.setApplicationStatus(GuideApplicationStatus.APPROVED);
-        profile.setVerificationStatus(GuideVerificationStatus.VERIFIED);
+        profile.setSpokenLanguages("[\"en-US\"]");
+        profile.setTourTopics("[\"GENERAL_CAMPUS\"]");
+        profile.setStatus(GuideStatus.VERIFIED);
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
         UniversityEntity university = new UniversityEntity();
         university.setId(uni);
@@ -513,16 +683,32 @@ class GuideServiceTest {
         university.setShortName("Stanford");
         when(universities.findById(uni)).thenReturn(Optional.of(university));
 
+        GuideUniversityEntity row = new GuideUniversityEntity();
+        row.setId(UUID.randomUUID());
+        row.setGuideProfileId(profileId);
+        row.setUniversityId(uni);
+        row.setMajor("CS");
+        row.setDegree("Bachelor's Degree");
+        row.setClassYear("2026");
+        row.setEntryYear(2022);
+        row.setVerificationStatus(GuideVerificationStatus.VERIFIED);
+        when(guideUniversities.findByGuideProfileId(profileId)).thenReturn(List.of(row));
+
         GuideProfileResponse res = service().getProfile(u);
 
-        assertEquals(uni.toString(), res.universityId());
-        assertEquals("Stanford University", res.universityName());
-        assertEquals("Stanford", res.universityShortName());
-        assertEquals("CS", res.major());
-        assertEquals("APPROVED", res.applicationStatus());
-        assertEquals("VERIFIED", res.verificationStatus());
-        assertEquals(List.of("en-US"), res.languages());
-        assertEquals(List.of("GENERAL_CAMPUS"), res.specialties());
+        assertEquals("VERIFIED", res.guideStatus());
+        assertEquals(List.of("en-US"), res.spokenLanguages());
+        assertEquals(List.of("GENERAL_CAMPUS"), res.tourTopics());
+        assertEquals(1, res.universities().size());
+        GuideUniversityView view = res.universities().get(0);
+        assertEquals(uni.toString(), view.universityId());
+        assertEquals("Stanford University", view.universityName());
+        assertEquals("Stanford", view.universityShortName());
+        assertEquals("CS", view.major());
+        assertEquals("Bachelor's Degree", view.degree());
+        assertEquals("2026", view.classYear());
+        assertEquals(2022, view.entryYear());
+        assertEquals("VERIFIED", view.verificationStatus());
     }
 
     @Test
@@ -533,31 +719,133 @@ class GuideServiceTest {
 
         GuideProfileResponse res = service().getProfile(u);
 
-        org.junit.jupiter.api.Assertions.assertNull(res.universityId());
-        org.junit.jupiter.api.Assertions.assertNull(res.major());
-        org.junit.jupiter.api.Assertions.assertNull(res.applicationStatus());
-        org.junit.jupiter.api.Assertions.assertNull(res.verificationStatus());
+        org.junit.jupiter.api.Assertions.assertNull(res.guideStatus());
+        org.junit.jupiter.api.Assertions.assertTrue(res.universities().isEmpty());
     }
 
     @Test
     void getProfile_profilePresentButNullEnumsAndArrays() {
         UUID uid = UUID.randomUUID();
         UserEntity u = user(uid);
-        // accountStatus null, applicationStatus null, verificationStatus null, null arrays.
+        // guideStatus null, null arrays.
         GuideProfileEntity profile = new GuideProfileEntity();
-        profile.setApplicationStatus(null);
-        profile.setVerificationStatus(null);
-        profile.setLanguages(null);
-        profile.setSpecialties("   ");
+        profile.setStatus(null);
+        profile.setSpokenLanguages(null);
+        profile.setTourTopics("   ");
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
 
         GuideProfileResponse res = service().getProfile(u);
 
-        org.junit.jupiter.api.Assertions.assertNull(res.accountStatus());
-        org.junit.jupiter.api.Assertions.assertNull(res.applicationStatus());
-        org.junit.jupiter.api.Assertions.assertNull(res.verificationStatus());
-        assertEquals(List.of(), res.languages()); // null json → empty via readArray null branch
-        assertEquals(List.of(), res.specialties()); // blank json → empty via readArray blank branch
+        org.junit.jupiter.api.Assertions.assertNull(res.guideStatus());
+        org.junit.jupiter.api.Assertions.assertTrue(res.universities().isEmpty());
+        assertEquals(
+                List.of(), res.spokenLanguages()); // null json → empty via readArray null branch
+        assertEquals(List.of(), res.tourTopics()); // blank json → empty via readArray blank branch
+    }
+
+    @Test
+    void getProfile_doesNotExposeIdentityFields() {
+        // Regression guard for the profile-contract-v2 identity split: /guide/profile is
+        // role-scoped — identity (user id, name, email, account status) lives only
+        // on /userinfo. GuideProfileResponse no longer declares those accessors at all, so
+        // this test documents the removal (would fail to compile if they came back).
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        UUID profileId = UUID.randomUUID();
+        UserEntity u = user(uid);
+        GuideProfileEntity profile = new GuideProfileEntity();
+        profile.setId(profileId);
+        profile.setStatus(GuideStatus.PENDING);
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
+        when(universities.findById(uni)).thenReturn(Optional.empty());
+        GuideUniversityEntity row = new GuideUniversityEntity();
+        row.setId(UUID.randomUUID());
+        row.setGuideProfileId(profileId);
+        row.setUniversityId(uni);
+        row.setMajor("CS");
+        when(guideUniversities.findByGuideProfileId(profileId)).thenReturn(List.of(row));
+
+        GuideProfileResponse res = service().getProfile(u);
+
+        assertEquals("PENDING", res.guideStatus());
+        assertEquals(uni.toString(), res.universities().get(0).universityId());
+        List<String> fieldNames =
+                java.util.Arrays.stream(GuideProfileResponse.class.getRecordComponents())
+                        .map(java.lang.reflect.RecordComponent::getName)
+                        .toList();
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("userId"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("firstName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("lastName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("displayName"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("email"));
+        org.junit.jupiter.api.Assertions.assertFalse(fieldNames.contains("accountStatus"));
+    }
+
+    // ---- getProfile(GuideProfileSnapshot): the GET /guide/profile read path (CTL-97 Task 5) ---
+
+    @Test
+    void getProfile_fromSnapshot_mapsAllFieldsWithoutRequeryingGuideProfiles() {
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        UUID profileId = UUID.randomUUID();
+        GuideProfileSnapshot snapshot =
+                new GuideProfileSnapshot(
+                        profileId,
+                        uid,
+                        "hi",
+                        "[\"en-US\"]",
+                        "[\"GENERAL_CAMPUS\"]",
+                        GuideStatus.VERIFIED,
+                        Instant.now(),
+                        Instant.now());
+        UniversityEntity university = new UniversityEntity();
+        university.setId(uni);
+        university.setName("Stanford University");
+        university.setShortName("Stanford");
+        when(universities.findById(uni)).thenReturn(Optional.of(university));
+        GuideUniversityEntity row = new GuideUniversityEntity();
+        row.setId(UUID.randomUUID());
+        row.setGuideProfileId(profileId);
+        row.setUniversityId(uni);
+        row.setMajor("CS");
+        row.setDegree("Bachelor's Degree");
+        row.setClassYear("2026");
+        row.setEntryYear(2022);
+        row.setVerificationStatus(GuideVerificationStatus.VERIFIED);
+        when(guideUniversities.findByGuideProfileId(profileId)).thenReturn(List.of(row));
+
+        GuideProfileResponse res = service().getProfile(snapshot);
+
+        assertEquals("VERIFIED", res.guideStatus());
+        assertEquals("hi", res.bio());
+        assertEquals(List.of("en-US"), res.spokenLanguages());
+        assertEquals(List.of("GENERAL_CAMPUS"), res.tourTopics());
+        assertEquals(1, res.universities().size());
+        assertEquals(uni.toString(), res.universities().get(0).universityId());
+        verify(guides, never()).findByUserId(any());
+    }
+
+    @Test
+    void getProfile_fromSnapshot_nullStatusAndBlankArrays_mapToNullAndEmpty() {
+        GuideProfileSnapshot snapshot =
+                new GuideProfileSnapshot(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        null,
+                        null,
+                        "   ",
+                        null,
+                        Instant.now(),
+                        Instant.now());
+        when(guideUniversities.findByGuideProfileId(snapshot.id())).thenReturn(List.of());
+
+        GuideProfileResponse res = service().getProfile(snapshot);
+
+        org.junit.jupiter.api.Assertions.assertNull(res.guideStatus());
+        org.junit.jupiter.api.Assertions.assertNull(res.bio());
+        assertEquals(List.of(), res.spokenLanguages());
+        assertEquals(List.of(), res.tourTopics());
+        org.junit.jupiter.api.Assertions.assertTrue(res.universities().isEmpty());
     }
 
     // ---- updateProfile: optional fields & display-name sync -------------------------------
@@ -581,9 +869,9 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        VALID_ENTRY_YEAR);
 
         service().updateProfile(u, r);
 
@@ -601,7 +889,7 @@ class GuideServiceTest {
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
 
         // both names null → L73 condition false (short-circuits) → displayName untouched.
-        service().updateProfile(u, req(uni.toString(), "CS", null, null, null, false));
+        service().updateProfile(u, req(uni.toString(), "CS", null, null, false));
 
         org.junit.jupiter.api.Assertions.assertNull(u.getDisplayName());
     }
@@ -618,20 +906,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(uid),
-                                                req(
-                                                        uni.toString(),
-                                                        null,
-                                                        null,
-                                                        null,
-                                                        null,
-                                                        false)));
-        assertInstanceOf(ValidationException.class, ex);
-    }
-
-    @Test
-    void review_422_whenDecisionNull() {
-        // decision null → L201 null branch.
-        var ex = badRequest(() -> service().reviewApplication(UUID.randomUUID(), null));
+                                                req(uni.toString(), null, null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
     }
 
@@ -643,6 +918,8 @@ class GuideServiceTest {
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
 
+        // classYear is now anchored on entryYear (not on today), so an entryYear that puts 2026
+        // inside the Bachelor's window [entryYear+1, entryYear+6] must be supplied.
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
                         "Ada",
@@ -653,10 +930,10 @@ class GuideServiceTest {
                         "bio",
                         List.of("en-US", "fr-FR"),
                         List.of("GENERAL_CAMPUS"),
-                        5000L,
                         null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        2023);
 
         service().updateProfile(u, r);
 
@@ -665,7 +942,7 @@ class GuideServiceTest {
         assertEquals("Ada Lovelace", u.getDisplayName());
         verify(guides).save(any());
         verify(users).save(u);
-        verifyNoInteractions(roleGrant, verifications);
+        verifyNoInteractions(roleGrant);
     }
 
     @Test
@@ -675,6 +952,7 @@ class GuideServiceTest {
         UserEntity u = user(uid);
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
 
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
@@ -687,13 +965,50 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
+                        false,
+                        "Bachelor's Degree",
+                        VALID_ENTRY_YEAR);
+
+        service().updateProfile(u, r);
+
+        // Degree now lives on the guide_universities row, not a flat response field.
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        assertEquals("Bachelor's Degree", captor.getValue().getDegree());
+    }
+
+    @Test
+    void update_persistsEntryYearOnGuideUniversityRow() {
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        UserEntity u = user(uid);
+        when(universities.existsById(uni)).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
+
+        GuideProfileUpdateRequest r =
+                new GuideProfileUpdateRequest(
+                        null,
+                        null,
+                        uni.toString(),
+                        "CS",
+                        null,
+                        null,
+                        null,
+                        null,
                         null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        2021);
 
-        GuideProfileResponse res = service().updateProfile(u, r);
+        service().updateProfile(u, r);
 
-        assertEquals("Bachelor's Degree", res.degree());
+        // entryYear now lives on the guide_universities row, not a flat response field.
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        assertEquals(2021, captor.getValue().getEntryYear());
     }
 
     @Test
@@ -713,8 +1028,8 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
+                        null,
                         null);
         var ex = badRequest(() -> service().updateProfile(user(uid), r));
         assertInstanceOf(ValidationException.class, ex);
@@ -736,37 +1051,45 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
         var ex = badRequest(() -> service().updateProfile(user(uid), r));
         assertInstanceOf(ValidationException.class, ex);
     }
 
+    /**
+     * classYear is anchored on entryYear now, not on today (see EnrollmentYearRules), so a
+     * "too-far-in-the-future" classYear must be expressed relative to a supplied entryYear rather
+     * than relative to the current year.
+     */
     @Test
     void update_422_whenClassYearOutOfRange() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
         when(universities.existsById(uni)).thenReturn(true);
-        String farFuture = String.valueOf(java.time.Year.now().getValue() + 50);
+        int entryYear = 2023;
+        String tooFarFuture =
+                String.valueOf(rules.classYearRange(entryYear, "Bachelor's Degree").max() + 1);
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
                         null,
                         null,
                         uni.toString(),
                         "CS",
-                        farFuture,
-                        null,
+                        tooFarFuture,
                         null,
                         null,
                         null,
                         null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        entryYear);
         var ex = badRequest(() -> service().updateProfile(user(uid), r));
         assertInstanceOf(ValidationException.class, ex);
     }
 
+    /** classYear within [entryYear+1, entryYear+6] (Bachelor's) is accepted. */
     @Test
     void update_acceptsValidClassYearWithinDegreeWindow() {
         UUID uid = UUID.randomUUID();
@@ -774,7 +1097,9 @@ class GuideServiceTest {
         UserEntity u = user(uid);
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
-        String year = String.valueOf(java.time.Year.now().getValue() + 4); // within Bachelor's +6
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
+        int entryYear = 2023;
+        String year = String.valueOf(rules.classYearRange(entryYear, "Bachelor's Degree").min());
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
                         null,
@@ -786,59 +1111,58 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        entryYear);
 
-        GuideProfileResponse res = service().updateProfile(u, r);
+        service().updateProfile(u, r);
 
-        assertEquals(year, res.classYear());
+        // classYear now lives on the guide_universities row, not a flat response field.
+        ArgumentCaptor<GuideUniversityEntity> captor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities).save(captor.capture());
+        assertEquals(year, captor.getValue().getClassYear());
     }
 
-    @Test
-    void gradYearBufferForDegree_mapsEachCredentialLevelAndDefault() {
-        assertEquals(9, GuideService.gradYearBufferForDegree("Doctoral Degree"));
-        assertEquals(9, GuideService.gradYearBufferForDegree("First Professional Degree"));
-        assertEquals(3, GuideService.gradYearBufferForDegree("Master's Degree"));
-        assertEquals(3, GuideService.gradYearBufferForDegree("Post-baccalaureate Certificate"));
-        assertEquals(6, GuideService.gradYearBufferForDegree("Bachelor's Degree"));
-        assertEquals(3, GuideService.gradYearBufferForDegree("Associate's Degree"));
-        assertEquals(3, GuideService.gradYearBufferForDegree("Undergraduate Certificate"));
-        assertEquals(3, GuideService.gradYearBufferForDegree("Diploma"));
-        assertEquals(8, GuideService.gradYearBufferForDegree("Some Other Credential"));
-    }
-
+    /**
+     * Below entryYear+1 is rejected — graduating in or before your own enrolment year is not a real
+     * case (see EnrollmentYearRules#classYearRange).
+     */
     @Test
     void update_422_whenClassYearBelowFloor() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
         when(universities.existsById(uni)).thenReturn(true);
-        String tooOld = String.valueOf(java.time.Year.now().getValue() - 20); // below the -10 floor
+        int entryYear = 2023;
+        String belowFloor =
+                String.valueOf(rules.classYearRange(entryYear, "Bachelor's Degree").min() - 1);
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
                         null,
                         null,
                         uni.toString(),
                         "CS",
-                        tooOld,
-                        null,
+                        belowFloor,
                         null,
                         null,
                         null,
                         null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        entryYear);
         var ex = badRequest(() -> service().updateProfile(user(uid), r));
         assertInstanceOf(ValidationException.class, ex);
     }
 
+    /**
+     * A blank classYear used to be silently accepted and stored as an empty string. It is now
+     * rejected outright — " " is neither "leave alone" (null) nor a year.
+     */
     @Test
-    void update_blankClassYearIsAcceptedWithoutRangeCheck() {
+    void update_blankClassYearIsRejected() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
-        UserEntity u = user(uid);
         when(universities.existsById(uni)).thenReturn(true);
-        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
         GuideProfileUpdateRequest r =
                 new GuideProfileUpdateRequest(
                         null,
@@ -850,13 +1174,411 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
+        var ex = badRequest(() -> service().updateProfile(user(uid), r));
+        assertInstanceOf(ValidationException.class, ex);
+    }
 
-        GuideProfileResponse res = service().updateProfile(u, r);
+    // ---- updateProfile: entryYear range + classYear anchored on enrolment (CTL-97 Task 2) -----
 
-        assertEquals("", res.classYear());
+    @Test
+    void updateProfile_rejectsEntryYearBelowTheFloor() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        GuideProfileUpdateRequest req =
+                guideRequestWith(/* entryYear */ 2015, /* classYear */ null);
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class, () -> service().updateProfile(user(uid), req));
+        assertTrue(ex.getMessage().contains("entryYear"));
+    }
+
+    @Test
+    void updateProfile_rejectsEntryYearAboveTheCeiling() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        GuideProfileUpdateRequest req = guideRequestWith(2028, null);
+        assertThrows(ValidationException.class, () -> service().updateProfile(user(uid), req));
+    }
+
+    @Test
+    void updateProfile_acceptsEntryYearExactlyAtBothBounds() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
+
+        service().updateProfile(user(uid), guideRequestWith(2016, null));
+        service().updateProfile(user(uid), guideRequestWith(2027, null));
+    }
+
+    @Test
+    void updateProfile_classYearIsAnchoredOnEntryYearNotToday() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(guideUniversities.findByGuideProfileId(any())).thenReturn(List.of());
+
+        // entry 2023 + bachelor(6) → [2024, 2029].
+        service().updateProfile(user(uid), guideRequestWith(2023, "2024"));
+        service().updateProfile(user(uid), guideRequestWith(2023, "2029"));
+        assertThrows(
+                ValidationException.class,
+                () -> service().updateProfile(user(uid), guideRequestWith(2023, "2023")));
+        assertThrows(
+                ValidationException.class,
+                () -> service().updateProfile(user(uid), guideRequestWith(2023, "2030")));
+    }
+
+    /**
+     * Under the OLD current-year anchoring this passed: 2016 sits inside [currentYear-10,
+     * currentYear+6]. Anchored on enrolment it cannot — a 2025 enrollee did not graduate in 2016.
+     * This is the defect the re-anchoring exists to close.
+     */
+    @Test
+    void updateProfile_rejectsAGraduationYearBeforeEnrolment() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().updateProfile(user(uid), guideRequestWith(2025, "2016")));
+    }
+
+    @Test
+    void updateProfile_stillRejectsANonFourDigitClassYear() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().updateProfile(user(uid), guideRequestWith(2023, "24")));
+    }
+
+    /**
+     * A blank classYear is neither "leave alone" nor a year. Accepting it silently stored an empty
+     * string in class_year — a third state the rest of the system does not model.
+     */
+    @Test
+    void updateProfile_rejectsABlankClassYearRatherThanStoringAnEmptyString() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().updateProfile(user(uid), guideRequestWith(2023, "   ")));
+    }
+
+    // ---- updateProfile: PATCH validates the merged pair, not just the sent half (CTL-97 Task 4)
+
+    /**
+     * Captures the entities the immediately-preceding {@code updateProfile} call persisted, and
+     * wires the mocks so the NEXT call sees them as the already-stored row — simulating a real
+     * PATCH against previously-saved state without a real database.
+     */
+    private GuideUniversityEntity stubStoredState(UUID uid) {
+        ArgumentCaptor<GuideProfileEntity> profileCaptor =
+                ArgumentCaptor.forClass(GuideProfileEntity.class);
+        verify(guides, org.mockito.Mockito.atLeastOnce()).save(profileCaptor.capture());
+        GuideProfileEntity storedProfile = profileCaptor.getValue();
+
+        ArgumentCaptor<GuideUniversityEntity> rowCaptor =
+                ArgumentCaptor.forClass(GuideUniversityEntity.class);
+        verify(guideUniversities, org.mockito.Mockito.atLeastOnce()).save(rowCaptor.capture());
+        GuideUniversityEntity storedRow = rowCaptor.getValue();
+
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(storedProfile));
+        when(guideUniversities.findByGuideProfileId(storedProfile.getId()))
+                .thenReturn(List.of(storedRow));
+        return storedRow;
+    }
+
+    @Test
+    void updateProfile_changingOnlyEntryYear_validatesAgainstTheStoredClassYear() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        UserEntity user = user(uid);
+        GuideService service = service();
+
+        // Stored: entry 2023, class 2027 (inside [2024, 2029]).
+        service.updateProfile(user, guideRequestWith(2023, "2027"));
+        stubStoredState(uid);
+
+        // Moving enrolment to 2026 makes the STORED 2027 illegal ([2027, 2032] starts at 2027 —
+        // so pick 2016, whose window [2017, 2022] excludes it outright).
+        GuideProfileUpdateRequest onlyEntryYear = guideRequestWith(2016, null);
+        assertThrows(ValidationException.class, () -> service.updateProfile(user, onlyEntryYear));
+    }
+
+    @Test
+    void updateProfile_changingOnlyClassYear_validatesAgainstTheStoredEntryYear() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        UserEntity user = user(uid);
+        GuideService service = service();
+
+        service.updateProfile(user, guideRequestWith(2023, "2027"));
+        stubStoredState(uid);
+
+        // 2035 is outside [2024, 2029] derived from the STORED entry year.
+        assertThrows(
+                ValidationException.class,
+                () -> service.updateProfile(user, guideRequestWith(null, "2035")));
+
+        // 2028 is inside it, and must be accepted without resending entryYear.
+        service.updateProfile(user, guideRequestWith(null, "2028"));
+    }
+
+    /**
+     * classYear's ceiling is entryYear + maxYearsToGraduate(DEGREE), so degree is the third input
+     * to the same rule. Narrowing the degree can invalidate a stored pair that never changed:
+     * bachelor's (2020, 2026) is legal at +6, and the same years under a master's (+3) are not.
+     *
+     * <p>This passes because {@code degree} is REQUIRED on this path — GuideService rejects a
+     * missing one before validation, so the request always carries it and there is nothing to
+     * merge. If degree ever becomes genuinely optional, the merge in this method must widen from a
+     * pair to a triple, and this test is what will fail first.
+     */
+    @Test
+    void updateProfile_narrowingTheDegree_revalidatesTheStoredYearsAgainstIt() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        UserEntity user = user(uid);
+        GuideService service = service();
+
+        service.updateProfile(user, guideRequestWith(2020, "2026", "Bachelor's Degree"));
+        stubStoredState(uid);
+
+        assertThrows(
+                ValidationException.class,
+                () -> service.updateProfile(user, guideRequestWith(null, null, "Master's Degree")));
+    }
+
+    /**
+     * The merge can leave NO entryYear at all, and that must be a 422, not a 500.
+     *
+     * <p>The stored row is looked up by {@code (profileId, universityId)}, so a guide who already
+     * holds GUIDE and PATCHes a university they have no row for yet — the multi-school case — finds
+     * nothing to merge from. GuideProfileUpdateRequest has no {@code @NotNull} on entryYear, so the
+     * merged value is null; the year validation lets that through (a null entryYear skips its range
+     * check and a null classYear returns early), and the write would then INSERT a row with no
+     * entry_year into a NOT NULL column — a constraint violation no handler maps, i.e. a 500.
+     *
+     * <p>Asserting {@code never()).save(...)} is the point: the request must be rejected BEFORE the
+     * repository sees it, so this stays a validation failure rather than a database failure.
+     */
+    @Test
+    void
+            updateProfile_patchingAUniversityWithNoStoredRow_andNoEntryYear_is422NotAConstraintError() {
+        UUID uid = UUID.randomUUID();
+        UUID otherUniversity = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        // An established guide, but their only guide_universities row is for a DIFFERENT school.
+        GuideProfileEntity storedProfile = new GuideProfileEntity();
+        storedProfile.setId(UUID.randomUUID());
+        storedProfile.setUserId(uid);
+        GuideUniversityEntity otherRow = new GuideUniversityEntity();
+        otherRow.setId(UUID.randomUUID());
+        otherRow.setGuideProfileId(storedProfile.getId());
+        otherRow.setUniversityId(otherUniversity);
+        otherRow.setEntryYear(2020);
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(storedProfile));
+        when(guideUniversities.findByGuideProfileId(storedProfile.getId()))
+                .thenReturn(List.of(otherRow));
+
+        GuideProfileUpdateRequest r = guideRequestWith(null, null);
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class, () -> service().updateProfile(user(uid), r));
+        assertTrue(
+                ex.getMessage().contains("entryYear"),
+                "the 422 must name the missing field, but was: " + ex.getMessage());
+        verify(guideUniversities, never()).save(any());
+    }
+
+    // ---- updateProfile: the entryYear window applies to a NEW value, not a stored one ----------
+
+    /**
+     * Wires the mocks so {@code updateProfile} sees an already-stored {@code guide_universities}
+     * row for {@link #UNIVERSITY_ID} carrying {@code storedEntryYear} / {@code storedClassYear}.
+     *
+     * <p>Built directly rather than by calling {@code updateProfile} first (as {@link
+     * #stubStoredState}) does, because the state these tests are about — an entry year that has
+     * since aged out of the window — is precisely the state {@code updateProfile} refuses to write.
+     * A real database holds plenty of it: every row was in range on the day it was saved.
+     */
+    private void stubStoredYears(UUID uid, Integer storedEntryYear, String storedClassYear) {
+        GuideProfileEntity storedProfile = new GuideProfileEntity();
+        storedProfile.setId(UUID.randomUUID());
+        storedProfile.setUserId(uid);
+        GuideUniversityEntity row = new GuideUniversityEntity();
+        row.setId(UUID.randomUUID());
+        row.setGuideProfileId(storedProfile.getId());
+        row.setUniversityId(UUID.fromString(UNIVERSITY_ID));
+        row.setEntryYear(storedEntryYear);
+        row.setClassYear(storedClassYear);
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(storedProfile));
+        when(guideUniversities.findByGuideProfileId(storedProfile.getId()))
+                .thenReturn(List.of(row));
+    }
+
+    /** One year older than the floor — derived, so it stays "aged out" if TEST_CLOCK is revised. */
+    private int agedOutEntryYear() {
+        return rules.entryYearRange().min() - 1;
+    }
+
+    /**
+     * THE BUG. The window {@code [serverYear − 10, serverYear + 1]} advances every 1 January; a
+     * stored entry year does not. The edit form now sends every server-required field on every
+     * PATCH, so a guide who enrolled 11+ years ago resends their own true, previously-accepted year
+     * — and, before this fix, was told it "must be between …" and could not save any profile change
+     * at all, with classYear disabled beside it and no way out.
+     */
+    @Test
+    void updateProfile_resendingAStoredEntryYearThatHasAgedOut_isAccepted() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        int agedOut = agedOutEntryYear();
+        stubStoredYears(uid, agedOut, null);
+
+        assertDoesNotThrow(
+                () -> service().updateProfile(user(uid), guideRequestWith(agedOut, null)));
+    }
+
+    /** The same stored value, this time simply not mentioned by the request. */
+    @Test
+    void updateProfile_omittingAnAgedOutStoredEntryYear_isAccepted() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        stubStoredYears(uid, agedOutEntryYear(), null);
+
+        assertDoesNotThrow(() -> service().updateProfile(user(uid), guideRequestWith(null, null)));
+    }
+
+    /**
+     * The exemption is for a value that is already stored, not for the number itself: with no row
+     * to carry it, an aged-out year is a NEW value and the window still applies. Onboarding must
+     * not become the way to put an out-of-window year into the database.
+     */
+    @Test
+    void updateProfile_supplyingAnAgedOutEntryYearWithNothingStored_isStillRejected() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () ->
+                                service()
+                                        .updateProfile(
+                                                user(uid),
+                                                guideRequestWith(agedOutEntryYear(), null)));
+        assertTrue(ex.getMessage().contains("entryYear"));
+        verify(guideUniversities, never()).save(any());
+    }
+
+    /** A genuine edit is a new value, wherever it started from. */
+    @Test
+    void updateProfile_editingAValidStoredEntryYearToAnOutOfWindowOne_isStillRejected() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        stubStoredYears(uid, VALID_ENTRY_YEAR, null);
+
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .updateProfile(
+                                        user(uid), guideRequestWith(agedOutEntryYear(), null)));
+    }
+
+    /** Being exempt does not freeze the field: an aged-out row can still be corrected. */
+    @Test
+    void updateProfile_editingAnAgedOutStoredEntryYearToAnInWindowOne_isAccepted() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        stubStoredYears(uid, agedOutEntryYear(), null);
+        int inWindow = rules.entryYearRange().min();
+
+        assertDoesNotThrow(
+                () -> service().updateProfile(user(uid), guideRequestWith(inWindow, null)));
+    }
+
+    /**
+     * Scope: the exemption covers the entry-year WINDOW only. classYear's window is still derived
+     * from the merged entry year, so an aged-out enrolment simply yields a graduation window in the
+     * past — correct, and still enforced in both directions.
+     */
+    @Test
+    void updateProfile_classYearIsStillCheckedAgainstAnExemptStoredEntryYear() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        int agedOut = agedOutEntryYear();
+        stubStoredYears(uid, agedOut, null);
+        EnrollmentYearRules.YearRange window = rules.classYearRange(agedOut, "Bachelor's Degree");
+
+        assertDoesNotThrow(
+                () ->
+                        service()
+                                .updateProfile(
+                                        user(uid),
+                                        guideRequestWith(agedOut, String.valueOf(window.max()))));
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .updateProfile(
+                                        user(uid),
+                                        guideRequestWith(
+                                                agedOut, String.valueOf(window.max() + 1))));
+    }
+
+    /**
+     * Pins the exemption to the {@code (guide_profile_id, university_id)} ROW named by this
+     * request, not to a property of the profile as a whole — every other test in this section
+     * stores its aged-out row under {@link #UNIVERSITY_ID}, the same university every request in
+     * this suite targets, so none of them can tell "per profile" from "per row" apart. Here the
+     * stored aged-out entryYear belongs to a DIFFERENT university: {@code findGuideUniversity}
+     * finds no row for {@link #UNIVERSITY_ID}, so {@code storedEntryYear} is null for THIS request
+     * and the merged value is a NEW one — checked, and rejected. A guide with a passing history at
+     * one school gets no exemption when the request is about a school they have no row for yet.
+     *
+     * <p>This is exactly the distinction the frontend's mirror of this rule got wrong (spec D1a):
+     * it keyed the exemption off a property of the profile rather than the row named by the
+     * request, so a guide switching university with an aged-out year passed client validation and
+     * then got a 422 from here.
+     */
+    @Test
+    void agedOutEntryYear_storedForADifferentUniversity_isStillRejected() {
+        UUID uid = UUID.randomUUID();
+        when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+        int agedOut = agedOutEntryYear();
+
+        GuideProfileEntity storedProfile = new GuideProfileEntity();
+        storedProfile.setId(UUID.randomUUID());
+        storedProfile.setUserId(uid);
+        GuideUniversityEntity rowAtAnotherUniversity = new GuideUniversityEntity();
+        rowAtAnotherUniversity.setId(UUID.randomUUID());
+        rowAtAnotherUniversity.setGuideProfileId(storedProfile.getId());
+        rowAtAnotherUniversity.setUniversityId(UUID.randomUUID()); // NOT UNIVERSITY_ID
+        rowAtAnotherUniversity.setEntryYear(agedOut);
+        rowAtAnotherUniversity.setClassYear(null);
+        when(guides.findByUserId(uid)).thenReturn(Optional.of(storedProfile));
+        when(guideUniversities.findByGuideProfileId(storedProfile.getId()))
+                .thenReturn(List.of(rowAtAnotherUniversity));
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().updateProfile(user(uid), guideRequestWith(agedOut, null)));
+        assertTrue(ex.getMessage().contains("entryYear"));
+        verify(guideUniversities, never()).save(any());
     }
 
     @Test
@@ -873,9 +1595,9 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        null);
         var ex = badRequest(() -> service().updateProfile(user(UUID.randomUUID()), r));
         assertInstanceOf(ValidationException.class, ex);
     }
@@ -900,9 +1622,9 @@ class GuideServiceTest {
                         null,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        VALID_ENTRY_YEAR);
 
         service().updateProfile(u, r);
 
@@ -931,17 +1653,17 @@ class GuideServiceTest {
                         langs,
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        VALID_ENTRY_YEAR);
 
         GuideProfileResponse res = service().updateProfile(u, r);
 
-        assertEquals(List.of("en-US"), res.languages());
+        assertEquals(List.of("en-US"), res.spokenLanguages());
     }
 
     @Test
-    void update_specialtiesWithNullAndBlankEntriesSkipped() {
+    void update_tourTopicsWithNullAndBlankEntriesSkipped() {
         UUID uid = UUID.randomUUID();
         UUID uni = UUID.randomUUID();
         UserEntity u = user(uid);
@@ -963,35 +1685,13 @@ class GuideServiceTest {
                         null,
                         topics,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        VALID_ENTRY_YEAR);
 
         GuideProfileResponse res = service().updateProfile(u, r);
 
-        assertEquals(List.of("GENERAL_CAMPUS"), res.specialties());
-    }
-
-    @Test
-    void update_priceTooHigh_422() {
-        UUID uid = UUID.randomUUID();
-        UUID uni = UUID.randomUUID();
-        when(universities.existsById(uni)).thenReturn(true);
-        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
-        var ex =
-                badRequest(
-                        () ->
-                                service()
-                                        .updateProfile(
-                                                user(uid),
-                                                req(
-                                                        uni.toString(),
-                                                        "CS",
-                                                        null,
-                                                        999999L,
-                                                        null,
-                                                        false)));
-        assertInstanceOf(ValidationException.class, ex);
+        assertEquals(List.of("GENERAL_CAMPUS"), res.tourTopics());
     }
 
     @Test
@@ -1002,8 +1702,7 @@ class GuideServiceTest {
                         () ->
                                 service()
                                         .updateProfile(
-                                                user(uid),
-                                                req("   ", "CS", null, null, null, false)));
+                                                user(uid), req("   ", "CS", null, null, false)));
         assertInstanceOf(ValidationException.class, ex);
     }
 
@@ -1014,10 +1713,10 @@ class GuideServiceTest {
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
 
-        service().updateProfile(user(uid), req(uni.toString(), "CS", null, null, null, null));
+        service().updateProfile(user(uid), req(uni.toString(), "CS", null, null, null));
 
         verify(guides).save(any());
-        verifyNoInteractions(roleGrant, verifications);
+        verifyNoInteractions(roleGrant);
     }
 
     @Test
@@ -1034,13 +1733,7 @@ class GuideServiceTest {
                                 service()
                                         .updateProfile(
                                                 user(uid),
-                                                req(
-                                                        uni.toString(),
-                                                        "CS",
-                                                        null,
-                                                        null,
-                                                        "noatsign",
-                                                        true)));
+                                                req(uni.toString(), "CS", null, "noatsign", true)));
         assertInstanceOf(ValidationException.class, ex);
         verify(roleGrant, never()).grant(any(), any());
     }
@@ -1065,7 +1758,7 @@ class GuideServiceTest {
                                         "I lead weekly campus tours for prospective students.",
                                         List.of("GENERAL_CAMPUS")));
 
-        assertEquals("PENDING_REVIEW", res.applicationStatus());
+        assertEquals("PENDING", res.guideStatus());
         verify(roleGrant).grant(u, UserRole.GUIDE);
     }
 
@@ -1079,7 +1772,7 @@ class GuideServiceTest {
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.of(existing));
 
-        service().updateProfile(user(uid), req(uni.toString(), "CS", null, 5000L, null, false));
+        service().updateProfile(user(uid), req(uni.toString(), "CS", null, null, false));
 
         verify(guides).save(existing);
     }
@@ -1096,14 +1789,15 @@ class GuideServiceTest {
         GuideService svc =
                 new GuideService(
                         guides,
-                        verifications,
+                        guideUniversities,
                         universities,
                         participants,
                         users,
                         roleGrant,
                         schools,
                         campusImages,
-                        badMapper);
+                        badMapper,
+                        rules);
         when(universities.existsById(uni)).thenReturn(true);
         when(guides.findByUserId(uid)).thenReturn(Optional.empty());
 
@@ -1119,9 +1813,9 @@ class GuideServiceTest {
                         List.of("en-US"),
                         null,
                         null,
-                        null,
                         false,
-                        "Bachelor's Degree");
+                        "Bachelor's Degree",
+                        VALID_ENTRY_YEAR);
 
         org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> svc.updateProfile(user(uid), r));
     }
@@ -1138,22 +1832,133 @@ class GuideServiceTest {
         GuideService svc =
                 new GuideService(
                         guides,
-                        verifications,
+                        guideUniversities,
                         universities,
                         participants,
                         users,
                         roleGrant,
                         schools,
                         campusImages,
-                        badMapper);
+                        badMapper,
+                        rules);
         GuideProfileEntity profile = new GuideProfileEntity();
-        profile.setLanguages("[\"en-US\"]"); // non-blank → readValue invoked → throws → []
-        profile.setSpecialties("[\"GENERAL_CAMPUS\"]");
+        profile.setSpokenLanguages("[\"en-US\"]"); // non-blank → readValue invoked → throws → []
+        profile.setTourTopics("[\"GENERAL_CAMPUS\"]");
         when(guides.findByUserId(uid)).thenReturn(Optional.of(profile));
 
         GuideProfileResponse res = svc.getProfile(u);
 
-        assertEquals(List.of(), res.languages());
-        assertEquals(List.of(), res.specialties());
+        assertEquals(List.of(), res.spokenLanguages());
+        assertEquals(List.of(), res.tourTopics());
+    }
+
+    // ---- I1: the published rules and the enforced windows cannot disagree (CTL-97 Task 7) -----
+
+    /**
+     * I1: every boundary the endpoint PUBLISHES is a boundary GuideService ENFORCES.
+     *
+     * <p>Deliberately drives the SERVICE, not the rules component. Re-deriving a window from the
+     * same component it came from proves only that a method is consistent with itself, and would
+     * keep passing if the service had its own hardcoded copy — the exact defect this design
+     * removes.
+     *
+     * <p>Nested here (rather than a standalone {@code EnrollmentYearRulesAgreementTest}) so it
+     * reads the outer class's {@code TEST_CLOCK}-backed {@code rules}, {@code service()}, {@code
+     * user(uid)}, and {@code guideRequestWith(...)} fixtures directly instead of duplicating them
+     * into a second file that could drift out of sync with this one.
+     */
+    @Nested
+    class PublishedRulesAgreeWithEnforcedWindows {
+
+        /**
+         * One case per real credential title the Scorecard vocabulary produces, run as a
+         * {@code @ParameterizedTest} rather than a {@code for} loop over a shared instance: each
+         * invocation gets its own fresh JUnit test instance, and therefore fresh {@code @Mock}
+         * repositories (see {@link GuideServiceTest} field declarations). A plain loop would reuse
+         * the same mocks across degrees, so whatever an {@code assertThrows} case above it left
+         * behind — an incremented version, a captured save, a stubbed lookup — would leak into the
+         * next degree's assertions. This design requires validate-before-mutate (Task 4); a test
+         * that only passes because a previous iteration happened to leave compatible state proves
+         * nothing about the boundary it claims to check. Parameterizing also names the failing
+         * degree instead of aborting the whole run at the first mismatch.
+         */
+        @ParameterizedTest(name = "{0}")
+        @ValueSource(
+                strings = {
+                    "Doctoral Degree",
+                    "First Professional Degree",
+                    "Master's Degree",
+                    "Post-baccalaureate Certificate",
+                    "Bachelor's Degree",
+                    "Associate's Degree",
+                    "Undergraduate Certificate",
+                    "Diploma",
+                    "Some Other Credential"
+                })
+        void theServiceAcceptsExactlyTheWindowTheRulesPublish(String degree) {
+            UUID uid = UUID.randomUUID();
+            when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+            GuideService svc = service();
+            UserEntity actor = user(uid);
+
+            // Same rules instance the endpoint serves from, on the fixed TEST_CLOCK.
+            EnrollmentYearRules.YearRange entry = rules.entryYearRange();
+            // DERIVED, not a literal: a hardcoded year would drift out of the window as years
+            // pass and turn this test red for a reason that has nothing to do with the boundary
+            // it checks. One below the ceiling leaves room on both sides forever.
+            int entryYear = entry.max() - 1;
+            EnrollmentYearRules.YearRange w = rules.classYearRange(entryYear, degree);
+
+            assertDoesNotThrow(
+                    () ->
+                            svc.updateProfile(
+                                    actor,
+                                    guideRequestWith(entryYear, String.valueOf(w.min()), degree)),
+                    degree + " should accept its published min " + w.min());
+            assertDoesNotThrow(
+                    () ->
+                            svc.updateProfile(
+                                    actor,
+                                    guideRequestWith(entryYear, String.valueOf(w.max()), degree)),
+                    degree + " should accept its published max " + w.max());
+            assertThrows(
+                    ValidationException.class,
+                    () ->
+                            svc.updateProfile(
+                                    actor,
+                                    guideRequestWith(
+                                            entryYear, String.valueOf(w.min() - 1), degree)),
+                    degree + " should reject one below its published min");
+            assertThrows(
+                    ValidationException.class,
+                    () ->
+                            svc.updateProfile(
+                                    actor,
+                                    guideRequestWith(
+                                            entryYear, String.valueOf(w.max() + 1), degree)),
+                    degree + " should reject one above its published max");
+        }
+
+        /**
+         * The entryYear window itself (not per-degree), at both published edges and one outside
+         * each.
+         */
+        @Test
+        void theServiceAcceptsExactlyTheEntryYearWindowTheRulesPublish() {
+            when(universities.existsById(UUID.fromString(UNIVERSITY_ID))).thenReturn(true);
+            GuideService svc = service();
+            UserEntity actor = user(UUID.randomUUID());
+
+            EnrollmentYearRules.YearRange entry = rules.entryYearRange();
+
+            assertDoesNotThrow(() -> svc.updateProfile(actor, guideRequestWith(entry.min(), null)));
+            assertDoesNotThrow(() -> svc.updateProfile(actor, guideRequestWith(entry.max(), null)));
+            assertThrows(
+                    ValidationException.class,
+                    () -> svc.updateProfile(actor, guideRequestWith(entry.min() - 1, null)));
+            assertThrows(
+                    ValidationException.class,
+                    () -> svc.updateProfile(actor, guideRequestWith(entry.max() + 1, null)));
+        }
     }
 }

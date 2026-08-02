@@ -17,6 +17,10 @@ public interface ApiExamples {
 
     // --- Error bodies (RFC 7807 problem+json) ---
 
+    String PROBLEM_400 =
+            "{\"type\":\"about:blank\",\"title\":\"Validation failed\",\"status\":400,"
+                    + "\"detail\":\"Unknown role: BOGUS\"}";
+
     String PROBLEM_401 =
             "{\"type\":\"about:blank\",\"title\":\"No valid principal\",\"status\":401,"
                     + "\"detail\":\"Authentication is required.\"}";
@@ -25,6 +29,9 @@ public interface ApiExamples {
             "{\"type\":\"about:blank\",\"title\":\"Missing required role\",\"status\":403,"
                     + "\"detail\":\"The caller does not hold the role this endpoint requires.\"}";
 
+    String PROBLEM_403_ACCOUNT_NOT_ACTIVE =
+            "{\"type\":\"about:blank\",\"title\":\"ACCOUNT_NOT_ACTIVE\",\"status\":403}";
+
     String PROBLEM_404 =
             "{\"type\":\"about:blank\",\"title\":\"Not found\",\"status\":404,"
                     + "\"detail\":\"The requested resource does not exist.\"}";
@@ -32,6 +39,19 @@ public interface ApiExamples {
     String PROBLEM_409 =
             "{\"type\":\"about:blank\",\"title\":\"This resource was modified by another request —"
                     + " please retry\",\"status\":409}";
+
+    String PROBLEM_409_ROLE_ALREADY_GRANTED =
+            "{\"type\":\"about:blank\",\"title\":\"Role already granted: GUIDE\",\"status\":409,"
+                    + "\"code\":\"ROLE_ALREADY_GRANTED\",\"role\":\"GUIDE\","
+                    + "\"reconciliationRequired\":true}";
+
+    String PROBLEM_409_ROLE_NOT_ELIGIBLE =
+            "{\"type\":\"about:blank\",\"title\":\"Not eligible for role: GUIDE\",\"status\":409,"
+                    + "\"code\":\"ROLE_NOT_ELIGIBLE\",\"role\":\"GUIDE\"}";
+
+    String PROBLEM_409_ROLE_NOT_ELIGIBLE_PARTICIPANT =
+            "{\"type\":\"about:blank\",\"title\":\"Not eligible for role: PARTICIPANT\","
+                    + "\"status\":409,\"code\":\"ROLE_NOT_ELIGIBLE\",\"role\":\"PARTICIPANT\"}";
 
     String PROBLEM_422 =
             "{\"type\":\"about:blank\",\"title\":\"Validation failed\",\"status\":422,"
@@ -115,40 +135,82 @@ public interface ApiExamples {
                     + "}";
 
     String GUIDE_PROFILE =
-            "{\"data\":{\"userId\":\"11111111-0000-4000-8000-000000000001\","
-                    + "\"firstName\":\"Maya\",\"lastName\":\"Chen\",\"displayName\":\"Maya Chen\","
-                    + "\"email\":\"maya.chen@ncu.edu\",\"accountStatus\":\"ACTIVE\","
-                    + "\"universityId\":\"u1a2c3d4-0000-4000-8000-000000000003\","
+            "{\"data\":{\"guideStatus\":\"VERIFIED\","
+                    + "\"universities\":[{\"universityId\":"
+                    + "\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"universityName\":\"North Coast University\","
                     + "\"universityShortName\":\"NCU\",\"major\":\"Marine Biology\","
-                    + "\"classYear\":\"Junior\",\"bio\":\"Third-year student and campus tour"
-                    + " lead.\","
-                    + "\"languages\":[\"en-US\",\"zh-CN\"],\"specialties\":[\"DORM_HOUSING\"],"
-                    + "\"basePriceCents\":4200,\"currency\":\"USD\","
-                    + "\"applicationStatus\":\"APPROVED\",\"verificationStatus\":\"VERIFIED\","
-                    + "\"degree\":\"Bachelor's Degree\"},"
+                    // A 4-digit year inside the window entryYear 2023 + Bachelor's Degree admits;
+                    // the old free-text "Junior" is a response the server can no longer produce.
+                    + "\"degree\":\"Bachelor's Degree\",\"classYear\":\"2027\","
+                    + "\"entryYear\":2023,"
+                    + "\"verificationStatus\":\"VERIFIED\"}],"
+                    + "\"bio\":\"Third-year student and campus tour lead.\","
+                    + "\"spokenLanguages\":[\"en-US\",\"zh-CN\"],\"tourTopics\":[\"DORM_HOUSING\"]},"
                     + META
                     + "}";
 
     String PARTICIPANT_PROFILE =
-            "{\"data\":{\"userId\":\"22222222-0000-4000-8000-000000000001\","
-                    + "\"firstName\":\"Sam\",\"lastName\":\"Rivera\",\"displayName\":\"Sam Rivera\","
-                    + "\"email\":\"sam.rivera@example.com\",\"preferredLanguage\":\"en-US\","
-                    + "\"timezone\":\"America/New_York\",\"participantType\":\"PROSPECTIVE_STUDENT\","
+            "{\"data\":{\"participantStatus\":\"VERIFIED\","
+                    + "\"type\":\"PROSPECTIVE_STUDENT\","
                     + "\"gradeLevel\":\"HIGH_SCHOOL_SENIOR\",\"intendedMajor\":\"Computer Science\","
                     + "\"guardianRequired\":false,\"topicsOfInterest\":[\"DORM_HOUSING\"],"
                     + "\"universitiesOfInterest\":[\"166683\"],"
-                    + "\"accessibilityPreferences\":null},"
+                    + "\"accessibilityPreferences\":null,\"preferredLanguage\":\"en-US\","
+                    + "\"timezone\":\"America/New_York\"},"
                     + META
                     + "}";
 
-    String ME =
-            "{\"data\":{\"id\":\"22222222-0000-4000-8000-000000000001\","
-                    + "\"roles\":[\"PARTICIPANT\"],\"activeRole\":\"PARTICIPANT\","
-                    + "\"participantType\":\"PROSPECTIVE_STUDENT\",\"guideStatus\":null,"
+    String CURRENT_USER =
+            "{\"data\":{\"user\":{\"id\":\"22222222-0000-4000-8000-000000000001\","
                     + "\"firstName\":\"Sam\",\"lastName\":\"Rivera\",\"displayName\":\"Sam Rivera\","
                     + "\"email\":\"sam.rivera@example.com\",\"accountStatus\":\"ACTIVE\","
                     + "\"ageBand\":\"ADULT\",\"createdAt\":\"2026-01-15T09:30:00Z\"},"
+                    + "\"roles\":[\"PARTICIPANT\"]},"
+                    + META
+                    + "}";
+
+    String ONBOARDING_GUIDE =
+            "{\"data\":{"
+                    + "\"user\":{\"id\":\"22222222-0000-4000-8000-000000000001\","
+                    + "\"firstName\":\"Maya\",\"lastName\":\"Chen\",\"displayName\":\"Maya Chen\","
+                    + "\"email\":\"maya.chen@example.com\",\"accountStatus\":\"ACTIVE\","
+                    + "\"ageBand\":\"ADULT\",\"createdAt\":\"2026-07-24T09:30:00Z\"},"
+                    + "\"roles\":[\"GUIDE\"],\"acquiredRole\":\"GUIDE\","
+                    + "\"profile\":{\"guideStatus\":\"PENDING\","
+                    + "\"universities\":[{\"universityId\":"
+                    + "\"u1a2c3d4-0000-4000-8000-000000000003\","
+                    + "\"universityName\":\"North Coast University\","
+                    + "\"universityShortName\":\"NCU\",\"major\":\"Marine Biology\","
+                    + "\"degree\":\"Bachelor's Degree\",\"classYear\":\"2027\","
+                    + "\"entryYear\":2023,\"verificationStatus\":\"PENDING\"}],"
+                    + "\"bio\":\"Third-year student and campus tour lead.\","
+                    + "\"spokenLanguages\":[\"en-US\"],\"tourTopics\":[\"DORM_HOUSING\"]}},"
+                    + META
+                    + "}";
+
+    String ONBOARDING_PARTICIPANT =
+            "{\"data\":{"
+                    + "\"user\":{\"id\":\"22222222-0000-4000-8000-000000000001\","
+                    + "\"firstName\":\"Sam\",\"lastName\":\"Rivera\",\"displayName\":\"Sam Rivera\","
+                    + "\"email\":\"sam.rivera@example.com\",\"accountStatus\":\"ACTIVE\","
+                    + "\"ageBand\":\"ADULT\",\"createdAt\":\"2026-07-24T09:30:00Z\"},"
+                    + "\"roles\":[\"PARTICIPANT\"],\"acquiredRole\":\"PARTICIPANT\","
+                    + "\"profile\":{\"participantStatus\":\"PENDING\","
+                    + "\"type\":\"PROSPECTIVE\",\"gradeLevel\":\"High school senior\","
+                    + "\"intendedMajor\":\"Computer Science\",\"guardianRequired\":false,"
+                    + "\"topicsOfInterest\":[\"DORM_HOUSING\"],"
+                    + "\"universitiesOfInterest\":[\"166683\"],"
+                    + "\"accessibilityPreferences\":null,\"preferredLanguage\":\"en-US\","
+                    + "\"timezone\":\"America/New_York\"}},"
+                    + META
+                    + "}";
+
+    String ROLE_ELIGIBILITY_ELIGIBLE =
+            "{\"data\":{\"eligible\":true,\"reason\":null}," + META + "}";
+
+    String ROLE_ELIGIBILITY_INELIGIBLE =
+            "{\"data\":{\"eligible\":false,\"reason\":\"PARENT_CANNOT_BECOME_GUIDE\"},"
                     + META
                     + "}";
 
@@ -185,13 +247,6 @@ public interface ApiExamples {
             "{\"data\":[{\"value\":\"Associate's Degree\",\"label\":\"Associate's Degree\"},"
                     + "{\"value\":\"Bachelor's Degree\",\"label\":\"Bachelor's Degree\"},"
                     + "{\"value\":\"Master's Degree\",\"label\":\"Master's Degree\"}],"
-                    + META
-                    + "}";
-
-    String UNIVERSITY_LIST =
-            "{\"data\":[{\"id\":\"u1a2c3d4-0000-4000-8000-000000000003\","
-                    + "\"slug\":\"north-coast\",\"name\":\"North Coast University\","
-                    + "\"shortName\":\"NCU\",\"city\":\"Arcata\",\"region\":\"CA\"}],"
                     + META
                     + "}";
 
@@ -319,6 +374,19 @@ public interface ApiExamples {
     String SLOT_LIST =
             "{\"data\":[{\"startAt\":\"2026-07-14T10:00:00Z\","
                     + "\"endAt\":\"2026-07-14T11:00:00Z\"}],"
+                    + META
+                    + "}";
+
+    // --- Enrolment-year rules (CTL-97) ---
+
+    String ENROLLMENT_YEARS =
+            "{\"data\":{\"entryYear\":{\"min\":2016,\"max\":2027},"
+                    + "\"maxYearsToGraduate\":["
+                    + "{\"matches\":[\"doctor\",\"first professional\"],\"years\":9},"
+                    + "{\"matches\":[\"master\",\"post-baccalaureate\"],\"years\":3},"
+                    + "{\"matches\":[\"bachelor\"],\"years\":6},"
+                    + "{\"matches\":[\"associate\",\"certificate\",\"diploma\"],\"years\":3}],"
+                    + "\"defaultMaxYearsToGraduate\":8},"
                     + META
                     + "}";
 }

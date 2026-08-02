@@ -29,3 +29,11 @@ Thumbs.db
 
 # Claude Code — personal settings (do not commit); share .claude/settings.json
 .claude/settings.local.json
+
+# --- Superpowers working artifacts — plans, specs, SDD ledgers, review write-ups ---
+# They record how a change was arrived at, which goes stale the moment the code moves on. The
+# code, its tests and README/CLAUDE.md are the shared source of truth. Keep these local.
+# NOTE: docs/openapi-conventions.md is NOT this — it is real repo documentation that CLAUDE.md
+# points contributors at, and it stays tracked.
+.superpowers/
+docs/superpowers/

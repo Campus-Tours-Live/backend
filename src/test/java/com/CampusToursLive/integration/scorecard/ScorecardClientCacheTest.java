@@ -184,7 +184,8 @@ class ScorecardClientCacheTest {
 
     @Test
     void secondLookupOfTheSameSchoolIsServedFromCache_outboundCallHappensOnce() {
-        SchoolRef ref = new SchoolRef("243744", "Stanford University", "Stanford", "CA");
+        SchoolRef ref =
+                new SchoolRef("243744", "Stanford University", "Stanford", "Stanford", "CA");
         given(api.getSchool("243744")).willReturn(ref);
 
         assertThat(client.getSchool("243744")).isEqualTo(ref);

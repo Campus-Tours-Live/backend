@@ -50,11 +50,11 @@ class TourOfferingRepositoryTest {
         activeUniversityId = insertUniversity("active-" + searchMarker, "ACTIVE");
         UUID inactiveUniversityId = insertUniversity("archived-" + searchMarker, "ARCHIVED");
 
-        approvedGuideId = insertGuide(activeUniversityId, "APPROVED");
+        approvedGuideId = insertGuide(activeUniversityId, "VERIFIED");
         UUID pendingGuideUserId = UUID.randomUUID();
         insertUser(pendingGuideUserId, "Pending Guide");
         UUID pendingGuideId =
-                insertGuideWithUser(activeUniversityId, pendingGuideUserId, "PENDING_REVIEW");
+                insertGuideWithUser(activeUniversityId, pendingGuideUserId, "PENDING");
 
         discoverableId =
                 insertOffering(
@@ -200,7 +200,7 @@ class TourOfferingRepositoryTest {
     void findDiscoverable_matchesViaUniversityName() {
         String token = "uni-" + UUID.randomUUID().toString().substring(0, 8);
         UUID uni = insertUniversity(token, "ACTIVE"); // name is "University " + token
-        UUID guide = insertGuide(uni, "APPROVED");
+        UUID guide = insertGuide(uni, "VERIFIED");
         UUID id =
                 insertOffering(
                         guide,
@@ -230,7 +230,7 @@ class TourOfferingRepositoryTest {
     void findDiscoverable_filtersByUniversityIdAndTopic() {
         String token = "flt-" + UUID.randomUUID().toString().substring(0, 8);
         UUID targetUni = insertUniversity("target-" + token, "ACTIVE");
-        UUID targetGuide = insertGuide(targetUni, "APPROVED");
+        UUID targetGuide = insertGuide(targetUni, "VERIFIED");
         UUID match =
                 insertOffering(
                         targetGuide,
@@ -251,7 +251,7 @@ class TourOfferingRepositoryTest {
                 "GENERAL_CAMPUS");
         // different university, same topic -> excluded by the universityId filter
         UUID otherUni = insertUniversity("other-" + token, "ACTIVE");
-        UUID otherGuide = insertGuide(otherUni, "APPROVED");
+        UUID otherGuide = insertGuide(otherUni, "VERIFIED");
         insertOffering(
                 otherGuide,
                 otherUni,
@@ -346,25 +346,29 @@ class TourOfferingRepositoryTest {
         return id;
     }
 
-    private UUID insertGuide(UUID universityId, String applicationStatus) {
+    private UUID insertGuide(UUID universityId, String guideStatus) {
         UUID userId = UUID.randomUUID();
-        insertUser(userId, "Guide " + applicationStatus);
-        return insertGuideWithUser(universityId, userId, applicationStatus);
+        insertUser(userId, "Guide " + guideStatus);
+        return insertGuideWithUser(universityId, userId, guideStatus);
     }
 
-    private UUID insertGuideWithUser(UUID universityId, UUID userId, String applicationStatus) {
+    /**
+     * {@code universityId} is unused here (guide_profiles no longer carries a flat university_id
+     * column — that lives on guide_universities instead, which this repository's queries don't
+     * consult), kept only so callers don't need touching: they already have the id in hand for
+     * {@link #insertOffering}.
+     */
+    private UUID insertGuideWithUser(UUID universityId, UUID userId, String guideStatus) {
         UUID guideId = UUID.randomUUID();
         entityManager
                 .createNativeQuery(
                         """
-                        INSERT INTO guide_profiles (id, user_id, university_id, major, application_status)
-                        VALUES (:id, :userId, :universityId, 'Computer Science',
-                                CAST(:applicationStatus AS guide_application_status))
+                        INSERT INTO guide_profiles (id, user_id, guide_status)
+                        VALUES (:id, :userId, CAST(:guideStatus AS guide_application_status))
                         """)
                 .setParameter("id", guideId)
                 .setParameter("userId", userId)
-                .setParameter("universityId", universityId)
-                .setParameter("applicationStatus", applicationStatus)
+                .setParameter("guideStatus", guideStatus)
                 .executeUpdate();
         return guideId;
     }
