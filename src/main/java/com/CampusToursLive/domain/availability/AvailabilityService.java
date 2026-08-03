@@ -13,10 +13,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Availability persistence layer (CTL-54 Task 3): re-derives a guide's materialized availability
- * occurrences (and DST notices) from their rules + exceptions over the rolling horizon and
- * WHOLESALE-REPLACES them in one transaction. The pure math lives in {@link AvailabilityProjection}
- * (Task 2); this class is only the "fetch inputs, project, replace outputs" wiring.
+ * Availability persistence layer: re-derives a guide's materialized availability occurrences (and
+ * DST notices) from their rules + exceptions over the rolling horizon and WHOLESALE-REPLACES them
+ * in one transaction. The pure math lives in {@link AvailabilityProjection} (Task 2); this class is
+ * only the "fetch inputs, project, replace outputs" wiring.
  *
  * <p><b>Wholesale replace, not incremental.</b> Occurrences and DST notices are a DERIVED cache
  * (spec "(G)"): {@link #rematerialize(UUID)} deletes the guide's existing rows and re-inserts the
@@ -173,8 +173,8 @@ public class AvailabilityService {
     }
 
     /**
-     * Acquires the per-guide, TRANSACTION-scoped PostgreSQL advisory lock (CTL-54 B5) that
-     * serializes concurrent {@link #rematerialize(UUID)} calls for one guide. The key is {@code
+     * Acquires the per-guide, TRANSACTION-scoped PostgreSQL advisory lock that serializes
+     * concurrent {@link #rematerialize(UUID)} calls for one guide. The key is {@code
      * hashtextextended(guideId::text, 0)} — a stable 64-bit hash of the guide's canonical UUID
      * string. EVERY path that re-derives a guide's occurrences funnels through {@code
      * rematerialize} (guide-facing rule/exception/settings writes AND the daily {@link

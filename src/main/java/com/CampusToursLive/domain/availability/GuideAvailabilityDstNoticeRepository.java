@@ -5,8 +5,8 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
- * DST-notice cache access (CTL-54 Task 3). Like the occurrence repository, this is a derived cache:
- * {@link #deleteByGuideId(UUID)} is the "replace" half of rematerialize, never a row-by-row edit.
+ * DST-notice cache access. Like the occurrence repository, this is a derived cache: {@link
+ * #deleteByGuideId(UUID)} is the "replace" half of rematerialize, never a row-by-row edit.
  */
 public interface GuideAvailabilityDstNoticeRepository
         extends JpaRepository<GuideAvailabilityDstNoticeEntity, UUID> {

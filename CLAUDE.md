@@ -8,9 +8,13 @@ If you (human or AI agent) open a PR, follow these.
 Fill out the PR description using `.github/pull_request_template.md`. The required
 `pr-template` check needs:
 
-- a non-empty **## Summary**
-- a non-empty **## Testing** section
+- a **## Summary** of at least 100 characters / 15 words
+- a **## Testing** section of at least 40 characters / 7 words
 - at least one **## Type of change** box checked (`- [x]`)
+
+Placeholder text, gibberish, and a Testing section identical to the Summary are all rejected, and
+a second AI step fails the check if the description contradicts the diff. "Non-empty" is not
+enough — write the real thing.
 
 The template is **not** auto-applied when a PR is created via `gh pr create` or by an
 agent, so pass a `--body` that includes those sections yourself.
@@ -23,11 +27,13 @@ Conventional Commits **plus a Jira ticket**:
     e.g. feat: CTL-1234 add Google OIDC callback
 
 Types: `feat fix docs style refactor perf test build ci chore revert`.
-Enforced by a local `commit-msg` hook (installed on first `./mvnw` / `npm install`).
+Enforced by a local `commit-msg` hook. This repo has no `package.json` — the Maven build
+points `core.hooksPath` at `.githooks/`, so the hook installs on your first `./mvnw` run.
 
 ## What blocks a merge
 
-- `ci` — unit + integration tests, project coverage gate, and ≥80% patch coverage on changed lines
+- `Lint & Format` · `Unit & Integration` — Spotless format check, unit + integration tests, the JaCoCo project gate, and ≥80% patch coverage on changed lines (plus a Spectral lint of the generated OpenAPI spec)
+- `pr-size` — **hard-fails** a PR over 700 added lines or 40 changed files; split it
 - `pr-template` — the PR-description checks above
 - a pull request is required (no direct push to `main`) with **1 approving review**
 
@@ -68,7 +74,7 @@ command** (e.g. `/code-review`); `/plugin` only installs/manages plugins — it 
 | Data model / schema / queries / indexes / query performance | `database-design` |
 | Writing **Flyway migrations** (adding / changing schema) | `database-migrations` |
 | Docker / Postgres container / local infra | `database-migrations`, `database-design` (compose lives in this repo; `docker compose up -d`) |
-| Logging / observability / Actuator / health & metrics | `api-testing-observability` |
+| Logging / observability / Actuator / health & metrics | `api-testing-observability` — **not** in this repo's `enabledPlugins`, so install it yourself if you want it |
 | Env / config changes (`GOOGLE_CLIENT_ID`, DB URL — **no `.env` auto-load**) | ⚠️ cross-repo & startup-critical; see Cross-repo rules below |
 | Writing / adding tests (JUnit 5 + Testcontainers) | `qa-orchestra`, `superpowers:test-driven-development` † |
 | Dependency upgrades / CVE remediation | `security-scanning` |
@@ -80,9 +86,10 @@ command** (e.g. `/code-review`); `/plugin` only installs/manages plugins — it 
 | Reviewing your own or someone else's PR, before merging | `comprehensive-review`, `/code-review`; security via `/security-review` |
 | **"Live" real-time tours (WebSocket/streaming backend support)** | ⚠️ product core, **no skill and no infra yet** — always `superpowers:brainstorming` † and design before coding |
 
-> **Coverage gate:** this repo's `verify` enforces **JaCoCo ≥90% bundle** coverage (line,
-> branch, and method) on in-scope code — not a patch-coverage percentage. See `pom.xml`
-> (`<excludes>`) and the README. Run `./mvnw spotless:apply` before your first `verify`.
+> **Coverage gates (two of them):** `./mvnw verify` enforces **JaCoCo ≥90% bundle** coverage
+> (line, branch, and method) on in-scope code — see `pom.xml` (`<excludes>`) and the README. CI
+> additionally enforces **≥80% patch coverage** on changed lines via `diff-cover`, the same patch
+> gate bff and frontend have. Run `./mvnw spotless:apply` before your first `verify`.
 
 ## ⚠️ Cross-repo observation rules (read before changing backend)
 
@@ -99,8 +106,13 @@ matrix in `campus-tours-live/CLAUDE.md`):
   must match bff, and the OAuth client lives in the Google Console — see the hub's "Cross-repo
   environment contract". Run `backend-api-security` for these.
 - **Changing DB schema (Flyway migration)** → if a field is exposed by the API, verify layer
-  by layer along backend → bff → frontend. **Migrations are forward-only — never edit an
-  existing, already-deployed migration file** (add a new one to roll forward/back).
+  by layer along backend → bff → frontend. **Migrations are forward-only — NEVER edit an
+  applied `V<n>` file** (not even reformatting or adding a row): editing it drifts its checksum,
+  and `flyway:repair` only re-aligns the checksum — it does **not** re-run the file, so already-migrated
+  DBs never receive the change's data. To change what an applied migration did, add a **new**
+  `V<n+1>` (for data, an idempotent `UPDATE` keyed by a stable unique column — never mutate the
+  conflict key). Reset a disposable dev DB with `docker compose down -v`; see `README.md`
+  "Database & migrations" for the repair-vs-rebuild recipe.
 - **Contract-first principle**: new features start with backend **defining the contract**,
   then bff adapts and frontend consumes. Breaking contract changes must be flagged and
   coordinated with the other two repos — never merged unilaterally.

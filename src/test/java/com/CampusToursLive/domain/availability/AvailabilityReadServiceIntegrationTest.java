@@ -4,9 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.CampusToursLive.domain.booking.BookingRepository;
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.university.UniversityStatus;
@@ -39,9 +39,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Persistence integration test for {@link AvailabilityReadService} (CTL-54 Task 5b) against a REAL
- * PostgreSQL (Testcontainers). Rules -- and the occurrences + DST notices they materialize -- are
- * created through {@link AvailabilityWriteService} / {@link AvailabilityService} (the real write +
+ * Persistence integration test for {@link AvailabilityReadService} against a REAL PostgreSQL
+ * (Testcontainers). Rules -- and the occurrences + DST notices they materialize -- are created
+ * through {@link AvailabilityWriteService} / {@link AvailabilityService} (the real write +
  * projection path, T3/T5) with a FIXED clock, so what this read service serves is exactly what
  * production would have coalesced -- never hand-assembled. Mirrors {@code
  * AvailabilityWriteServiceIntegrationTest}.
@@ -502,9 +502,7 @@ class AvailabilityReadServiceIntegrationTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setUniversityId(universityId);
-        guide.setMajor("Computer Science");
-        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        guide.setStatus(GuideStatus.VERIFIED);
         return guides.save(guide);
     }
 

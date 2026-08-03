@@ -65,6 +65,8 @@ public class RescheduleController {
     @PostMapping("/{bookingId}/reschedule-proposals")
     public ApiEnvelope<RescheduleProposalResponse> propose(
             @PathVariable UUID bookingId, @RequestBody CreateRescheduleProposalRequest req) {
-        return ApiEnvelope.of(rescheduleService.propose(currentUser.require(), bookingId, req));
+        return ApiEnvelope.of(
+                rescheduleService.propose(
+                        currentUser.requireProvisioned().userId(), bookingId, req));
     }
 }

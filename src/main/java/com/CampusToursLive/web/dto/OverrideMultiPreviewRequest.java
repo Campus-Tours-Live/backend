@@ -5,14 +5,13 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
- * Request body for {@code POST /availability/preview} (CTL-54 v2.1 Task 4, multi-window): a
- * proposed date-specific override composed of MULTIPLE time windows applied together over an
- * inclusive date range, previewed as ONE combined dry-run WITHOUT persisting anything. Same {@code
- * dateFrom}/{@code dateTo}/{@code kind} envelope as the single-window {@link
- * OverridePreviewRequest}, but carries a {@code windows} list instead of a single {@code
- * startLocal}/{@code windowMin} pair -- the backend applies every window together (newest-wins
- * trim/replace across the windows too) and returns the net result per date, so the frontend never
- * merges N single-window previews itself.
+ * Request body for {@code POST /availability/preview}: a proposed date-specific override composed
+ * of MULTIPLE time windows applied together over an inclusive date range, previewed as ONE combined
+ * dry-run WITHOUT persisting anything. Same {@code dateFrom}/{@code dateTo}/{@code kind} envelope
+ * as the single-window {@link OverridePreviewRequest}, but carries a {@code windows} list instead
+ * of a single {@code startLocal}/{@code windowMin} pair -- the backend applies every window
+ * together (newest-wins trim/replace across the windows too) and returns the net result per date,
+ * so the frontend never merges N single-window previews itself.
  *
  * <p>Bound as a JSON request body (a POST is the clean way to carry the {@code windows} array); the
  * single-window {@code GET /availability/preview} is kept unchanged alongside it.

@@ -9,7 +9,6 @@ import com.CampusToursLive.domain.booking.BookingRepository;
 import com.CampusToursLive.domain.booking.BookingService;
 import com.CampusToursLive.domain.booking.BookingStatus;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
-import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
@@ -29,8 +28,6 @@ public class RescheduleService {
 
     static final Duration COUNTERPARTY_RESPONSE_WINDOW = Duration.ofHours(48);
     private static final int MAX_REASON_LENGTH = 1000;
-    static final String ALREADY_PENDING_MESSAGE =
-            "A reschedule proposal is already pending for this booking";
 
     private final RescheduleProposalRepository proposals;
     private final BookingRepository bookings;
@@ -54,19 +51,19 @@ public class RescheduleService {
     /** Propose; same party + same start replays the active proposal, else active → 409. */
     @Transactional
     public RescheduleProposalResponse propose(
-            UserEntity caller, UUID bookingId, CreateRescheduleProposalRequest req) {
+            UUID callerUserId, UUID bookingId, CreateRescheduleProposalRequest req) {
         BookingEntity booking =
                 bookings.findById(bookingId)
                         .orElseThrow(() -> new NotFoundException("Booking not found"));
-        BookingActor requestedBy = resolveActor(caller, booking);
+        BookingActor requestedBy = resolveActor(callerUserId, booking);
 
         if (booking.getStatus() != BookingStatus.CONFIRMED) {
-            throw new ConflictException("Only a confirmed booking can be rescheduled");
+            throw ConflictException.bookingNotConfirmedForReschedule();
         }
 
         Instant now = Instant.now();
         if (!booking.getScheduledStartAt().isAfter(now)) {
-            throw new ConflictException("A booking that has already started cannot be rescheduled");
+            throw ConflictException.bookingAlreadyStarted();
         }
 
         Instant proposedStart = parseProposedStart(req.proposedStartAt());
@@ -94,7 +91,7 @@ public class RescheduleService {
             if (sameReplay) {
                 return toResponse(existing);
             }
-            throw new ConflictException(ALREADY_PENDING_MESSAGE);
+            throw ConflictException.rescheduleAlreadyPending();
         }
 
         requireSlotAvailable(booking, proposedStart, proposedEnd, guideSettings);
@@ -103,7 +100,7 @@ public class RescheduleService {
         p.setId(UUID.randomUUID());
         p.setBookingId(booking.getId());
         p.setRequestedBy(requestedBy);
-        p.setRequestedByUserId(caller.getId());
+        p.setRequestedByUserId(callerUserId);
         p.setProposedStartAt(proposedStart);
         p.setProposedEndAt(proposedEnd);
         p.setStatus(RescheduleStatus.PENDING_COUNTERPARTY);
@@ -113,18 +110,18 @@ public class RescheduleService {
         try {
             proposals.saveAndFlush(p);
         } catch (DataIntegrityViolationException raceLost) {
-            throw new ConflictException(ALREADY_PENDING_MESSAGE);
+            throw ConflictException.rescheduleAlreadyPending();
         }
         return toResponse(p);
     }
 
-    private BookingActor resolveActor(UserEntity caller, BookingEntity booking) {
-        if (booking.getParticipantUserId().equals(caller.getId())) {
+    private BookingActor resolveActor(UUID callerUserId, BookingEntity booking) {
+        if (booking.getParticipantUserId().equals(callerUserId)) {
             return BookingActor.PARTICIPANT;
         }
         boolean isBookingsGuide =
                 guides.findById(booking.getGuideId())
-                        .map(g -> g.getUserId().equals(caller.getId()))
+                        .map(g -> g.getUserId().equals(callerUserId))
                         .orElse(false);
         if (isBookingsGuide) {
             return BookingActor.GUIDE;
@@ -139,7 +136,7 @@ public class RescheduleService {
             GuideBookingSettingsEntity guideSettings) {
         if (!availabilityOccurrences.existsContaining(
                 booking.getGuideId(), proposedStart, proposedEnd)) {
-            throw new ConflictException("The proposed time is outside the guide's availability");
+            throw ConflictException.proposedOutsideAvailability();
         }
         Instant reservedStart =
                 proposedStart.minus(Duration.ofMinutes(guideSettings.getBufferBeforeMin()));
@@ -152,7 +149,7 @@ public class RescheduleService {
                         BookingService.SLOT_HOLDING_STATUSES,
                         reservedEnd,
                         reservedStart)) {
-            throw new ConflictException("The guide already has a booking at the proposed time");
+            throw ConflictException.guideSlotConflict();
         }
         if (bookings
                 .existsByIdNotAndParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
@@ -161,8 +158,7 @@ public class RescheduleService {
                         BookingService.SLOT_HOLDING_STATUSES,
                         proposedEnd,
                         proposedStart)) {
-            throw new ConflictException(
-                    "The participant already has a booking that overlaps the proposed time");
+            throw ConflictException.participantSlotConflict();
         }
     }
 

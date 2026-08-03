@@ -10,7 +10,6 @@ import com.CampusToursLive.domain.availability.GuideBookingSettingsRepository;
 import com.CampusToursLive.domain.booking.*;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
-import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.error.*;
 import com.CampusToursLive.web.dto.CreateRescheduleProposalRequest;
 import com.CampusToursLive.web.dto.RescheduleProposalResponse;
@@ -180,7 +179,7 @@ class RescheduleServiceTest {
 
     private RescheduleProposalResponse proposeRaw(UUID userId, String start, String reason) {
         return service.propose(
-                user(userId), bookingId, new CreateRescheduleProposalRequest(start, null, reason));
+                userId, bookingId, new CreateRescheduleProposalRequest(start, null, reason));
     }
 
     private void stubBooking(BookingEntity b) {
@@ -235,11 +234,5 @@ class RescheduleServiceTest {
         b.setTotalCents(5000L);
         b.setCurrency("USD");
         return b;
-    }
-
-    private static UserEntity user(UUID id) {
-        UserEntity u = new UserEntity();
-        u.setId(id);
-        return u;
     }
 }

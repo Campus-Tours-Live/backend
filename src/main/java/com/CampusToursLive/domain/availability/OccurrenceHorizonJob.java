@@ -10,7 +10,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Daily scheduled roll-forward of the materialized availability horizon (CTL-54 Task 4).
+ * Daily scheduled roll-forward of the materialized availability horizon.
  *
  * <p>{@link AvailabilityService#rematerialize(UUID)} (Task 3) always materializes {@code [now,
  * now+HORIZON_DAYS)} relative to whenever it's called — a guide who never edits a rule or exception

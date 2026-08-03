@@ -3,11 +3,11 @@ package com.CampusToursLive.web.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
- * Query params for {@code GET /availability/preview} (CTL-54 v2.1 Task 4): a proposed date-specific
- * override that has NOT been saved yet. Mirrors the multi-day shape of {@link
- * AvailabilityExceptionRequest} ({@code kind}/{@code startLocal}/{@code windowMin} plus an
- * inclusive date range), except {@code dateFrom}/{@code dateTo} are ALWAYS both required here --
- * there is no single-date shorthand, since this is a read-only {@code GET}.
+ * Query params for {@code GET /availability/preview}: a proposed date-specific override that has
+ * NOT been saved yet. Mirrors the multi-day shape of {@link AvailabilityExceptionRequest} ({@code
+ * kind}/{@code startLocal}/{@code windowMin} plus an inclusive date range), except {@code
+ * dateFrom}/{@code dateTo} are ALWAYS both required here -- there is no single-date shorthand,
+ * since this is a read-only {@code GET}.
  *
  * <p>Not bound as a request body (the controller builds it from {@code @RequestParam}s -- see
  * {@link com.CampusToursLive.web.AvailabilityController#getOverridePreview}); the {@link Schema}
