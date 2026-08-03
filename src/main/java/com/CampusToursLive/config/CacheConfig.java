@@ -26,6 +26,11 @@ import org.springframework.context.annotation.Configuration;
  *       same near-static program list, so 24h.
  *   <li>{@code scorecardSchools} — a single school looked up by id (onboarding upsert). Also
  *       near-static, so 24h.
+ *   <li>{@code scorecardDirectory} — the whole browsable university directory, bucketed by state.
+ *       ONE entry (fixed key) and 24h, because there is one answer for the application and it moves
+ *       when IPEDS publishes, annually. The TTL does more work here than anywhere else: a miss
+ *       costs ~20 paged calls, so this cache is what keeps every browse-by-state and state page off
+ *       the outbound budget entirely.
  * </ul>
  */
 @Configuration
@@ -36,6 +41,7 @@ public class CacheConfig {
     public static final String SCORECARD_MAJORS = "scorecardMajors";
     public static final String SCORECARD_DEGREES = "scorecardDegrees";
     public static final String SCORECARD_SCHOOLS = "scorecardSchools";
+    public static final String SCORECARD_DIRECTORY = "scorecardDirectory";
 
     @Bean
     public CacheManager cacheManager() {
@@ -50,7 +56,8 @@ public class CacheConfig {
                         SCORECARD_UNIVERSITIES,
                         SCORECARD_MAJORS,
                         SCORECARD_DEGREES,
-                        SCORECARD_SCHOOLS));
+                        SCORECARD_SCHOOLS,
+                        SCORECARD_DIRECTORY));
         manager.registerCustomCache(
                 SCORECARD_UNIVERSITIES,
                 Caffeine.newBuilder()
@@ -73,6 +80,14 @@ public class CacheConfig {
                 SCORECARD_SCHOOLS,
                 Caffeine.newBuilder()
                         .maximumSize(5000)
+                        .expireAfterWrite(Duration.ofHours(24))
+                        .build());
+        // Size 1, not 5000: one fixed key holds the whole directory, so any headroom above 1 would
+        // reserve space for entries that cannot exist.
+        manager.registerCustomCache(
+                SCORECARD_DIRECTORY,
+                Caffeine.newBuilder()
+                        .maximumSize(1)
                         .expireAfterWrite(Duration.ofHours(24))
                         .build());
         return manager;
