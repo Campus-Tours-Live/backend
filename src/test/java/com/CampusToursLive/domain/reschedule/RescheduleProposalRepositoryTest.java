@@ -8,9 +8,9 @@ import com.CampusToursLive.domain.booking.BookingActor;
 import com.CampusToursLive.domain.booking.BookingEntity;
 import com.CampusToursLive.domain.booking.BookingRepository;
 import com.CampusToursLive.domain.booking.BookingStatus;
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.tour.TourOfferingEntity;
 import com.CampusToursLive.domain.tour.TourOfferingRepository;
 import com.CampusToursLive.domain.tour.TourStatus;
@@ -75,9 +75,7 @@ class RescheduleProposalRepositoryTest {
         GuideProfileEntity g = new GuideProfileEntity();
         g.setId(UUID.randomUUID());
         g.setUserId(guideUser.getId());
-        g.setUniversityId(university.getId());
-        g.setMajor("Computer Science");
-        g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        g.setStatus(GuideStatus.VERIFIED);
         GuideProfileEntity guide = guides.save(g);
 
         TourOfferingEntity o = new TourOfferingEntity();
