@@ -97,7 +97,7 @@ class AvailabilityControllerTest {
     }
 
     // ---------------------------------------------------------------------
-    // Resolved availability (CTL-54 Task 5b).
+    // Resolved availability.
     // ---------------------------------------------------------------------
 
     @Test
@@ -170,6 +170,33 @@ class AvailabilityControllerTest {
                 .andExpect(jsonPath("$.status").value(403));
     }
 
+    // CTL-97 Task 6: requireRole(GUIDE) is now gated by requireProvisioned() — a pending caller
+    // gets a coded 404, never a bare 401 (I10), and a provisioned non-holder gets a coded 403.
+    // One representative endpoint (GET /availability) stands in for all ~16 GUIDE-gated sites in
+    // this controller, since every site delegates to the same currentUser.requireRole(GUIDE).
+
+    @Test
+    void getResolvedAvailability_404_withCode_whenPendingCaller() throws Exception {
+        when(currentUser.requireRole(UserRole.GUIDE))
+                .thenThrow(
+                        new NotFoundException(
+                                "Account not provisioned", "ACCOUNT_NOT_PROVISIONED"));
+
+        mvc.perform(get("/availability"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_NOT_PROVISIONED"));
+    }
+
+    @Test
+    void getResolvedAvailability_403_withCode_whenProvisionedNonHolder() throws Exception {
+        when(currentUser.requireRole(UserRole.GUIDE))
+                .thenThrow(new ForbiddenException("Missing required role: GUIDE", "ROLE_REQUIRED"));
+
+        mvc.perform(get("/availability"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ROLE_REQUIRED"));
+    }
+
     @Test
     void getResolvedAvailability_422_whenWindowMalformed() throws Exception {
         UserEntity u = user();
@@ -197,7 +224,7 @@ class AvailabilityControllerTest {
     }
 
     // ---------------------------------------------------------------------
-    // Date-specific override dry-run preview (CTL-54 v2.1 Task 4).
+    // Date-specific override dry-run preview.
     // ---------------------------------------------------------------------
 
     @Test
@@ -633,7 +660,7 @@ class AvailabilityControllerTest {
     }
 
     // ---------------------------------------------------------------------
-    // Override replace (CTL-54 v2.1 remediation B2).
+    // Override replace.
     // ---------------------------------------------------------------------
 
     @Test
@@ -697,7 +724,7 @@ class AvailabilityControllerTest {
     }
 
     // ---------------------------------------------------------------------
-    // Rules replace (CTL-54 v2.1 remediation B2, Task 5).
+    // Rules replace.
     // ---------------------------------------------------------------------
 
     @Test

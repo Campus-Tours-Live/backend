@@ -7,9 +7,9 @@ import static org.mockito.Mockito.*;
 import com.CampusToursLive.domain.availability.GuideAvailabilityOccurrenceRepository;
 import com.CampusToursLive.domain.availability.GuideBookingSettingsEntity;
 import com.CampusToursLive.domain.availability.GuideBookingSettingsRepository;
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.tour.TourOfferingEntity;
 import com.CampusToursLive.domain.tour.TourOfferingRepository;
 import com.CampusToursLive.domain.tour.TourStatus;
@@ -646,7 +646,7 @@ class BookingServiceTest {
         o.setGuideId(guideProfileId);
         when(offerings.findById(offeringId)).thenReturn(Optional.of(o));
         GuideProfileEntity g = guideProfile(guideProfileId, UUID.randomUUID());
-        g.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
+        g.setStatus(GuideStatus.PENDING);
         when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
 
         assertThrows(
@@ -671,7 +671,7 @@ class BookingServiceTest {
         o.setUniversityId(universityId);
         when(offerings.findById(offeringId)).thenReturn(Optional.of(o));
         GuideProfileEntity g = guideProfile(guideProfileId, UUID.randomUUID());
-        g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        g.setStatus(GuideStatus.VERIFIED);
         when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
         UniversityEntity u = university(universityId, "Paused U");
         u.setStatus(UniversityStatus.PAUSED);
@@ -756,7 +756,7 @@ class BookingServiceTest {
                                                 ctx.offeringId().toString(), tooFar, null)));
     }
 
-    // ── createBooking: guide-configured notice/advance/buffers (CTL-54 design-gap fix) ─────────
+    // ── createBooking: guide-configured notice/advance/buffers ─────────
 
     @Test
     void createBooking_customMaxAdvanceDays_acceptsBookingBeyondDefaultThirtyDayLimit() {
@@ -1354,9 +1354,8 @@ class BookingServiceTest {
         assertEquals(9000L, resp.get(0).priceCents());
     }
 
-    // ── checkout: guide-configured notice/advance/buffers (CTL-54 design-gap fix — parity with
-    // buildDraftBooking / createBooking, since the guide's settings can tighten OR loosen while an
-    // item sits in the cart) ─────────────────────────────────────────────────────────────────
+    // ── checkout: guide-configured notice/advance/buffers
+    // ─────────────────────────────────────────────────────────────────
 
     @Test
     void checkout_customMinNoticeMin_rejectsItemInsideGuidesStricterWindow() {
@@ -1485,7 +1484,7 @@ class BookingServiceTest {
         o.setUniversityId(item.getUniversityId());
         when(offerings.findById(item.getTourOfferingId())).thenReturn(Optional.of(o));
         GuideProfileEntity g = guideProfile(item.getGuideId(), UUID.randomUUID());
-        g.setApplicationStatus(GuideApplicationStatus.SUSPENDED);
+        g.setStatus(GuideStatus.REJECTED);
         when(guides.findById(item.getGuideId())).thenReturn(Optional.of(g));
 
         ValidationException ex =
@@ -1550,7 +1549,7 @@ class BookingServiceTest {
     }
 
     /**
-     * Stubs an ACTIVE 60-min $50 offering by an APPROVED guide (owned by {@code guideUserId}) at an
+     * Stubs an ACTIVE 60-min $50 offering by a VERIFIED guide (owned by {@code guideUserId}) at an
      * ACTIVE university.
      */
     private Bookable stubBookableOffering(UUID guideUserId) {
@@ -1567,14 +1566,14 @@ class BookingServiceTest {
         when(offerings.findById(offeringId)).thenReturn(Optional.of(o));
 
         GuideProfileEntity g = guideProfile(guideProfileId, guideUserId);
-        g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        g.setStatus(GuideStatus.VERIFIED);
         when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
 
         UniversityEntity u = university(universityId, "Test University");
         u.setStatus(UniversityStatus.ACTIVE);
         when(universities.findById(universityId)).thenReturn(Optional.of(u));
 
-        // Default: the scheduled interval IS covered by availability (CTL-54 Task 6) — lenient
+        // Default: the scheduled interval IS covered by availability — lenient
         // because several tests fail earlier (own-tour, blank/malformed start, notice/advance
         // window) and never reach this check.
         lenient()
@@ -1642,7 +1641,7 @@ class BookingServiceTest {
 
     /**
      * Stubs the offering lookup (in the given status, wired to the item's guide/university ids)
-     * plus, for ACTIVE offerings, an APPROVED guide and an ACTIVE university. Returns the guide's
+     * plus, for ACTIVE offerings, a VERIFIED guide and an ACTIVE university. Returns the guide's
      * user id so happy-path tests can stub the display-name lookup.
      */
     private UUID stubCheckoutLookups(BookingEntity b, TourStatus offeringStatus) {
@@ -1662,12 +1661,12 @@ class BookingServiceTest {
         UUID guideUserId = UUID.randomUUID();
         if (offeringStatus == TourStatus.ACTIVE) {
             GuideProfileEntity g = guideProfile(b.getGuideId(), guideUserId);
-            g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+            g.setStatus(GuideStatus.VERIFIED);
             when(guides.findById(b.getGuideId())).thenReturn(Optional.of(g));
             UniversityEntity u = university(b.getUniversityId(), "Test University");
             u.setStatus(UniversityStatus.ACTIVE);
             when(universities.findById(b.getUniversityId())).thenReturn(Optional.of(u));
-            // Default: still within availability at checkout re-validation time (CTL-54 Task 6) —
+            // Default: still within availability at checkout re-validation time —
             // lenient because some tests reject the item earlier (stale/notice-window, offering no
             // longer ACTIVE) and never reach this re-check.
             lenient()

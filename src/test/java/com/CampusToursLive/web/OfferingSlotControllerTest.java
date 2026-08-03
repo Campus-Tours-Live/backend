@@ -25,11 +25,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * Web-layer slice test for {@link OfferingSlotController} (CTL-54 Task 8): real routing, the {data,
- * meta} envelope, and that domain exceptions map to RFC 7807 problem+json via {@code
- * GlobalExceptionHandler}. Mirrors {@code AvailabilityControllerTest}: {@link
- * SlotGenerationService} is mocked, so this test only exercises the controller/role/HTTP-status
- * wiring, never real slicing/subtraction (covered by {@code SlotGenerationServiceIntegrationTest}).
+ * Web-layer slice test for {@link OfferingSlotController}: real routing, the {data, meta} envelope,
+ * and that domain exceptions map to RFC 7807 problem+json via {@code GlobalExceptionHandler}.
+ * Mirrors {@code AvailabilityControllerTest}: {@link SlotGenerationService} is mocked, so this test
+ * only exercises the controller/role/HTTP-status wiring, never real slicing/subtraction (covered by
+ * {@code SlotGenerationServiceIntegrationTest}).
  */
 @WebMvcTest(
         controllers = OfferingSlotController.class,
@@ -108,6 +108,36 @@ class OfferingSlotControllerTest {
         mvc.perform(get("/offerings/{id}/slots", offeringId))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.status").value(403));
+    }
+
+    // CTL-97 Task 6: requireRole(PARTICIPANT) is gated by requireProvisioned() — pending -> coded
+    // 404 ACCOUNT_NOT_PROVISIONED (never a bare 401, I10), distinct from the "offering not found"
+    // 404 above which has no code and fires only after authorization already succeeded.
+
+    @Test
+    void getSlots_404_withCode_whenPendingCaller() throws Exception {
+        UUID offeringId = UUID.randomUUID();
+        when(currentUser.requireRole(UserRole.PARTICIPANT))
+                .thenThrow(
+                        new NotFoundException(
+                                "Account not provisioned", "ACCOUNT_NOT_PROVISIONED"));
+
+        mvc.perform(get("/offerings/{id}/slots", offeringId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_NOT_PROVISIONED"));
+    }
+
+    @Test
+    void getSlots_403_withCode_whenProvisionedNonHolder() throws Exception {
+        UUID offeringId = UUID.randomUUID();
+        when(currentUser.requireRole(UserRole.PARTICIPANT))
+                .thenThrow(
+                        new ForbiddenException(
+                                "Missing required role: PARTICIPANT", "ROLE_REQUIRED"));
+
+        mvc.perform(get("/offerings/{id}/slots", offeringId))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ROLE_REQUIRED"));
     }
 
     @Test

@@ -31,47 +31,22 @@ public class GuideProfileEntity {
     @Column(name = "user_id", nullable = false, unique = true)
     private UUID userId;
 
-    @Column(name = "university_id", nullable = false)
-    private UUID universityId;
-
-    @Column(name = "major", nullable = false)
-    private String major;
-
-    @Column(name = "class_year")
-    private String classYear;
-
     @Column(name = "bio")
     private String bio;
 
     /** JSONB array of BCP-47 language tags, e.g. ["en-US","es"]. Raw JSON string. */
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "languages", columnDefinition = "jsonb", nullable = false)
-    private String languages = "[\"en-US\"]";
+    @Column(name = "spoken_languages", columnDefinition = "jsonb", nullable = false)
+    private String spokenLanguages = "[\"en-US\"]";
 
     /** JSONB array of tour_topic values. Raw JSON string. */
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "specialties", columnDefinition = "jsonb", nullable = false)
-    private String specialties = "[]";
+    @Column(name = "tour_topics", columnDefinition = "jsonb", nullable = false)
+    private String tourTopics = "[]";
 
     @Enumerated(EnumType.STRING)
-    @Column(
-            name = "application_status",
-            columnDefinition = "guide_application_status",
-            nullable = false)
-    private GuideApplicationStatus applicationStatus = GuideApplicationStatus.DRAFT;
-
-    @Enumerated(EnumType.STRING)
-    @Column(
-            name = "verification_status",
-            columnDefinition = "guide_verification_status",
-            nullable = false)
-    private GuideVerificationStatus verificationStatus = GuideVerificationStatus.NOT_SUBMITTED;
-
-    @Column(name = "base_price_cents", nullable = false)
-    private long basePriceCents = 2800L;
-
-    @Column(name = "currency", nullable = false)
-    private String currency = "USD";
+    @Column(name = "guide_status", columnDefinition = "guide_application_status", nullable = false)
+    private GuideStatus status = GuideStatus.PENDING;
 
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;

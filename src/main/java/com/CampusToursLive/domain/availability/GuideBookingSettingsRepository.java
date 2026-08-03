@@ -5,9 +5,9 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
- * Read side of {@code guide_booking_settings} (CTL-54 Task 3). {@code guide_id} is the table's
- * primary key, so {@link #findByGuideId(UUID)} is a lookup by id. Task 5 will add the write
- * endpoints on top of this repository.
+ * Read side of {@code guide_booking_settings}. {@code guide_id} is the table's primary key, so
+ * {@link #findByGuideId(UUID)} is a lookup by id. Task 5 will add the write endpoints on top of
+ * this repository.
  */
 public interface GuideBookingSettingsRepository
         extends JpaRepository<GuideBookingSettingsEntity, UUID> {

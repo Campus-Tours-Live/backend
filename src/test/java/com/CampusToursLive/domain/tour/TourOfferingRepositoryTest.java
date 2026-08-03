@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -49,11 +50,11 @@ class TourOfferingRepositoryTest {
         activeUniversityId = insertUniversity("active-" + searchMarker, "ACTIVE");
         UUID inactiveUniversityId = insertUniversity("archived-" + searchMarker, "ARCHIVED");
 
-        approvedGuideId = insertGuide(activeUniversityId, "APPROVED");
+        approvedGuideId = insertGuide(activeUniversityId, "VERIFIED");
         UUID pendingGuideUserId = UUID.randomUUID();
         insertUser(pendingGuideUserId, "Pending Guide");
         UUID pendingGuideId =
-                insertGuideWithUser(activeUniversityId, pendingGuideUserId, "PENDING_REVIEW");
+                insertGuideWithUser(activeUniversityId, pendingGuideUserId, "PENDING");
 
         discoverableId =
                 insertOffering(
@@ -104,15 +105,53 @@ class TourOfferingRepositoryTest {
 
     @Test
     void findDiscoverable_succeedsWithNullOptionalFilters() {
-        assertThat(offerings.findDiscoverable(null, null, "", PageRequest.of(0, 20))).isNotNull();
+        assertThat(
+                        offerings.findDiscoverable(
+                                null,
+                                false,
+                                List.of(TourTopic.values()[0]),
+                                "",
+                                PageRequest.of(0, 20)))
+                .isNotNull();
     }
 
     @Test
     void findDiscoverable_excludesNonVisibleOfferings() {
         List<TourOfferingEntity> results =
-                offerings.findDiscoverable(null, null, searchMarker, PageRequest.of(0, 20));
+                offerings
+                        .findDiscoverable(
+                                null,
+                                false,
+                                List.of(TourTopic.values()[0]),
+                                searchMarker,
+                                PageRequest.of(0, 20))
+                        .getContent();
 
         assertThat(results).extracting(TourOfferingEntity::getId).containsExactly(discoverableId);
+    }
+
+    /**
+     * The count query and the list query must agree.
+     *
+     * <p>They are one @Query with the FROM/WHERE written twice, so a filter edited on one side and
+     * not the other silently desynchronises them: the page reports a total the results cannot
+     * account for, and pagination shows empty or unreachable pages. This pins the invariant against
+     * a filter that actually excludes rows, so the two clauses have something to disagree about.
+     */
+    @Test
+    void findDiscoverable_totalMatchesTheRowsItReturns() {
+        Page<TourOfferingEntity> page =
+                offerings.findDiscoverable(
+                        null,
+                        false,
+                        List.of(TourTopic.values()[0]),
+                        searchMarker,
+                        PageRequest.of(0, 20));
+
+        assertThat(page.getTotalElements()).isEqualTo(page.getContent().size());
+        assertThat(page.getContent())
+                .extracting(TourOfferingEntity::getId)
+                .containsExactly(discoverableId);
     }
 
     @Test
@@ -144,7 +183,15 @@ class TourOfferingRepositoryTest {
         entityManager.flush();
         entityManager.clear();
 
-        assertThat(offerings.findDiscoverable(null, null, token, PageRequest.of(0, 20)))
+        assertThat(
+                        offerings
+                                .findDiscoverable(
+                                        null,
+                                        false,
+                                        List.of(TourTopic.values()[0]),
+                                        token,
+                                        PageRequest.of(0, 20))
+                                .getContent())
                 .extracting(TourOfferingEntity::getId)
                 .containsExactly(id);
     }
@@ -153,7 +200,7 @@ class TourOfferingRepositoryTest {
     void findDiscoverable_matchesViaUniversityName() {
         String token = "uni-" + UUID.randomUUID().toString().substring(0, 8);
         UUID uni = insertUniversity(token, "ACTIVE"); // name is "University " + token
-        UUID guide = insertGuide(uni, "APPROVED");
+        UUID guide = insertGuide(uni, "VERIFIED");
         UUID id =
                 insertOffering(
                         guide,
@@ -166,7 +213,15 @@ class TourOfferingRepositoryTest {
         entityManager.flush();
         entityManager.clear();
 
-        assertThat(offerings.findDiscoverable(null, null, token, PageRequest.of(0, 20)))
+        assertThat(
+                        offerings
+                                .findDiscoverable(
+                                        null,
+                                        false,
+                                        List.of(TourTopic.values()[0]),
+                                        token,
+                                        PageRequest.of(0, 20))
+                                .getContent())
                 .extracting(TourOfferingEntity::getId)
                 .containsExactly(id);
     }
@@ -175,7 +230,7 @@ class TourOfferingRepositoryTest {
     void findDiscoverable_filtersByUniversityIdAndTopic() {
         String token = "flt-" + UUID.randomUUID().toString().substring(0, 8);
         UUID targetUni = insertUniversity("target-" + token, "ACTIVE");
-        UUID targetGuide = insertGuide(targetUni, "APPROVED");
+        UUID targetGuide = insertGuide(targetUni, "VERIFIED");
         UUID match =
                 insertOffering(
                         targetGuide,
@@ -196,7 +251,7 @@ class TourOfferingRepositoryTest {
                 "GENERAL_CAMPUS");
         // different university, same topic -> excluded by the universityId filter
         UUID otherUni = insertUniversity("other-" + token, "ACTIVE");
-        UUID otherGuide = insertGuide(otherUni, "APPROVED");
+        UUID otherGuide = insertGuide(otherUni, "VERIFIED");
         insertOffering(
                 otherGuide,
                 otherUni,
@@ -210,7 +265,11 @@ class TourOfferingRepositoryTest {
 
         assertThat(
                         offerings.findDiscoverable(
-                                targetUni, TourTopic.DORM_HOUSING, token, PageRequest.of(0, 20)))
+                                targetUni,
+                                true,
+                                List.of(TourTopic.DORM_HOUSING),
+                                token,
+                                PageRequest.of(0, 20)))
                 .extracting(TourOfferingEntity::getId)
                 .containsExactly(match);
     }
@@ -218,7 +277,16 @@ class TourOfferingRepositoryTest {
     @Test
     void findDiscoverable_excludesRowsNotMatchingQuery() {
         String absent = "absent-" + UUID.randomUUID().toString().substring(0, 8);
-        assertThat(offerings.findDiscoverable(null, null, absent, PageRequest.of(0, 20))).isEmpty();
+        assertThat(
+                        offerings
+                                .findDiscoverable(
+                                        null,
+                                        false,
+                                        List.of(TourTopic.values()[0]),
+                                        absent,
+                                        PageRequest.of(0, 20))
+                                .getContent())
+                .isEmpty();
     }
 
     @Test
@@ -237,7 +305,15 @@ class TourOfferingRepositoryTest {
         entityManager.clear();
 
         // Escaped "%" ("!%") matches a literal "%" via `escape '!'`; the title contains "50%".
-        assertThat(offerings.findDiscoverable(null, null, "50!%", PageRequest.of(0, 20)))
+        assertThat(
+                        offerings
+                                .findDiscoverable(
+                                        null,
+                                        false,
+                                        List.of(TourTopic.values()[0]),
+                                        "50!%",
+                                        PageRequest.of(0, 20))
+                                .getContent())
                 .extracting(TourOfferingEntity::getId)
                 .contains(id);
     }
@@ -270,25 +346,29 @@ class TourOfferingRepositoryTest {
         return id;
     }
 
-    private UUID insertGuide(UUID universityId, String applicationStatus) {
+    private UUID insertGuide(UUID universityId, String guideStatus) {
         UUID userId = UUID.randomUUID();
-        insertUser(userId, "Guide " + applicationStatus);
-        return insertGuideWithUser(universityId, userId, applicationStatus);
+        insertUser(userId, "Guide " + guideStatus);
+        return insertGuideWithUser(universityId, userId, guideStatus);
     }
 
-    private UUID insertGuideWithUser(UUID universityId, UUID userId, String applicationStatus) {
+    /**
+     * {@code universityId} is unused here (guide_profiles no longer carries a flat university_id
+     * column — that lives on guide_universities instead, which this repository's queries don't
+     * consult), kept only so callers don't need touching: they already have the id in hand for
+     * {@link #insertOffering}.
+     */
+    private UUID insertGuideWithUser(UUID universityId, UUID userId, String guideStatus) {
         UUID guideId = UUID.randomUUID();
         entityManager
                 .createNativeQuery(
                         """
-                        INSERT INTO guide_profiles (id, user_id, university_id, major, application_status)
-                        VALUES (:id, :userId, :universityId, 'Computer Science',
-                                CAST(:applicationStatus AS guide_application_status))
+                        INSERT INTO guide_profiles (id, user_id, guide_status)
+                        VALUES (:id, :userId, CAST(:guideStatus AS guide_application_status))
                         """)
                 .setParameter("id", guideId)
                 .setParameter("userId", userId)
-                .setParameter("universityId", universityId)
-                .setParameter("applicationStatus", applicationStatus)
+                .setParameter("guideStatus", guideStatus)
                 .executeUpdate();
         return guideId;
     }

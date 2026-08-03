@@ -1,11 +1,15 @@
 package com.CampusToursLive.domain.participant;
 
+import com.CampusToursLive.domain.user.NameRules;
 import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.domain.user.UserRoleRepository;
+import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.security.OidcIdentity;
+import com.CampusToursLive.security.OidcIdentityLock;
 import com.CampusToursLive.web.dto.ParticipantProfileResponse;
 import com.CampusToursLive.web.dto.ParticipantProfileUpdateRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -25,6 +29,7 @@ public class ParticipantService {
     private final UserRepository users;
     private final UserRoleRepository userRoles;
     private final RoleGrantService roleGrant;
+    private final OidcIdentityLock identityLock;
     private final ObjectMapper mapper;
 
     public ParticipantService(
@@ -32,11 +37,13 @@ public class ParticipantService {
             UserRepository users,
             UserRoleRepository userRoles,
             RoleGrantService roleGrant,
+            OidcIdentityLock identityLock,
             ObjectMapper mapper) {
         this.profiles = profiles;
         this.users = users;
         this.userRoles = userRoles;
         this.roleGrant = roleGrant;
+        this.identityLock = identityLock;
         this.mapper = mapper;
     }
 
@@ -48,8 +55,10 @@ public class ParticipantService {
 
     @Transactional
     public ParticipantProfileResponse updateProfile(
-            UserEntity user, ParticipantProfileUpdateRequest req) {
+            UserEntity user, OidcIdentity oidcIdentity, ParticipantProfileUpdateRequest req) {
         // users-table fields
+        NameRules.validate("firstName", req.firstName());
+        NameRules.validate("lastName", req.lastName());
         if (req.firstName() != null) user.setFirstName(req.firstName());
         if (req.lastName() != null) user.setLastName(req.lastName());
         // Keep display_name (canonical display string) synced from first/last.
@@ -77,13 +86,30 @@ public class ParticipantService {
                                     return p;
                                 });
 
-        if (req.participantType() != null) {
-            profile.setParticipantType(parseType(req.participantType()));
+        ParticipantType requestedType =
+                req.participantType() != null ? parseType(req.participantType()) : null;
+        boolean participantTypeChanging =
+                requestedType != null && requestedType != profile.getParticipantType();
+
+        if (participantTypeChanging) {
+            // I14: any participant_type change (to OR from PARENT) mutates PARENT<->GUIDE
+            // eligibility, so it must be serialized against concurrent eligibility mutations
+            // (guide onboarding, other participant-type edits) for the SAME identity, FIRST —
+            // before evaluating the exclusion check below. Re-entrant + a harmless no-op when the
+            // caller (e.g. OnboardingService) already holds this identity's lock in the same
+            // transaction.
+            identityLock.acquire(oidcIdentity);
         }
-        // Bidirectional exclusion: a guide cannot also be a parent/guardian participant.
+
+        if (requestedType != null) {
+            profile.setParticipantType(requestedType);
+        }
+        // Bidirectional exclusion: a guide cannot also be a parent/guardian participant. This
+        // read is issued AFTER the lock acquire above (when the type is changing), so it observes
+        // any concurrent GUIDE grant that had to finish committing first under the same lock.
         if (profile.getParticipantType() == ParticipantType.PARENT
                 && userRoles.existsByUserIdAndRole(user.getId(), UserRole.GUIDE)) {
-            throw new ValidationException("Guides cannot also be parent or guardian participants.");
+            throw ConflictException.roleNotEligible(UserRole.PARTICIPANT.name());
         }
         if (req.gradeLevel() != null) profile.setGradeLevel(req.gradeLevel());
         if (req.intendedMajor() != null) profile.setIntendedMajor(req.intendedMajor());
@@ -100,7 +126,7 @@ public class ParticipantService {
         profiles.save(profile);
 
         // Onboarding complete → grant the PARTICIPANT role (idempotent; re-edits
-        // won't re-grant or change the active role).
+        // won't re-grant or change the current role).
         roleGrant.grant(user, UserRole.PARTICIPANT);
         users.save(user); // persist user-field updates + the grant's role change, once
         return toResponse(user, profile);
@@ -122,13 +148,7 @@ public class ParticipantService {
         Map<String, Object> interests =
                 profile != null ? readInterests(profile.getInterests()) : null;
         return new ParticipantProfileResponse(
-                user.getId().toString(),
-                user.getFirstName(),
-                user.getLastName(),
-                user.getDisplayName(),
-                user.getEmail(),
-                user.getPreferredLanguage(),
-                user.getTimezone(),
+                profile == null ? null : participantStatus(profile),
                 profile == null
                         ? null
                         : (profile.getParticipantType() != null
@@ -141,7 +161,18 @@ public class ParticipantService {
                 interests == null
                         ? null
                         : interests.getOrDefault("universities", new ArrayList<>()),
-                interests == null ? null : interests.get("accessibility"));
+                interests == null ? null : interests.get("accessibility"),
+                user.getPreferredLanguage(),
+                user.getTimezone());
+    }
+
+    /**
+     * Underage participants require guardian verification before the account is fully usable; that
+     * flow is future work (Phase 4), so today {@code guardianRequired} is always {@code false} and
+     * this always returns {@code VERIFIED}.
+     */
+    private static String participantStatus(ParticipantProfileEntity p) {
+        return p.isGuardianRequired() ? "PENDING" : "VERIFIED";
     }
 
     /**

@@ -1,16 +1,23 @@
 package com.CampusToursLive.domain.tour;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
+import com.CampusToursLive.domain.guide.GuideUniversityEntity;
+import com.CampusToursLive.domain.guide.GuideUniversityRepository;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.university.UniversityStatus;
@@ -22,6 +29,9 @@ import com.CampusToursLive.web.dto.TourDetailResponse;
 import com.CampusToursLive.web.dto.TourSummaryResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,20 +40,24 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
-/** Public marketplace discovery — only ACTIVE offerings from APPROVED guides are visible. */
+/** Public marketplace discovery — only ACTIVE offerings from VERIFIED guides are visible. */
 @ExtendWith(MockitoExtension.class)
 class TourDiscoveryServiceTest {
 
     @Mock TourOfferingRepository offerings;
     @Mock GuideProfileRepository guides;
+    @Mock GuideUniversityRepository guideUniversities;
     @Mock UniversityRepository universities;
     @Mock UserRepository users;
 
     private TourDiscoveryService service() {
-        return new TourDiscoveryService(offerings, guides, universities, users, new ObjectMapper());
+        return new TourDiscoveryService(
+                offerings, guides, guideUniversities, universities, users, new ObjectMapper());
     }
 
     private static TourOfferingEntity offering(UUID id, UUID guideId, UUID universityId) {
@@ -59,6 +73,8 @@ class TourDiscoveryServiceTest {
         o.setPriceCents(4200L);
         o.setCurrency("USD");
         o.setLanguages("[\"en-US\"]");
+        o.setFeatures("[\"Q_AND_A\"]");
+        o.setCreatedAt(Instant.now());
         o.setAvgRating(new BigDecimal("4.50"));
         o.setReviewCount(12);
         return o;
@@ -72,14 +88,27 @@ class TourDiscoveryServiceTest {
         UUID univId = UUID.randomUUID();
 
         TourOfferingEntity row = offering(oid, gid, univId);
-        when(offerings.findDiscoverable(eq(null), eq(null), eq(""), any(Pageable.class)))
-                .thenReturn(List.of(row));
+        when(offerings.findDiscoverable(
+                        eq(null), eq(false), anyList(), eq(""), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
 
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(gid);
         guide.setUserId(uid);
         guide.setBio("Student guide");
         when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
+
+        // major/degree/entryYear now live on the guide's guide_universities row for THIS
+        // offering's school, not on the flat guide_profiles row.
+        GuideUniversityEntity guideUniversity = new GuideUniversityEntity();
+        guideUniversity.setId(UUID.randomUUID());
+        guideUniversity.setGuideProfileId(gid);
+        guideUniversity.setUniversityId(univId);
+        guideUniversity.setMajor("Computer Science");
+        guideUniversity.setDegree("BS");
+        guideUniversity.setEntryYear(2023);
+        when(guideUniversities.findByGuideProfileIdIn(List.of(gid)))
+                .thenReturn(List.of(guideUniversity));
 
         UserEntity user = new UserEntity();
         user.setId(uid);
@@ -93,41 +122,143 @@ class TourDiscoveryServiceTest {
         university.setCity("Arcata");
         university.setRegion("CA");
         university.setStatus(UniversityStatus.ACTIVE);
+        university.setImageUrl("https://r2.example/Stanford%20University.png");
         when(universities.findAllById(List.of(univId))).thenReturn(List.of(university));
 
-        List<TourSummaryResponse> res =
-                service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 20);
+        Page<TourSummaryResponse> res =
+                service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 20);
 
-        assertEquals(1, res.size());
-        assertEquals(oid.toString(), res.get(0).id());
-        assertEquals("North Coast University", res.get(0).universityName());
-        assertEquals("Maya Chen", res.get(0).guideDisplayName());
-        assertEquals(4200L, res.get(0).priceCents());
-        assertEquals(4.5, res.get(0).avgRating());
-        assertEquals(12, res.get(0).reviewCount());
+        assertEquals(1, res.getTotalElements());
+        assertEquals(1, res.getContent().size());
+        assertEquals(oid.toString(), res.getContent().get(0).id());
+        assertEquals("North Coast University", res.getContent().get(0).universityName());
+        assertEquals(
+                "https://r2.example/Stanford%20University.png",
+                res.getContent().get(0).universityImageUrl());
+        assertEquals("Maya Chen", res.getContent().get(0).guideDisplayName());
+        assertEquals("Computer Science", res.getContent().get(0).guideMajor());
+        assertEquals("BS", res.getContent().get(0).guideDegree());
+        assertEquals(2023, res.getContent().get(0).guideEntryYear());
+        assertEquals(List.of("en-US"), res.getContent().get(0).languages());
+        assertEquals(List.of("Q_AND_A"), res.getContent().get(0).features());
+        assertEquals(true, res.getContent().get(0).isNew());
+        assertEquals(4200L, res.getContent().get(0).priceCents());
+        assertEquals(4.5, res.getContent().get(0).avgRating());
+        assertEquals(12, res.getContent().get(0).reviewCount());
+    }
+
+    @Test
+    void list_picksTheGuideUniversityRow_matchingTheOfferingsOwnSchool() {
+        // A guide can hold guide_universities rows for several schools; the card must show the
+        // major/degree for THIS offering's university, not just any row on the guide.
+        UUID oid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uid = UUID.randomUUID();
+        UUID univId = UUID.randomUUID();
+        UUID otherUnivId = UUID.randomUUID();
+
+        TourOfferingEntity row = offering(oid, gid, univId);
+        when(offerings.findDiscoverable(
+                        eq(null), eq(false), anyList(), eq(""), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(gid);
+        guide.setUserId(uid);
+        when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
+
+        GuideUniversityEntity otherSchoolRow = new GuideUniversityEntity();
+        otherSchoolRow.setId(UUID.randomUUID());
+        otherSchoolRow.setGuideProfileId(gid);
+        otherSchoolRow.setUniversityId(otherUnivId);
+        otherSchoolRow.setMajor("Wrong School Major");
+        otherSchoolRow.setDegree("Wrong School Degree");
+
+        GuideUniversityEntity thisOfferingsSchoolRow = new GuideUniversityEntity();
+        thisOfferingsSchoolRow.setId(UUID.randomUUID());
+        thisOfferingsSchoolRow.setGuideProfileId(gid);
+        thisOfferingsSchoolRow.setUniversityId(univId);
+        thisOfferingsSchoolRow.setMajor("Correct Major");
+        thisOfferingsSchoolRow.setDegree("Correct Degree");
+
+        when(guideUniversities.findByGuideProfileIdIn(List.of(gid)))
+                .thenReturn(List.of(otherSchoolRow, thisOfferingsSchoolRow));
+
+        UserEntity user = new UserEntity();
+        user.setId(uid);
+        user.setDisplayName("Maya Chen");
+        when(users.findAllById(List.of(uid))).thenReturn(List.of(user));
+
+        UniversityEntity university = new UniversityEntity();
+        university.setId(univId);
+        university.setName("North Coast University");
+        when(universities.findAllById(List.of(univId))).thenReturn(List.of(university));
+
+        Page<TourSummaryResponse> res =
+                service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 20);
+
+        assertEquals("Correct Major", res.getContent().get(0).guideMajor());
+        assertEquals("Correct Degree", res.getContent().get(0).guideDegree());
+    }
+
+    @Test
+    void list_guideMajorAndDegreeAreNull_whenNoGuideUniversityRowMatchesTheOffering() {
+        // No guide_universities row at all for this offering's university → the card degrades
+        // gracefully (null major/degree) instead of throwing.
+        UUID oid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uid = UUID.randomUUID();
+        UUID univId = UUID.randomUUID();
+
+        TourOfferingEntity row = offering(oid, gid, univId);
+        when(offerings.findDiscoverable(
+                        eq(null), eq(false), anyList(), eq(""), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(gid);
+        guide.setUserId(uid);
+        when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
+        // No stub for guideUniversities.findByGuideProfileIdIn(...) → Mockito's default empty list.
+
+        UserEntity user = new UserEntity();
+        user.setId(uid);
+        user.setDisplayName("Maya Chen");
+        when(users.findAllById(List.of(uid))).thenReturn(List.of(user));
+
+        UniversityEntity university = new UniversityEntity();
+        university.setId(univId);
+        university.setName("North Coast University");
+        when(universities.findAllById(List.of(univId))).thenReturn(List.of(university));
+
+        Page<TourSummaryResponse> res =
+                service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 20);
+
+        assertNull(res.getContent().get(0).guideMajor());
+        assertNull(res.getContent().get(0).guideDegree());
     }
 
     @Test
     void list_clampsLimitToFifty() {
-        when(offerings.findDiscoverable(any(), any(), any(), any(Pageable.class)))
-                .thenReturn(List.of());
+        when(offerings.findDiscoverable(any(), anyBoolean(), anyList(), any(), any(Pageable.class)))
+                .thenReturn(Page.empty());
 
-        service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 100);
+        service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 100);
 
         ArgumentCaptor<Pageable> page = ArgumentCaptor.forClass(Pageable.class);
-        verify(offerings).findDiscoverable(eq(null), eq(null), eq(""), page.capture());
+        verify(offerings).findDiscoverable(eq(null), eq(false), anyList(), eq(""), page.capture());
         assertEquals(50, page.getValue().getPageSize());
     }
 
     @Test
     void list_clampsLimitToOne_whenBelowMinimum() {
-        when(offerings.findDiscoverable(any(), any(), any(), any(Pageable.class)))
-                .thenReturn(List.of());
+        when(offerings.findDiscoverable(any(), anyBoolean(), anyList(), any(), any(Pageable.class)))
+                .thenReturn(Page.empty());
 
-        service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0);
+        service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 0);
 
         ArgumentCaptor<Pageable> page = ArgumentCaptor.forClass(Pageable.class);
-        verify(offerings).findDiscoverable(eq(null), eq(null), eq(""), page.capture());
+        verify(offerings).findDiscoverable(eq(null), eq(false), anyList(), eq(""), page.capture());
         assertEquals(1, page.getValue().getPageSize());
     }
 
@@ -135,27 +266,43 @@ class TourDiscoveryServiceTest {
     void list_throws422_whenUniversityIdInvalid() {
         assertThrows(
                 ValidationException.class,
-                () -> service().list("bad-id", null, "", TourDiscoverySort.RECOMMENDED, 20));
+                () -> service().list("bad-id", null, "", TourDiscoverySort.RECOMMENDED, 0, 20));
     }
 
     @Test
     void list_throws422_whenTopicInvalid() {
         assertThrows(
                 ValidationException.class,
-                () -> service().list(null, "NOT_A_TOPIC", "", TourDiscoverySort.RECOMMENDED, 20));
+                () ->
+                        service()
+                                .list(
+                                        null,
+                                        List.of("NOT_A_TOPIC"),
+                                        "",
+                                        TourDiscoverySort.RECOMMENDED,
+                                        0,
+                                        20));
     }
 
     @Test
-    void list_acceptsLowercaseTopic() {
+    void list_singleTopic_filtersByThatTopic() {
         when(offerings.findDiscoverable(
-                        eq(null), eq(TourTopic.DORM_HOUSING), eq(""), any(Pageable.class)))
-                .thenReturn(List.of());
+                        eq(null),
+                        eq(true),
+                        eq(List.of(TourTopic.DORM_HOUSING)),
+                        eq(""),
+                        any(Pageable.class)))
+                .thenReturn(Page.empty());
 
-        service().list(null, "dorm_housing", "", TourDiscoverySort.RECOMMENDED, 20);
+        service().list(null, List.of("DORM_HOUSING"), "", TourDiscoverySort.RECOMMENDED, 0, 20);
 
         verify(offerings)
                 .findDiscoverable(
-                        eq(null), eq(TourTopic.DORM_HOUSING), eq(""), any(Pageable.class));
+                        eq(null),
+                        eq(true),
+                        eq(List.of(TourTopic.DORM_HOUSING)),
+                        eq(""),
+                        any(Pageable.class));
     }
 
     @Test
@@ -181,13 +328,13 @@ class TourDiscoveryServiceTest {
 
     private void assertFirstSortOrder(
             TourDiscoverySort sort, String property, Sort.Direction direction) {
-        when(offerings.findDiscoverable(any(), any(), any(), any(Pageable.class)))
-                .thenReturn(List.of());
+        when(offerings.findDiscoverable(any(), anyBoolean(), anyList(), any(), any(Pageable.class)))
+                .thenReturn(Page.empty());
 
-        service().list(null, null, "", sort, 20);
+        service().list(null, null, "", sort, 0, 20);
 
         ArgumentCaptor<Pageable> page = ArgumentCaptor.forClass(Pageable.class);
-        verify(offerings).findDiscoverable(eq(null), eq(null), eq(""), page.capture());
+        verify(offerings).findDiscoverable(eq(null), eq(false), anyList(), eq(""), page.capture());
         Sort.Order first = page.getValue().getSort().iterator().next();
         assertEquals(property, first.getProperty());
         assertEquals(direction, first.getDirection());
@@ -216,7 +363,7 @@ class TourDiscoveryServiceTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(gid);
         guide.setUserId(uid);
-        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        guide.setStatus(GuideStatus.VERIFIED);
         guide.setBio("Bio text");
         when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
 
@@ -231,6 +378,7 @@ class TourDiscoveryServiceTest {
         university.setSlug("north-coast");
         university.setCity("Arcata");
         university.setRegion("CA");
+        university.setImageUrl("https://r2.example/Stanford%20University.png");
         when(universities.findAllById(List.of(univId))).thenReturn(List.of(university));
 
         TourDetailResponse res = service().getById(oid);
@@ -239,6 +387,7 @@ class TourDiscoveryServiceTest {
         assertEquals(List.of("en-US"), res.languages());
         assertEquals("north-coast", res.universitySlug());
         assertEquals("Bio text", res.guideBio());
+        assertEquals("https://r2.example/Stanford%20University.png", res.universityImageUrl());
     }
 
     @Test
@@ -266,22 +415,26 @@ class TourDiscoveryServiceTest {
     @Test
     void list_parsesValidUniversityId_andTreatsNullQueryAsEmpty() {
         UUID univId = UUID.randomUUID();
-        when(offerings.findDiscoverable(eq(univId), eq(null), eq(""), any(Pageable.class)))
-                .thenReturn(List.of());
+        when(offerings.findDiscoverable(
+                        eq(univId), eq(false), anyList(), eq(""), any(Pageable.class)))
+                .thenReturn(Page.empty());
 
-        service().list(univId.toString(), null, null, TourDiscoverySort.RECOMMENDED, 20);
+        service().list(univId.toString(), null, null, TourDiscoverySort.RECOMMENDED, 0, 20);
 
-        verify(offerings).findDiscoverable(eq(univId), eq(null), eq(""), any(Pageable.class));
+        verify(offerings)
+                .findDiscoverable(eq(univId), eq(false), anyList(), eq(""), any(Pageable.class));
     }
 
     @Test
     void list_treatsBlankUniversityIdAndTopicAsAbsent() {
-        when(offerings.findDiscoverable(eq(null), eq(null), eq(""), any(Pageable.class)))
-                .thenReturn(List.of());
+        when(offerings.findDiscoverable(
+                        eq(null), eq(false), anyList(), eq(""), any(Pageable.class)))
+                .thenReturn(Page.empty());
 
-        service().list("   ", "   ", "", TourDiscoverySort.RECOMMENDED, 20);
+        service().list("   ", List.of("   "), "", TourDiscoverySort.RECOMMENDED, 0, 20);
 
-        verify(offerings).findDiscoverable(eq(null), eq(null), eq(""), any(Pageable.class));
+        verify(offerings)
+                .findDiscoverable(eq(null), eq(false), anyList(), eq(""), any(Pageable.class));
     }
 
     @Test
@@ -294,6 +447,116 @@ class TourDiscoveryServiceTest {
         assertEquals(TourDiscoverySort.PRICE_ASC, TourDiscoveryService.parseSort("price_asc"));
     }
 
+    // ---- parseTopics ----
+
+    @Test
+    void parseTopics_mergesRepeatedAndCommaTokensDedupedInOrder() {
+        // Repeated params, each possibly comma-joined, merge into one deduped set.
+        assertThat(
+                        TourDiscoveryService.parseTopics(
+                                List.of("GENERAL_CAMPUS,DORM_HOUSING", "DORM_HOUSING")))
+                .containsExactly(TourTopic.GENERAL_CAMPUS, TourTopic.DORM_HOUSING);
+    }
+
+    @Test
+    void parseTopics_trimsAndDropsEmptyTokensWithoutError() {
+        assertThat(TourDiscoveryService.parseTopics(List.of(" GENERAL_CAMPUS , ", "", "  ")))
+                .containsExactly(TourTopic.GENERAL_CAMPUS);
+    }
+
+    @Test
+    void parseTopics_nullOrAllEmptyMeansNoFilter() {
+        assertThat(TourDiscoveryService.parseTopics(null)).isEmpty();
+        assertThat(TourDiscoveryService.parseTopics(List.of("", " "))).isEmpty();
+    }
+
+    @Test
+    void parseTopics_fullSetMeansNoFilter() {
+        List<String> all = Arrays.stream(TourTopic.values()).map(Enum::name).toList();
+        assertThat(TourDiscoveryService.parseTopics(all)).isEmpty();
+    }
+
+    @Test
+    void parseTopics_isCaseSensitiveExactMatch() {
+        // Lowercase is NOT accepted (exact enum-name match).
+        assertThatThrownBy(() -> TourDiscoveryService.parseTopics(List.of("general_campus")))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void parseTopics_unknownNonEmptyTokenThrows() {
+        assertThatThrownBy(() -> TourDiscoveryService.parseTopics(List.of("NOT_A_TOPIC")))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void parseTopics_nullElementInListIsSkipped() {
+        // Repeated params can arrive with a null element; it must be skipped, not NPE.
+        assertThat(TourDiscoveryService.parseTopics(Arrays.asList(null, "GENERAL_CAMPUS")))
+                .containsExactly(TourTopic.GENERAL_CAMPUS);
+    }
+
+    @Test
+    void parseTopics_fullSetWithDuplicatesStillMeansNoFilter() {
+        List<String> all =
+                new ArrayList<>(Arrays.stream(TourTopic.values()).map(Enum::name).toList());
+        all.add("GENERAL_CAMPUS"); // duplicate — deduped set still equals the full enum
+        assertThat(TourDiscoveryService.parseTopics(all)).isEmpty();
+    }
+
+    @Test
+    void parseTopics_unknownAfterValidStillThrows() {
+        assertThatThrownBy(
+                        () -> TourDiscoveryService.parseTopics(List.of("GENERAL_CAMPUS", "NOPE")))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void parseTopics_fullSetMissingOneStillFilters() {
+        List<String> sevenOfEight =
+                Arrays.stream(TourTopic.values()).map(Enum::name).skip(1).toList();
+        assertThat(TourDiscoveryService.parseTopics(sevenOfEight))
+                .hasSize(TourTopic.values().length - 1);
+    }
+
+    // ---- list(...) multi-topic wiring ----
+
+    @Test
+    void list_noTopicParam_doesNotFilterByTopic() {
+        when(offerings.findDiscoverable(
+                        isNull(), eq(false), anyList(), eq(""), any(Pageable.class)))
+                .thenReturn(Page.empty());
+        service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 20);
+        verify(offerings)
+                .findDiscoverable(isNull(), eq(false), anyList(), eq(""), any(Pageable.class));
+    }
+
+    @Test
+    void list_topicSubset_filtersByThoseTopics() {
+        when(offerings.findDiscoverable(
+                        isNull(),
+                        eq(true),
+                        eq(List.of(TourTopic.GENERAL_CAMPUS, TourTopic.DORM_HOUSING)),
+                        eq(""),
+                        any(Pageable.class)))
+                .thenReturn(Page.empty());
+        service()
+                .list(
+                        null,
+                        List.of("GENERAL_CAMPUS", "DORM_HOUSING"),
+                        "",
+                        TourDiscoverySort.RECOMMENDED,
+                        0,
+                        20);
+        verify(offerings)
+                .findDiscoverable(
+                        isNull(),
+                        eq(true),
+                        eq(List.of(TourTopic.GENERAL_CAMPUS, TourTopic.DORM_HOUSING)),
+                        eq(""),
+                        any(Pageable.class));
+    }
+
     // ---- toSummary / toDetail fallbacks (null topic, missing guide user) ----
 
     @Test
@@ -304,16 +567,17 @@ class TourDiscoveryServiceTest {
         UUID univId = UUID.randomUUID();
         TourOfferingEntity row = offering(oid, gid, univId);
         row.setTopic(null);
-        when(offerings.findDiscoverable(eq(null), eq(null), eq(""), any(Pageable.class)))
-                .thenReturn(List.of(row));
+        when(offerings.findDiscoverable(
+                        eq(null), eq(false), anyList(), eq(""), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
         stubGuideUserUniversity(gid, uid, univId, false);
 
-        List<TourSummaryResponse> res =
-                service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 20);
+        Page<TourSummaryResponse> res =
+                service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 20);
 
-        assertEquals(1, res.size());
-        assertNull(res.get(0).topic());
-        assertEquals("Guide", res.get(0).guideDisplayName());
+        assertEquals(1, res.getTotalElements());
+        assertNull(res.getContent().get(0).topic());
+        assertEquals("Guide", res.getContent().get(0).guideDisplayName());
     }
 
     @Test

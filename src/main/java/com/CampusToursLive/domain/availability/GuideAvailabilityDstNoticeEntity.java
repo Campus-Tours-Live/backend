@@ -11,12 +11,12 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * Maps the {@code guide_availability_dst_notices} table (V5__availability_dst_notices.sql) — one
- * row per calendar date on which a daylight-saving transition shifted or absorbed one of a guide's
- * availability windows during projection (see {@link ProjectionResult#dstAdjustedDays()}).
+ * Maps the {@code guide_availability_dst_notices} table (V1__schema.sql) — one row per calendar
+ * date on which a daylight-saving transition shifted or absorbed one of a guide's availability
+ * windows during projection (see {@link ProjectionResult#dstAdjustedDays()}).
  *
  * <p>A DERIVED cache like {@link GuideAvailabilityOccurrenceEntity}: wholesale re-derived and
- * replaced per guide on every {@code rematerialize} (CTL-54 Task 3), never edited row-by-row. The
+ * replaced per guide on every {@code rematerialize}, never edited row-by-row. The
  * resolved-availability read model (Task 5b) reads these to warn the guide.
  */
 @Getter

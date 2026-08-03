@@ -1,131 +1,157 @@
 package com.CampusToursLive.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.verify;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
-import com.CampusToursLive.domain.guide.GuideProfileEntity;
-import com.CampusToursLive.domain.guide.GuideProfileRepository;
-import com.CampusToursLive.domain.participant.ParticipantProfileEntity;
-import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
-import com.CampusToursLive.domain.participant.ParticipantType;
-import com.CampusToursLive.domain.user.ActiveRoleService;
+import com.CampusToursLive.domain.user.AccountStatus;
+import com.CampusToursLive.domain.user.RoleEligibilityService;
+import com.CampusToursLive.domain.user.RoleIneligibilityReason;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
-import com.CampusToursLive.domain.user.UserRoleEntity;
-import com.CampusToursLive.domain.user.UserRoleRepository;
+import com.CampusToursLive.error.ForbiddenException;
+import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.security.CurrentUser;
-import com.CampusToursLive.web.dto.ActiveRoleRequest;
-import com.CampusToursLive.web.dto.MeResponse;
+import com.CampusToursLive.security.ProvisionedAccount;
+import com.CampusToursLive.web.dto.CurrentUserResponse;
+import com.CampusToursLive.web.dto.RoleEligibilityResponse;
+import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
- * SessionController.userinfo / resolveSession — the principal view (MeResponse). Verifies the
- * enrichment in {@code me()}: the authoritative role set (sorted), the participant type, and the
- * guide application status, all assembled from the per-role repositories.
+ * SessionController.me / roleEligibility — the principal view (CurrentUserResponse) and the
+ * role-eligibility passthrough. Verifies identity nested under {@code user} and the authoritative
+ * role set in FIXED enum order (PARTICIPANT, GUIDE, ADMIN, SUPPORT), not insertion order. There is
+ * no {@code currentRole} field and no /session/current-role endpoint any more —
+ * current-role/session context is bff-owned. The old OAuth-time session-provisioning endpoint was
+ * removed in CTL-97 — provisioning is onboarding-only now (see {@code OnboardingServiceTest}).
  */
 @ExtendWith(MockitoExtension.class)
 class SessionControllerTest {
 
     @Mock CurrentUser currentUser;
-    @Mock UserRoleRepository userRoles;
-    @Mock ParticipantProfileRepository participants;
-    @Mock GuideProfileRepository guides;
-    @Mock ActiveRoleService activeRole;
+    @Mock RoleEligibilityService roleEligibilityService;
 
     private SessionController controller() {
-        return new SessionController(currentUser, userRoles, participants, guides, activeRole);
+        return new SessionController(currentUser, roleEligibilityService);
     }
 
-    private static UserEntity user(UUID id) {
-        UserEntity u = new UserEntity();
-        u.setId(id);
-        u.setLastActiveRole(UserRole.GUIDE);
-        return u;
+    private static ProvisionedAccount provisionedAccount(UUID id, UserRole... roles) {
+        return new ProvisionedAccount(
+                id,
+                "sub-1",
+                "ada@example.com",
+                "Ada",
+                "Lovelace",
+                "Ada Lovelace",
+                AccountStatus.ACTIVE,
+                null,
+                Instant.parse("2024-01-01T00:00:00Z"),
+                Set.of(roles));
+    }
+
+    private static ProvisionedAccount provisionedAccount(UUID id) {
+        return provisionedAccount(id, new UserRole[0]);
     }
 
     @Test
-    void userinfo_returnsSortedRolesAndPerRoleStatus() {
+    void me_returnsUserEnvelopeWithFixedEnumOrderRoles() {
         UUID uid = UUID.randomUUID();
-        UserEntity u = user(uid);
-        when(currentUser.require()).thenReturn(u);
-        // intentionally out of order — me() sorts
-        when(userRoles.findByUserId(uid))
+        // GUIDE inserted before PARTICIPANT in the Set — the response must still emit fixed enum
+        // order (PARTICIPANT before GUIDE), not Set/insertion order.
+        when(currentUser.requireProvisioned())
+                .thenReturn(provisionedAccount(uid, UserRole.GUIDE, UserRole.PARTICIPANT));
+
+        CurrentUserResponse body = controller().me().data();
+
+        assertNotNull(body.user());
+        assertEquals(uid.toString(), body.user().id());
+        assertEquals(List.of(UserRole.PARTICIPANT, UserRole.GUIDE), body.roles());
+    }
+
+    @Test
+    void me_returnsEmptyRoles_forBrandNewSignup() {
+        UUID uid = UUID.randomUUID();
+        when(currentUser.requireProvisioned()).thenReturn(provisionedAccount(uid));
+
+        CurrentUserResponse body = controller().me().data();
+
+        assertEquals(List.of(), body.roles());
+    }
+
+    @Test
+    void me_pending_propagates404AccountNotProvisioned() {
+        when(currentUser.requireProvisioned())
+                .thenThrow(
+                        new NotFoundException(
+                                "Account not provisioned", "ACCOUNT_NOT_PROVISIONED"));
+
+        NotFoundException ex = assertThrows(NotFoundException.class, () -> controller().me());
+        assertEquals("ACCOUNT_NOT_PROVISIONED", ex.code());
+    }
+
+    @Test
+    void me_suspended_propagates403AccountSuspended() {
+        when(currentUser.requireProvisioned())
+                .thenThrow(new ForbiddenException("Account is suspended", "ACCOUNT_SUSPENDED"));
+
+        ForbiddenException ex = assertThrows(ForbiddenException.class, () -> controller().me());
+        assertEquals("ACCOUNT_SUSPENDED", ex.code());
+    }
+
+    @Test
+    void roleEligibility_delegatesParsedRoleToService() {
+        UUID uid = UUID.randomUUID();
+        when(currentUser.requireProvisioned()).thenReturn(provisionedAccount(uid));
+        when(roleEligibilityService.checkEligibility(any(UserEntity.class), eq(UserRole.GUIDE)))
                 .thenReturn(
-                        List.of(
-                                new UserRoleEntity(uid, UserRole.PARTICIPANT),
-                                new UserRoleEntity(uid, UserRole.GUIDE)));
-        ParticipantProfileEntity pp = new ParticipantProfileEntity();
-        pp.setParticipantType(ParticipantType.PROSPECTIVE);
-        when(participants.findByUserId(uid)).thenReturn(Optional.of(pp));
-        GuideProfileEntity gp = new GuideProfileEntity();
-        gp.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
-        when(guides.findByUserId(uid)).thenReturn(Optional.of(gp));
+                        new RoleEligibilityResponse(
+                                false, RoleIneligibilityReason.PARENT_CANNOT_BECOME_GUIDE));
 
-        MeResponse me = controller().userinfo().data();
+        RoleEligibilityResponse body = controller().roleEligibility("GUIDE").data();
 
-        assertEquals(List.of("GUIDE", "PARTICIPANT"), me.roles());
-        assertEquals("GUIDE", me.activeRole());
-        assertEquals("PROSPECTIVE", me.participantType());
-        assertEquals("PENDING_REVIEW", me.guideStatus());
+        assertEquals(false, body.eligible());
+        assertEquals(RoleIneligibilityReason.PARENT_CANNOT_BECOME_GUIDE, body.reason());
     }
 
     @Test
-    void resolveSession_delegatesToResolveWithIntent() {
+    void roleEligibility_eligibleHasNullReason() {
         UUID uid = UUID.randomUUID();
-        UserEntity u = user(uid);
-        when(currentUser.resolve("signup")).thenReturn(u);
-        when(userRoles.findByUserId(uid)).thenReturn(List.of());
-        when(participants.findByUserId(uid)).thenReturn(Optional.empty());
-        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+        when(currentUser.requireProvisioned()).thenReturn(provisionedAccount(uid));
+        when(roleEligibilityService.checkEligibility(
+                        any(UserEntity.class), eq(UserRole.PARTICIPANT)))
+                .thenReturn(new RoleEligibilityResponse(true, null));
 
-        MeResponse me = controller().resolveSession("signup").data();
+        RoleEligibilityResponse body = controller().roleEligibility("PARTICIPANT").data();
 
-        assertEquals(List.of(), me.roles());
-        assertEquals(null, me.participantType());
-        assertEquals(null, me.guideStatus());
+        assertEquals(true, body.eligible());
+        assertNull(body.reason());
     }
 
     @Test
-    void setActiveRole_delegatesToServiceThenReturnsMe() {
-        UUID uid = UUID.randomUUID();
-        UserEntity u = user(uid);
-        when(currentUser.require()).thenReturn(u);
-        when(userRoles.findByUserId(uid))
-                .thenReturn(List.of(new UserRoleEntity(uid, UserRole.GUIDE)));
-        when(participants.findByUserId(uid)).thenReturn(Optional.empty());
-        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
-
-        MeResponse me = controller().setActiveRole(new ActiveRoleRequest("GUIDE")).data();
-
-        verify(activeRole).switchActiveRole(u, "GUIDE");
-        assertEquals(List.of("GUIDE"), me.roles());
+    void roleEligibility_throws400_whenRoleBlank() {
+        ResponseStatusException ex =
+                assertThrows(
+                        ResponseStatusException.class, () -> controller().roleEligibility("  "));
+        assertEquals(400, ex.getStatusCode().value());
     }
 
     @Test
-    void userinfo_handlesProfilesWithNullInnerEnums() {
-        // Profiles exist but their enum fields are null → me() maps both to null (the ": null"
-        // arm).
-        UUID uid = UUID.randomUUID();
-        UserEntity u = user(uid);
-        when(currentUser.require()).thenReturn(u);
-        when(userRoles.findByUserId(uid)).thenReturn(List.of());
-        when(participants.findByUserId(uid))
-                .thenReturn(Optional.of(new ParticipantProfileEntity())); // participantType null
-        GuideProfileEntity gp = new GuideProfileEntity();
-        gp.setApplicationStatus(null); // override the DRAFT default → exercise the ": null" arm
-        when(guides.findByUserId(uid)).thenReturn(Optional.of(gp));
-
-        MeResponse me = controller().userinfo().data();
-
-        assertEquals(null, me.participantType());
-        assertEquals(null, me.guideStatus());
+    void roleEligibility_throws400_whenRoleUnknown() {
+        ResponseStatusException ex =
+                assertThrows(
+                        ResponseStatusException.class, () -> controller().roleEligibility("BOGUS"));
+        assertEquals(400, ex.getStatusCode().value());
     }
 }

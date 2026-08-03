@@ -5,9 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.university.UniversityStatus;
 import com.CampusToursLive.domain.user.AccountStatus;
@@ -40,10 +40,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Integration test for {@link OccurrenceHorizonJob} (CTL-54 Task 4) against a REAL PostgreSQL
- * (Testcontainers) — the only way to exercise the real {@code SELECT ... FOR UPDATE SKIP LOCKED}
- * claim and genuine {@code REQUIRES_NEW} transaction boundaries (needed for the failure-isolation
- * proof below).
+ * Integration test for {@link OccurrenceHorizonJob} against a REAL PostgreSQL (Testcontainers) —
+ * the only way to exercise the real {@code SELECT ... FOR UPDATE SKIP LOCKED} claim and genuine
+ * {@code REQUIRES_NEW} transaction boundaries (needed for the failure-isolation proof below).
  *
  * <p>The default {@code @DataJpaTest} test-transaction wrapping is turned OFF
  * ({@code @Transactional(propagation = NOT_SUPPORTED)}): {@link GuideHorizonClaimService}'s {@code
@@ -253,9 +252,7 @@ class OccurrenceHorizonJobTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setUniversityId(universityId);
-        guide.setMajor("Computer Science");
-        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        guide.setStatus(GuideStatus.VERIFIED);
         guides.save(guide);
         UUID guideId = guide.getId();
 

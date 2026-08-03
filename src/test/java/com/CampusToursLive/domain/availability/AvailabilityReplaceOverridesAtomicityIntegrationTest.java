@@ -4,12 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
-import com.CampusToursLive.domain.university.UniversityEntity;
-import com.CampusToursLive.domain.university.UniversityRepository;
-import com.CampusToursLive.domain.university.UniversityStatus;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.user.AccountStatus;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
@@ -76,7 +73,6 @@ class AvailabilityReplaceOverridesAtomicityIntegrationTest {
     @Autowired private AvailabilityExceptionRepository exceptions;
     @Autowired private GuideProfileRepository guides;
     @Autowired private UserRepository users;
-    @Autowired private UniversityRepository universities;
 
     @Test
     void replaceOverrides_midTransactionFailure_rollsBack_priorOverrideSurvives() {
@@ -119,12 +115,6 @@ class AvailabilityReplaceOverridesAtomicityIntegrationTest {
     }
 
     private UUID seedGuide() {
-        UniversityEntity university =
-                universities.findAll().stream()
-                        .filter(u -> u.getStatus() == UniversityStatus.ACTIVE)
-                        .findFirst()
-                        .orElseThrow();
-
         UserEntity guideUser = new UserEntity();
         guideUser.setId(UUID.randomUUID());
         guideUser.setOidcSubject("b2-" + UUID.randomUUID());
@@ -138,9 +128,7 @@ class AvailabilityReplaceOverridesAtomicityIntegrationTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setUniversityId(university.getId());
-        guide.setMajor("Computer Science");
-        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        guide.setStatus(GuideStatus.VERIFIED);
         guides.save(guide);
 
         return guide.getId();

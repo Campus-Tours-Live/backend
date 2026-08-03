@@ -15,9 +15,9 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
- * PURE, DB-free projection engine (CTL-54 Task 2): turns a guide's recurring availability rules and
- * one-off exceptions into a coalesced, disjoint, net-available set of UTC {@link
- * AvailabilityInterval}s over a horizon, plus the calendar days a DST transition affected.
+ * PURE, DB-free projection engine: turns a guide's recurring availability rules and one-off
+ * exceptions into a coalesced, disjoint, net-available set of UTC {@link AvailabilityInterval}s
+ * over a horizon, plus the calendar days a DST transition affected.
  *
  * <p>This class touches no database and no Spring context — it is a plain static function so Task 3
  * (persistence) can call it inside a transaction without any collaborator wiring.
@@ -107,13 +107,13 @@ public final class AvailabilityProjection {
     }
 
     /**
-     * Same projection, but with the exception zone supplied EXPLICITLY (CTL-54 Task 3). Rules are
-     * always projected in each rule's own {@code timezone} column; every exception is projected in
-     * {@code guideTimezone} (the {@code guide_booking_settings.timezone}). This overload lets a
-     * guide who has exceptions but NO active rules still materialize correctly — there is no rule
-     * to infer a zone from, so the persistence layer passes the guide's settings zone directly
-     * instead of the 3-arg overload throwing. {@code guideTimezone} may be {@code null} only when
-     * {@code exceptions} is empty (then no exception needs a zone).
+     * Same projection, but with the exception zone supplied EXPLICITLY. Rules are always projected
+     * in each rule's own {@code timezone} column; every exception is projected in {@code
+     * guideTimezone} (the {@code guide_booking_settings.timezone}). This overload lets a guide who
+     * has exceptions but NO active rules still materialize correctly — there is no rule to infer a
+     * zone from, so the persistence layer passes the guide's settings zone directly instead of the
+     * 3-arg overload throwing. {@code guideTimezone} may be {@code null} only when {@code
+     * exceptions} is empty (then no exception needs a zone).
      */
     public static ProjectionResult project(
             List<GuideAvailabilityRuleEntity> rules,
