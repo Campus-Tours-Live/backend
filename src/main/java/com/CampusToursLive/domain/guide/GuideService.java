@@ -2,6 +2,7 @@ package com.CampusToursLive.domain.guide;
 
 import com.CampusToursLive.domain.participant.ParticipantProfileRepository;
 import com.CampusToursLive.domain.participant.ParticipantType;
+import com.CampusToursLive.domain.tour.SupportedLanguages;
 import com.CampusToursLive.domain.tour.TourTopic;
 import com.CampusToursLive.domain.university.CampusImageUrls;
 import com.CampusToursLive.domain.university.UniversityEntity;
@@ -180,8 +181,7 @@ public class GuideService {
 
         if (req.bio() != null) profile.setBio(req.bio().trim());
         if (req.spokenLanguages() != null) {
-            List<String> langs =
-                    req.spokenLanguages().stream().filter(s -> s != null && !s.isBlank()).toList();
+            List<String> langs = SupportedLanguages.requireSupported(req.spokenLanguages());
             profile.setSpokenLanguages(writeJson(langs.isEmpty() ? List.of("en-US") : langs));
         }
         if (req.tourTopics() != null) {

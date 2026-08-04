@@ -216,6 +216,7 @@ class TourControllerTest {
                         "GENERAL_CAMPUS",
                         "Description",
                         List.of("en-US"),
+                        List.of("Q_AND_A"),
                         "u1",
                         "North Coast University",
                         "https://r2.example/Stanford%20University.png",
