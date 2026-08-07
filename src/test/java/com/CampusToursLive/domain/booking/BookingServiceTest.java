@@ -935,6 +935,25 @@ class BookingServiceTest {
     }
 
     @Test
+    void createBooking_nonExclusionIntegrityViolation_propagates_notMislabelledAsSlotTaken() {
+        // CTL-36: a booking_number UNIQUE collision (or any non-exclusion violation) must NOT be
+        // dressed up as a "slot taken" 422 — it propagates to the generic 500 handler.
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        stubNoOverlaps();
+        when(bookings.saveAndFlush(any()))
+                .thenThrow(
+                        new DataIntegrityViolationException(
+                                "duplicate key value violates unique constraint"
+                                        + " \"bookings_booking_number_key\""));
+
+        assertThrows(
+                DataIntegrityViolationException.class,
+                () -> service().createBooking(participant, validRequest(ctx, null)));
+        verifyNoInteractions(statusHistory);
+    }
+
+    @Test
     void createBooking_notesOverLengthCap_isRejected() {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
         Bookable ctx = stubBookableOffering();
@@ -1326,6 +1345,28 @@ class BookingServiceTest {
                 .thenThrow(new DataIntegrityViolationException("excl_guide_no_overlap"));
 
         assertThrows(ValidationException.class, () -> service().checkout(participant));
+        verifyNoInteractions(statusHistory);
+    }
+
+    @Test
+    void checkout_nonExclusionIntegrityViolation_propagates_notMislabelledAsSlotTaken() {
+        // CTL-36: parity with createBooking — a non-exclusion violation at checkout must propagate,
+        // not be re-labelled "time slots were just taken".
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity item =
+                draftItem(participant.getId(), Instant.now().plus(3, ChronoUnit.DAYS), 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        stubCheckoutLookups(item, TourStatus.ACTIVE);
+        stubNoOverlaps();
+        when(bookings.saveAllAndFlush(any()))
+                .thenThrow(
+                        new DataIntegrityViolationException(
+                                "duplicate key value violates unique constraint"
+                                        + " \"bookings_booking_number_key\""));
+
+        assertThrows(DataIntegrityViolationException.class, () -> service().checkout(participant));
         verifyNoInteractions(statusHistory);
     }
 
