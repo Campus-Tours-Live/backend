@@ -3,57 +3,30 @@ package com.CampusToursLive.web.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
- * Participant profile view, returned as an immutable record whose field names are the JSON keys.
- * The interest fields ({@code topicsOfInterest}, {@code universitiesOfInterest}, {@code
- * accessibilityPreferences}) come from a free-form JSON blob, so they stay typed as {@code Object}.
- * Profile-level fields are null before participant onboarding.
+ * Participant profile view — flat, role-scoped ({@code GET /participant/profile}), immutable record
+ * whose field names are the JSON keys. No identity fields (user id, name, email, account status):
+ * those live only on {@code GET /userinfo}. The interest fields ({@code topicsOfInterest}, {@code
+ * universitiesOfInterest}, {@code accessibilityPreferences}) come from a free-form JSON blob, so
+ * they stay typed as {@code Object}. Profile-level fields are null before participant onboarding.
  */
 @Schema(
         name = "ParticipantProfileResponse",
         description =
-                "Participant profile view; profile-level fields are null before participant"
+                "Participant profile view; flat and role-scoped (no identity fields — see"
+                        + " /userinfo). Profile-level fields are null before participant"
                         + " onboarding.")
 public record ParticipantProfileResponse(
         @Schema(
-                        description = "The participant's user id (UUID).",
-                        example = "22222222-0000-4000-8000-000000000001",
-                        requiredMode = Schema.RequiredMode.REQUIRED)
-                String userId,
-        @Schema(
-                        description = "First name.",
-                        example = "Sam",
+                        description = "Participant application status.",
+                        example = "VERIFIED",
+                        allowableValues = {"PENDING", "VERIFIED"},
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String firstName,
-        @Schema(
-                        description = "Last name.",
-                        example = "Rivera",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String lastName,
-        @Schema(
-                        description = "Public display name.",
-                        example = "Sam Rivera",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String displayName,
-        @Schema(
-                        description = "Account email.",
-                        example = "sam.rivera@example.com",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String email,
-        @Schema(
-                        description = "Preferred BCP-47 language tag.",
-                        example = "en-US",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String preferredLanguage,
-        @Schema(
-                        description = "IANA timezone.",
-                        example = "America/New_York",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String timezone,
+                String participantStatus,
         @Schema(
                         description = "Participant type.",
                         example = "PROSPECTIVE_STUDENT",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String participantType,
+                String type,
         @Schema(
                         description = "Grade / education level.",
                         example = "HIGH_SCHOOL_SENIOR",
@@ -87,4 +60,14 @@ public record ParticipantProfileResponse(
                         description = "Free-form accessibility preferences blob.",
                         example = "null",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                Object accessibilityPreferences) {}
+                Object accessibilityPreferences,
+        @Schema(
+                        description = "Preferred BCP-47 language tag.",
+                        example = "en-US",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String preferredLanguage,
+        @Schema(
+                        description = "IANA timezone.",
+                        example = "America/New_York",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String timezone) {}

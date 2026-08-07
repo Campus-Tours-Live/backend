@@ -5,9 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 import com.CampusToursLive.domain.booking.BookingRepository;
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.university.UniversityStatus;
@@ -710,9 +710,7 @@ class AvailabilityPreviewServiceIntegrationTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setUniversityId(universityId);
-        guide.setMajor("Computer Science");
-        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        guide.setStatus(GuideStatus.VERIFIED);
         return guides.save(guide);
     }
 

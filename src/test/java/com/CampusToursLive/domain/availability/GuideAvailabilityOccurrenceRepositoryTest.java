@@ -3,9 +3,9 @@ package com.CampusToursLive.domain.availability;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.university.UniversityStatus;
@@ -28,9 +28,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * Repository integration test against a REAL PostgreSQL (Testcontainers) — the only way to exercise
- * the {@code excl_guide_occurrence_no_overlap} GIST exclusion constraint
- * (V4__availability_engine_v2.sql), the invariant backstop asserting that a guide's materialized
- * availability occurrences are always disjoint. Mirrors {@code
+ * the {@code excl_guide_occurrence_no_overlap} GIST exclusion constraint (V1__schema.sql), the
+ * invariant backstop asserting that a guide's materialized availability occurrences are always
+ * disjoint. Mirrors {@code
  * BookingWriteIntegrationTest#overlappingGuideReservation_isRejectedByExclusionConstraint}.
  */
 @DataJpaTest
@@ -69,9 +69,7 @@ class GuideAvailabilityOccurrenceRepositoryTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(UUID.randomUUID());
         guide.setUserId(guideUser.getId());
-        guide.setUniversityId(university.getId());
-        guide.setMajor("Computer Science");
-        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        guide.setStatus(GuideStatus.VERIFIED);
         guides.save(guide);
 
         guideId = guide.getId();
@@ -123,14 +121,7 @@ class GuideAvailabilityOccurrenceRepositoryTest {
         GuideProfileEntity otherGuide = new GuideProfileEntity();
         otherGuide.setId(UUID.randomUUID());
         otherGuide.setUserId(otherGuideUser.getId());
-        otherGuide.setUniversityId(
-                universities.findAll().stream()
-                        .filter(u -> u.getStatus() == UniversityStatus.ACTIVE)
-                        .findFirst()
-                        .orElseThrow()
-                        .getId());
-        otherGuide.setMajor("Biology");
-        otherGuide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        otherGuide.setStatus(GuideStatus.VERIFIED);
         guides.save(otherGuide);
 
         Instant start = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);

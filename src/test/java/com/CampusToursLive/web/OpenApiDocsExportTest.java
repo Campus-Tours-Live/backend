@@ -58,4 +58,29 @@ class OpenApiDocsExportTest {
         Files.writeString(OPENAPI_OUTPUT, body);
         assertThat(Files.size(OPENAPI_OUTPUT)).isGreaterThan(0L);
     }
+
+    /**
+     * CTL-97: /userinfo and /session/current-role are removed (Core no longer owns current-role);
+     * /users/me and /users/me/role-eligibility replace them. Asserted against the generated spec's
+     * path keys rather than by firing an unauthenticated request — an unauthenticated request to a
+     * removed, authenticated path 401s at the security chain before Spring Web would even 404 it,
+     * so a request-based check can't distinguish "removed" from "still there but needs a token".
+     *
+     * <p>The old OAuth-time JIT-provisioning session endpoint was also removed in CTL-97 Task 11 —
+     * provisioning now happens ONLY at onboarding submit ({@code UserProvisioningService
+     * .createUserForOnboarding}, called from {@code OnboardingService}). The whole {@code
+     * "/session"} path key is asserted absent below, since removing the only mapping on it means
+     * springdoc no longer emits the path at all (not even for GET).
+     */
+    @Test
+    void removedEndpoints_areAbsent_andReplacementsArePresent() throws Exception {
+        ResponseEntity<String> resp = rest.getForEntity("/v3/api-docs", String.class);
+        String body = resp.getBody();
+
+        assertThat(body).doesNotContain("\"/userinfo\"");
+        assertThat(body).doesNotContain("\"/session/current-role\"");
+        assertThat(body).doesNotContain("\"/session\"");
+        assertThat(body).contains("\"/users/me\"");
+        assertThat(body).contains("\"/users/me/role-eligibility\"");
+    }
 }

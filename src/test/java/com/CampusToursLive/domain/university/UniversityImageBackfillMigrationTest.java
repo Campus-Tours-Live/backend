@@ -13,12 +13,12 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Migration integration test against a REAL PostgreSQL (Testcontainers) proving the forward-only
- * image_url backfill. Flyway runs V1 → V4 on a clean container (V2 seeds the demo universities; V4
- * reconciles image_url/name). Asserts that after the full chain every seeded university row has a
- * non-null {@code image_url} — i.e. no row is left with the {@code ON CONFLICT DO NOTHING} gap that
- * V4 exists to close. {@code replace=NONE} keeps the container datasource; {@code ddl-auto=none}
- * means Flyway owns the schema. Requires a running Docker daemon.
+ * Migration integration test against a REAL PostgreSQL (Testcontainers) proving that seeded
+ * universities always come with an {@code image_url}. Flyway runs V1 (schema) → V2 (seeds the
+ * university catalog directly with {@code image_url} populated — no separate backfill migration
+ * exists anymore) on a clean container. Asserts that after that chain every seeded university row
+ * has a non-null {@code image_url}. {@code replace=NONE} keeps the container datasource; {@code
+ * ddl-auto=none} means Flyway owns the schema. Requires a running Docker daemon.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -31,7 +31,7 @@ class UniversityImageBackfillMigrationTest {
     @Autowired private JdbcTemplate jdbc;
 
     @Test
-    void everySeededUniversityHasImageUrlAfterV4() {
+    void everySeededUniversityHasImageUrl() {
         Integer total = jdbc.queryForObject("SELECT count(*) FROM universities", Integer.class);
         Integer missing =
                 jdbc.queryForObject(
