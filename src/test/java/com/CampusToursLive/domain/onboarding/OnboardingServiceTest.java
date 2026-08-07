@@ -151,7 +151,8 @@ class OnboardingServiceTest {
     }
 
     private static GuideProfileResponse guideProfileResponse() {
-        return new GuideProfileResponse("PENDING", List.of(), "bio", List.of("en-US"), List.of());
+        return new GuideProfileResponse(
+                "PENDING", List.of(), "bio", List.of("en-US"), List.of(), null, 0);
     }
 
     private static ParticipantProfileResponse participantProfileResponse() {

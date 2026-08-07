@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
@@ -47,6 +48,14 @@ public class GuideProfileEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "guide_status", columnDefinition = "guide_application_status", nullable = false)
     private GuideStatus status = GuideStatus.PENDING;
+
+    /** Aggregate review score maintained by a DB trigger / nightly batch. Read-only from JPA. */
+    @Column(name = "avg_rating", insertable = false, updatable = false)
+    private BigDecimal avgRating;
+
+    /** Total published review count. Read-only from JPA. */
+    @Column(name = "review_count", nullable = false, insertable = false, updatable = false)
+    private int reviewCount;
 
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;

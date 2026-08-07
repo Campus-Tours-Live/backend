@@ -94,7 +94,9 @@ public class GuideService {
                 buildUniversityViews(profile.id()),
                 profile.bio(),
                 readArray(profile.spokenLanguages()),
-                readArray(profile.tourTopics()));
+                readArray(profile.tourTopics()),
+                null,
+                0);
     }
 
     @Transactional
@@ -464,7 +466,9 @@ public class GuideService {
                 profile == null ? List.of() : buildUniversityViews(profile.getId()),
                 profile == null ? null : profile.getBio(),
                 profile == null ? null : readArray(profile.getSpokenLanguages()),
-                profile == null ? null : readArray(profile.getTourTopics()));
+                profile == null ? null : readArray(profile.getTourTopics()),
+                profile == null ? null : profile.getAvgRating(),
+                profile == null ? 0 : profile.getReviewCount());
     }
 
     /**

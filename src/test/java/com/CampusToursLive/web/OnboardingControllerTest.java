@@ -97,7 +97,9 @@ class OnboardingControllerTest {
                         List.of(),
                         "Third-year student and campus tour lead.",
                         List.of("en-US"),
-                        List.of("DORM_HOUSING"));
+                        List.of("DORM_HOUSING"),
+                        null,
+                        0);
         return new OnboardingResponse(
                 userSummary(), List.of(UserRole.GUIDE), UserRole.GUIDE, profile);
     }

@@ -105,4 +105,62 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
                             + ")",
             nativeQuery = true)
     long countCompletedWithoutReview(@Param("userId") UUID userId);
+
+    /**
+     * Total guide_amount_cents from COMPLETED tours for a guide within [{@code from}, {@code to}).
+     * COALESCE ensures 0 is returned when no rows match. Used for the dashboard "This month"
+     * earnings stat (caller passes the UTC calendar-month window).
+     */
+    @Query(
+            value =
+                    "SELECT COALESCE(SUM(b.guide_amount_cents), 0) FROM bookings b "
+                            + "WHERE b.guide_id = :guideId "
+                            + "AND b.status = 'COMPLETED' "
+                            + "AND b.completed_at >= :from "
+                            + "AND b.completed_at < :to",
+            nativeQuery = true)
+    long sumGuideEarningsThisMonth(
+            @Param("guideId") UUID guideId, @Param("from") Instant from, @Param("to") Instant to);
+
+    /**
+     * Total guide_amount_cents from upcoming CONFIRMED or IN_PROGRESS tours — money the guide will
+     * receive when these tours complete. Used for the dashboard "Upcoming payout" stat.
+     */
+    @Query(
+            value =
+                    "SELECT COALESCE(SUM(b.guide_amount_cents), 0) FROM bookings b "
+                            + "WHERE b.guide_id = :guideId "
+                            + "AND b.status IN ('CONFIRMED', 'IN_PROGRESS')",
+            nativeQuery = true)
+    long sumGuideUpcomingPayout(@Param("guideId") UUID guideId);
+
+    /**
+     * Variant of {@link #sumGuideEarningsThisMonth} that accepts the guide's user UUID directly,
+     * joining through guide_profiles. Lets {@link
+     * com.CampusToursLive.domain.guide.GuideEarningsService} avoid a separate profile lookup.
+     */
+    @Query(
+            value =
+                    "SELECT COALESCE(SUM(b.guide_amount_cents), 0) FROM bookings b "
+                            + "JOIN guide_profiles gp ON gp.id = b.guide_id "
+                            + "WHERE gp.user_id = :userId "
+                            + "AND b.status = 'COMPLETED' "
+                            + "AND b.completed_at >= :from "
+                            + "AND b.completed_at < :to",
+            nativeQuery = true)
+    long sumGuideEarningsThisMonthByUserId(
+            @Param("userId") UUID userId, @Param("from") Instant from, @Param("to") Instant to);
+
+    /**
+     * Variant of {@link #sumGuideUpcomingPayout} that accepts the guide's user UUID directly,
+     * joining through guide_profiles.
+     */
+    @Query(
+            value =
+                    "SELECT COALESCE(SUM(b.guide_amount_cents), 0) FROM bookings b "
+                            + "JOIN guide_profiles gp ON gp.id = b.guide_id "
+                            + "WHERE gp.user_id = :userId "
+                            + "AND b.status IN ('CONFIRMED', 'IN_PROGRESS')",
+            nativeQuery = true)
+    long sumGuideUpcomingPayoutByUserId(@Param("userId") UUID userId);
 }

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.CampusToursLive.domain.guide.GuideEarningsService;
 import com.CampusToursLive.domain.guide.GuideService;
 import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.user.AccountStatus;
@@ -20,6 +21,7 @@ import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.security.GuideProfileSnapshot;
 import com.CampusToursLive.security.ProvisionedAccount;
 import com.CampusToursLive.security.RoleAccountContext;
+import com.CampusToursLive.web.dto.GuideEarningsResponse;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import java.time.Instant;
@@ -50,14 +52,19 @@ class GuideControllerTest {
 
     @Mock CurrentUser currentUser;
     @Mock GuideService guideService;
+    @Mock GuideEarningsService guideEarningsService;
     @Mock UserRepository users;
 
     private GuideController controller() {
-        return new GuideController(currentUser, guideService, users);
+        return new GuideController(currentUser, guideService, guideEarningsService, users);
     }
 
     private static GuideProfileResponse response() {
-        return new GuideProfileResponse(null, null, null, null, null);
+        return new GuideProfileResponse(null, null, null, null, null, null, 0);
+    }
+
+    private static GuideEarningsResponse earningsResponse() {
+        return new GuideEarningsResponse(0L, 0L, "USD");
     }
 
     private static ProvisionedAccount account(UserRole... roles) {
@@ -229,5 +236,15 @@ class GuideControllerTest {
                         ex ->
                                 assertThat(((ConflictException) ex).code())
                                         .isEqualTo("ACCOUNT_STATE_INVALID"));
+    }
+
+    @Test
+    void getEarnings_delegatesAndWrapsInEnvelope() {
+        UserEntity u = new UserEntity();
+        GuideEarningsResponse earnings = earningsResponse();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(guideEarningsService.getEarnings(u)).thenReturn(earnings);
+
+        assertSame(earnings, controller().getEarnings().data());
     }
 }

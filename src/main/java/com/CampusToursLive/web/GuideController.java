@@ -1,14 +1,17 @@
 package com.CampusToursLive.web;
 
+import com.CampusToursLive.domain.guide.GuideEarningsService;
 import com.CampusToursLive.domain.guide.GuideService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
+import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.security.ProvisionedAccount;
 import com.CampusToursLive.security.RoleAccountContext;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
+import com.CampusToursLive.web.dto.GuideEarningsResponse;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.CampusToursLive.web.dto.Problem;
@@ -37,12 +40,17 @@ public class GuideController {
 
     private final CurrentUser currentUser;
     private final GuideService guideService;
+    private final GuideEarningsService guideEarningsService;
     private final UserRepository users;
 
     public GuideController(
-            CurrentUser currentUser, GuideService guideService, UserRepository users) {
+            CurrentUser currentUser,
+            GuideService guideService,
+            GuideEarningsService guideEarningsService,
+            UserRepository users) {
         this.currentUser = currentUser;
         this.guideService = guideService;
+        this.guideEarningsService = guideEarningsService;
         this.users = users;
     }
 
@@ -208,5 +216,31 @@ public class GuideController {
                 false,
                 req.degree(),
                 req.entryYear());
+    }
+
+    @Operation(
+            summary = "Get guide earnings",
+            description =
+                    "Returns the guide's this-month earnings and upcoming payout from confirmed"
+                            + " tours. Returns zero values when the guide has no bookings.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The guide's earnings snapshot.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_EARNINGS)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @GetMapping("/earnings")
+    public ApiEnvelope<GuideEarningsResponse> getEarnings() {
+        return ApiEnvelope.of(
+                guideEarningsService.getEarnings(currentUser.requireRole(UserRole.GUIDE)));
     }
 }

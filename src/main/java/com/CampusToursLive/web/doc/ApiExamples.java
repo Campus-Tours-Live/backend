@@ -134,6 +134,12 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String GUIDE_EARNINGS =
+            "{\"data\":{\"earningsThisMonthCents\":8400,\"upcomingPayoutCents\":4200,"
+                    + "\"currency\":\"USD\"},"
+                    + META
+                    + "}";
+
     String GUIDE_PROFILE =
             "{\"data\":{\"guideStatus\":\"VERIFIED\","
                     + "\"universities\":[{\"universityId\":"
@@ -146,7 +152,8 @@ public interface ApiExamples {
                     + "\"entryYear\":2023,"
                     + "\"verificationStatus\":\"VERIFIED\"}],"
                     + "\"bio\":\"Third-year student and campus tour lead.\","
-                    + "\"spokenLanguages\":[\"en-US\",\"zh-CN\"],\"tourTopics\":[\"DORM_HOUSING\"]},"
+                    + "\"spokenLanguages\":[\"en-US\",\"zh-CN\"],\"tourTopics\":[\"DORM_HOUSING\"],"
+                    + "\"avgRating\":4.5,\"reviewCount\":12},"
                     + META
                     + "}";
 

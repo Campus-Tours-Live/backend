@@ -1,15 +1,20 @@
 package com.CampusToursLive.security;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.CampusToursLive.domain.tour.TourDiscoveryService;
 import com.CampusToursLive.web.TourController;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Page;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -42,6 +47,12 @@ class PublicHeadAccessTest {
     @MockitoBean private JwtDecoder jwtDecoder;
 
     @MockitoBean private TourDiscoveryService tourDiscoveryService;
+
+    @BeforeEach
+    void stubDiscovery() {
+        when(tourDiscoveryService.list(any(), any(), any(), any(), anyInt(), anyInt()))
+                .thenReturn(Page.empty());
+    }
 
     @Test
     void headOnPublicTourCatalogIsNotRejectedAsUnauthenticated() throws Exception {
