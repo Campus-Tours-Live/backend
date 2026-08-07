@@ -33,7 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Participant booking domain: dashboard reads (CTL-13), the create/cancel writes (CTL-19), and the
  * booking cart (CTL-31 — DRAFT bookings assembled item by item, submitted atomically at checkout).
- * Guide accept/decline, reschedule proposals, and payment integration are still deferred.
+ * Guide accept/decline, payment, and reschedule resolve are still deferred (propose is CTL-50).
  *
  * <p>The {@code guideId} on both {@code BookingEntity} and {@code TourOfferingEntity} is the {@code
  * guide_profiles.id} primary key, not the user id — resolving to a display name requires a two-step
@@ -72,7 +72,8 @@ public class BookingService {
      * #findByGuideIdAndStatusAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc}, used
      * by Task 7) would under-count what actually occupies a guide's calendar.
      */
-    static final List<BookingStatus> SLOT_HOLDING_STATUSES =
+    /** Shared with reschedule overlap probes (CTL-50). */
+    public static final List<BookingStatus> SLOT_HOLDING_STATUSES =
             List.of(
                     BookingStatus.PENDING_PAYMENT_AUTH,
                     BookingStatus.PENDING_GUIDE_ACCEPTANCE,

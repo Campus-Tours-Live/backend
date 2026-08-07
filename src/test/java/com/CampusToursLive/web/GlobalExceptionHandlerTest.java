@@ -96,6 +96,14 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void conflictException_mapsTo409() {
+        ProblemDetail pd = handler.handleConflict(ConflictException.rescheduleAlreadyPending());
+        assertEquals(409, pd.getStatus());
+        assertEquals("A reschedule proposal is already pending for this booking", pd.getTitle());
+        assertEquals("RESCHEDULE_ALREADY_PENDING", pd.getProperties().get("code"));
+    }
+
+    @Test
     void notFoundException_mapsTo404() {
         ProblemDetail pd =
                 handler.handleDomainNotFound(new NotFoundException("Offering not found"));

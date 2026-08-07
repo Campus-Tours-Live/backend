@@ -404,4 +404,15 @@ public interface ApiExamples {
                     + "\"defaultMaxYearsToGraduate\":8},"
                     + META
                     + "}";
+
+    // --- Reschedule proposals (CTL-50) ---
+
+    String RESCHEDULE_PROPOSAL =
+            "{\"data\":{\"id\":\"r1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"bookingId\":\"b1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"requestedBy\":\"PARTICIPANT\",\"status\":\"PENDING_COUNTERPARTY\","
+                    + "\"proposedStartAt\":\"2026-08-05T17:00:00Z\",\"proposedEndAt\":\"2026-08-05T18:00:00Z\","
+                    + "\"feeCents\":0,\"priceDiffCents\":0,\"expiresAt\":\"2026-08-03T17:00:00Z\"},"
+                    + META
+                    + "}";
 }
