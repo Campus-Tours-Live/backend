@@ -18,6 +18,7 @@ import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.BookingDetailResponse;
 import com.CampusToursLive.web.dto.CancelBookingRequest;
+import com.CampusToursLive.web.dto.CartItemResponse;
 import com.CampusToursLive.web.dto.CreateBookingRequest;
 import com.CampusToursLive.web.dto.PendingActionsResponse;
 import java.security.SecureRandom;
@@ -250,30 +251,46 @@ public class BookingService {
     // ---------------------------------------------------------------------------
 
     /**
-     * Add an item to the cart. Runs the full booking validation but saves the row as a DRAFT
-     * booking — DRAFT is outside the DB exclusion constraints, so a carted item does NOT hold its
-     * slot; the slot is only claimed at {@link #checkout}. Conflicts with held bookings and other
-     * cart items are still rejected here for early feedback.
+     * Add an item to the cart. Saves the row as a DRAFT booking — DRAFT is outside the DB exclusion
+     * constraints, so a carted item does NOT hold its slot (add-to-cart never reserves the guide's
+     * time; CTL-83). Validation is for early feedback only, and availability is not guaranteed to
+     * hold afterwards — {@link #getCart} re-checks it for display.
+     *
+     * <p><b>Idempotent</b> on {@code (participant, offering, scheduledStartAt)}: re-adding the same
+     * tour and time returns the existing cart item instead of inserting a duplicate (and does not
+     * count against the max-items cap).
      */
     @Transactional
-    public BookingDetailResponse addCartItem(UserEntity participant, CreateBookingRequest req) {
+    public CartItemResponse addCartItem(UserEntity participant, CreateBookingRequest req) {
+        UUID offeringId = parseOfferingId(req.tourOfferingId());
+        Instant start = parseStart(req.scheduledStartAt());
+        Optional<BookingEntity> existing =
+                bookings.findByParticipantUserIdAndTourOfferingIdAndScheduledStartAtAndStatus(
+                        participant.getId(), offeringId, start, BookingStatus.DRAFT);
+        if (existing.isPresent()) {
+            return toCartItem(existing.get());
+        }
+
         if (bookings.countByParticipantUserIdAndStatus(participant.getId(), BookingStatus.DRAFT)
                 >= MAX_CART_ITEMS) {
             throw new ValidationException("Your cart is full (max " + MAX_CART_ITEMS + " items)");
         }
         BookingEntity b = buildDraftBooking(participant, req);
-        requireNoHeldOverlaps(b);
         requireNoCartOverlaps(b, cartItems(participant.getId()));
         // Flush so the audit row's FK sees the booking row (assigned id → deferred insert).
         bookings.saveAndFlush(b);
         recordTransition(b, null, participant.getId(), "CART_ITEM_ADDED");
-        return toDetailResponse(b);
+        return toCartItem(b);
     }
 
-    /** The participant's cart: their DRAFT bookings, oldest first. */
+    /**
+     * The participant's cart: their DRAFT items, oldest first, each with a freshly recomputed
+     * {@link CartItemStatus} and the offering's current price (CTL-83). The status is a display
+     * hint only — the cart holds no slot, so an {@code AVAILABLE} item is not reserved.
+     */
     @Transactional(readOnly = true)
-    public List<BookingDetailResponse> getCart(UUID participantUserId) {
-        return cartItems(participantUserId).stream().map(this::toDetailResponse).toList();
+    public List<CartItemResponse> getCart(UUID participantUserId) {
+        return cartItems(participantUserId).stream().map(this::toCartItem).toList();
     }
 
     /**
@@ -281,7 +298,7 @@ public class BookingService {
      * via ON DELETE CASCADE). Returns the remaining cart.
      */
     @Transactional
-    public List<BookingDetailResponse> removeCartItem(UserEntity participant, UUID itemId) {
+    public List<CartItemResponse> removeCartItem(UserEntity participant, UUID itemId) {
         BookingEntity b =
                 bookings.findByIdAndParticipantUserIdAndStatus(
                                 itemId, participant.getId(), BookingStatus.DRAFT)
@@ -525,17 +542,21 @@ public class BookingService {
                 participantUserId, BookingStatus.DRAFT);
     }
 
-    /** The offering must exist and be ACTIVE — anything else is invisible to participants (404). */
-    private TourOfferingEntity requireBookableOffering(String rawOfferingId) {
+    /** Parse and validate the offering id (format only; existence/status checked separately). */
+    private static UUID parseOfferingId(String rawOfferingId) {
         if (rawOfferingId == null || rawOfferingId.isBlank()) {
             throw new ValidationException("tourOfferingId is required");
         }
-        UUID offeringId;
         try {
-            offeringId = UUID.fromString(rawOfferingId.trim());
+            return UUID.fromString(rawOfferingId.trim());
         } catch (IllegalArgumentException ex) {
             throw new ValidationException("Invalid tourOfferingId: " + rawOfferingId);
         }
+    }
+
+    /** The offering must exist and be ACTIVE — anything else is invisible to participants (404). */
+    private TourOfferingEntity requireBookableOffering(String rawOfferingId) {
+        UUID offeringId = parseOfferingId(rawOfferingId);
         return offerings
                 .findById(offeringId)
                 .filter(o -> o.getStatus() == TourStatus.ACTIVE)
@@ -659,6 +680,77 @@ public class BookingService {
         h.setActorUserId(actorUserId);
         h.setReasonCode(reasonCode);
         statusHistory.save(h);
+    }
+
+    /**
+     * Maps a DRAFT cart item to its display response (CTL-83), loading its
+     * offering/guide/university once to both resolve names and recompute the {@link
+     * CartItemStatus}. Bounded per read (the cart is capped at {@link #MAX_CART_ITEMS}); the
+     * display is non-atomic — see {@link #getCart}.
+     */
+    private CartItemResponse toCartItem(BookingEntity b) {
+        TourOfferingEntity offering = offerings.findById(b.getTourOfferingId()).orElse(null);
+        GuideProfileEntity guide = guides.findById(b.getGuideId()).orElse(null);
+        UniversityEntity university = universities.findById(b.getUniversityId()).orElse(null);
+
+        String offeringTitle = offering != null ? offering.getTitle() : "Tour";
+        String guideName =
+                guide == null
+                        ? ""
+                        : users.findById(guide.getUserId())
+                                .map(UserEntity::getDisplayName)
+                                .orElse("");
+        String universityName = university != null ? university.getName() : "";
+        long currentPriceCents =
+                offering != null ? offering.getPriceCents() : b.getBasePriceCents();
+        int durationMin =
+                (int) Duration.between(b.getScheduledStartAt(), b.getScheduledEndAt()).toMinutes();
+
+        return new CartItemResponse(
+                b.getId().toString(),
+                b.getStatus().displayStatus(),
+                b.getScheduledStartAt().toString(),
+                b.getTourOfferingId().toString(),
+                offeringTitle,
+                guideName,
+                universityName,
+                durationMin,
+                b.getBasePriceCents(),
+                currentPriceCents,
+                b.getCurrency(),
+                computeCartStatus(b, offering, guide, university).name());
+    }
+
+    /**
+     * The first (most-blocking) condition that matches, in {@link CartItemStatus} order. Purely for
+     * display: it never reserves anything, so {@code AVAILABLE} does not guarantee the slot is
+     * still bookable at a future checkout.
+     */
+    private CartItemStatus computeCartStatus(
+            BookingEntity b,
+            TourOfferingEntity offering,
+            GuideProfileEntity guide,
+            UniversityEntity university) {
+        if (!b.getScheduledStartAt().isAfter(Instant.now())) {
+            return CartItemStatus.EXPIRED;
+        }
+        if (offering == null
+                || offering.getStatus() != TourStatus.ACTIVE
+                || university == null
+                || university.getStatus() != UniversityStatus.ACTIVE) {
+            return CartItemStatus.TOUR_UNAVAILABLE;
+        }
+        if (guide == null || guide.getStatus() != GuideStatus.VERIFIED) {
+            return CartItemStatus.GUIDE_UNAVAILABLE;
+        }
+        if (!availabilityOccurrences.existsContaining(
+                b.getGuideId(), b.getScheduledStartAt(), b.getScheduledEndAt())) {
+            return CartItemStatus.TIME_UNAVAILABLE;
+        }
+        if (offering.getPriceCents() != b.getBasePriceCents()) {
+            return CartItemStatus.PRICE_CHANGED;
+        }
+        return CartItemStatus.AVAILABLE;
     }
 
     private BookingDetailResponse toDetailResponse(BookingEntity b) {
