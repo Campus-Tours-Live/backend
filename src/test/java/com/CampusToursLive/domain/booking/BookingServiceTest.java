@@ -1245,7 +1245,7 @@ class BookingServiceTest {
         TourOfferingEntity dearer = offering(item.getTourOfferingId(), "Campus Walk");
         dearer.setStatus(TourStatus.ACTIVE);
         dearer.setPriceCents(9000L);
-        when(offerings.findById(item.getTourOfferingId())).thenReturn(Optional.of(dearer));
+        when(offerings.findAllById(any())).thenReturn(List.of(dearer));
 
         CartItemResponse resp = service().getCart(uid).get(0);
         assertEquals("PRICE_CHANGED", resp.cartStatus());
@@ -1270,7 +1270,7 @@ class BookingServiceTest {
         TourOfferingEntity paused = offering(item.getTourOfferingId(), "Campus Walk");
         paused.setStatus(TourStatus.PAUSED);
         paused.setPriceCents(5000L);
-        when(offerings.findById(item.getTourOfferingId())).thenReturn(Optional.of(paused));
+        when(offerings.findAllById(any())).thenReturn(List.of(paused));
 
         assertEquals("TOUR_UNAVAILABLE", service().getCart(uid).get(0).cartStatus());
     }
@@ -1282,7 +1282,7 @@ class BookingServiceTest {
         stubAvailableCartLookups(item);
         GuideProfileEntity suspended = guideProfile(item.getGuideId(), UUID.randomUUID());
         suspended.setStatus(GuideStatus.REJECTED);
-        when(guides.findById(item.getGuideId())).thenReturn(Optional.of(suspended));
+        when(guides.findAllById(any())).thenReturn(List.of(suspended));
 
         assertEquals("GUIDE_UNAVAILABLE", service().getCart(uid).get(0).cartStatus());
     }
@@ -1296,6 +1296,67 @@ class BookingServiceTest {
                 .thenReturn(false);
 
         assertEquals("TIME_UNAVAILABLE", service().getCart(uid).get(0).cartStatus());
+    }
+
+    @Test
+    void getCart_batchesNameLookups_noPerItemFindById() {
+        // Two cart items sharing one guide/offering/university: the batched prefetch fetches each
+        // related entity ONCE for the whole cart, with NO per-item findById fan-out.
+        UUID uid = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UUID guideUserId = UUID.randomUUID();
+        UUID offeringId = UUID.randomUUID();
+        UUID universityId = UUID.randomUUID();
+        Instant start = futureStart();
+        BookingEntity i1 =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        offeringId,
+                        universityId,
+                        BookingStatus.DRAFT,
+                        start,
+                        start.plus(60, ChronoUnit.MINUTES));
+        BookingEntity i2 =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        offeringId,
+                        universityId,
+                        BookingStatus.DRAFT,
+                        start.plus(2, ChronoUnit.HOURS),
+                        start.plus(3, ChronoUnit.HOURS));
+        i1.setParticipantUserId(uid);
+        i2.setParticipantUserId(uid);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(uid, BookingStatus.DRAFT))
+                .thenReturn(List.of(i1, i2));
+        TourOfferingEntity o = offering(offeringId, "Campus Walk");
+        o.setStatus(TourStatus.ACTIVE);
+        o.setPriceCents(5000L);
+        when(offerings.findAllById(any())).thenReturn(List.of(o));
+        GuideProfileEntity g = guideProfile(guideProfileId, guideUserId);
+        g.setStatus(GuideStatus.VERIFIED);
+        when(guides.findAllById(any())).thenReturn(List.of(g));
+        when(users.findAllById(any())).thenReturn(List.of(user(guideUserId, "Jane Guide")));
+        UniversityEntity u = university(universityId, "Test University");
+        u.setStatus(UniversityStatus.ACTIVE);
+        when(universities.findAllById(any())).thenReturn(List.of(u));
+        when(availabilityOccurrences.existsContaining(eq(guideProfileId), any(), any()))
+                .thenReturn(true);
+
+        List<CartItemResponse> cart = service().getCart(uid);
+
+        assertEquals(2, cart.size());
+        assertEquals("Jane Guide", cart.get(0).guideName());
+        assertEquals("AVAILABLE", cart.get(1).cartStatus());
+        verify(offerings).findAllById(any());
+        verify(guides).findAllById(any());
+        verify(users).findAllById(any());
+        verify(universities).findAllById(any());
+        verify(offerings, never()).findById(any());
+        verify(guides, never()).findById(any());
+        verify(users, never()).findById(any());
+        verify(universities, never()).findById(any());
     }
 
     @Test
@@ -1323,6 +1384,70 @@ class BookingServiceTest {
 
         assertThrows(NotFoundException.class, () -> service().removeCartItem(participant, itemId));
         verify(bookings, never()).delete(any());
+    }
+
+    // ── clearCart / expireStaleCartItems (CTL-91) ──────────────────────────────
+
+    @Test
+    void clearCart_deletesAllDraftItems_returnsEmpty() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        List<BookingEntity> items =
+                List.of(
+                        draftItem(participant.getId(), futureStart(), 60),
+                        draftItem(participant.getId(), futureStart(), 60));
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(items);
+
+        assertTrue(service().clearCart(participant).isEmpty());
+        verify(bookings).deleteAll(items);
+    }
+
+    @Test
+    void clearCart_emptyCart_isNoOp() {
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of());
+
+        assertTrue(service().clearCart(participant).isEmpty());
+        verify(bookings, never()).deleteAll(any());
+    }
+
+    @Test
+    void expireStaleCartItems_marksStaleDraftsExpired_withSystemAuditRow() {
+        BookingEntity stale =
+                draftItem(UUID.randomUUID(), Instant.now().minus(1, ChronoUnit.HOURS), 60);
+        when(bookings.findStaleDrafts(
+                        eq(BookingStatus.DRAFT), any(Instant.class), any(Instant.class)))
+                .thenReturn(List.of(stale));
+
+        int expired = service().expireStaleCartItems();
+
+        assertEquals(1, expired);
+        assertEquals(BookingStatus.EXPIRED, stale.getStatus());
+        assertNotNull(stale.getCancelledAt());
+        verify(bookings).save(stale);
+
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory).save(audit.capture());
+        assertEquals(BookingStatus.DRAFT, audit.getValue().getPreviousStatus());
+        assertEquals(BookingStatus.EXPIRED, audit.getValue().getNewStatus());
+        assertEquals(BookingActor.SYSTEM, audit.getValue().getActorType());
+        assertNull(audit.getValue().getActorUserId());
+        assertEquals("CART_EXPIRED", audit.getValue().getReasonCode());
+    }
+
+    @Test
+    void expireStaleCartItems_noneStale_returnsZero_writesNothing() {
+        when(bookings.findStaleDrafts(
+                        eq(BookingStatus.DRAFT), any(Instant.class), any(Instant.class)))
+                .thenReturn(List.of());
+
+        assertEquals(0, service().expireStaleCartItems());
+        verify(bookings, never()).save(any());
+        verifyNoInteractions(statusHistory);
     }
 
     // ── checkout ─────────────────────────────────────────────────────────────
@@ -1834,17 +1959,17 @@ class BookingServiceTest {
         TourOfferingEntity o = offering(item.getTourOfferingId(), "Campus Walk");
         o.setStatus(TourStatus.ACTIVE);
         o.setPriceCents(5000L);
-        lenient().when(offerings.findById(item.getTourOfferingId())).thenReturn(Optional.of(o));
+        lenient().when(offerings.findAllById(any())).thenReturn(List.of(o));
         UUID guideUserId = UUID.randomUUID();
         GuideProfileEntity g = guideProfile(item.getGuideId(), guideUserId);
         g.setStatus(GuideStatus.VERIFIED);
-        lenient().when(guides.findById(item.getGuideId())).thenReturn(Optional.of(g));
+        lenient().when(guides.findAllById(any())).thenReturn(List.of(g));
         lenient()
-                .when(users.findById(guideUserId))
-                .thenReturn(Optional.of(user(guideUserId, "Jane Guide")));
+                .when(users.findAllById(any()))
+                .thenReturn(List.of(user(guideUserId, "Jane Guide")));
         UniversityEntity u = university(item.getUniversityId(), "Test University");
         u.setStatus(UniversityStatus.ACTIVE);
-        lenient().when(universities.findById(item.getUniversityId())).thenReturn(Optional.of(u));
+        lenient().when(universities.findAllById(any())).thenReturn(List.of(u));
         lenient()
                 .when(availabilityOccurrences.existsContaining(eq(item.getGuideId()), any(), any()))
                 .thenReturn(true);

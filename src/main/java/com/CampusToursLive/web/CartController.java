@@ -186,6 +186,42 @@ public class CartController {
         return ApiEnvelope.of(bookingService.removeCartItem(user, id));
     }
 
+    /** Clear the whole cart; returns the now-empty cart. */
+    @Operation(
+            summary = "Clear the cart",
+            description =
+                    "Removes every item from the participant's cart (hard-deletes all DRAFT"
+                            + " bookings) and returns the now-empty cart. A no-op when the cart is"
+                            + " already empty.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The now-empty cart.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.CART_EMPTY)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the PARTICIPANT role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @DeleteMapping
+    public ApiEnvelope<List<CartItemResponse>> clear() {
+        var user = currentUser.requireRole(UserRole.PARTICIPANT);
+        return ApiEnvelope.of(bookingService.clearCart(user));
+    }
+
     /** Submit every cart item atomically — all become PENDING_GUIDE_ACCEPTANCE, or none do. */
     @Operation(
             summary = "Checkout the cart",

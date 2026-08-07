@@ -25,8 +25,11 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -98,6 +101,9 @@ public class BookingService {
 
     /** Cap on DRAFT items per participant — keeps carts (and checkout batches) bounded. */
     private static final int MAX_CART_ITEMS = 10;
+
+    /** How long a DRAFT cart item is retained before the expiry sweep retires it (CTL-91). */
+    private static final Duration MAX_CART_AGE = Duration.ofDays(30);
 
     private static final String BOOKING_NUMBER_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final int BOOKING_NUMBER_LENGTH = 10;
@@ -290,7 +296,60 @@ public class BookingService {
      */
     @Transactional(readOnly = true)
     public List<CartItemResponse> getCart(UUID participantUserId) {
-        return cartItems(participantUserId).stream().map(this::toCartItem).toList();
+        List<BookingEntity> items = cartItems(participantUserId);
+        if (items.isEmpty()) {
+            return List.of();
+        }
+        // Batch the name/price lookups: fetch each related entity ONCE for the whole cart via
+        // findAllById and join in memory, instead of the per-item findById fan-out toCartItem does
+        // on its own (~4 queries/item). The per-item availability containment check stays — it is
+        // an
+        // interval query, not a by-id lookup.
+        Map<UUID, TourOfferingEntity> offeringsById =
+                byId(
+                        offerings.findAllById(distinctIds(items, BookingEntity::getTourOfferingId)),
+                        TourOfferingEntity::getId);
+        Map<UUID, GuideProfileEntity> guidesById =
+                byId(
+                        guides.findAllById(distinctIds(items, BookingEntity::getGuideId)),
+                        GuideProfileEntity::getId);
+        Map<UUID, UserEntity> guideUsersById =
+                byId(
+                        users.findAllById(
+                                guidesById.values().stream()
+                                        .map(GuideProfileEntity::getUserId)
+                                        .distinct()
+                                        .toList()),
+                        UserEntity::getId);
+        Map<UUID, UniversityEntity> universitiesById =
+                byId(
+                        universities.findAllById(
+                                distinctIds(items, BookingEntity::getUniversityId)),
+                        UniversityEntity::getId);
+
+        return items.stream()
+                .map(
+                        b -> {
+                            GuideProfileEntity guide = guidesById.get(b.getGuideId());
+                            UserEntity guideUser =
+                                    guide == null ? null : guideUsersById.get(guide.getUserId());
+                            return toCartItem(
+                                    b,
+                                    offeringsById.get(b.getTourOfferingId()),
+                                    guide,
+                                    guideUser,
+                                    universitiesById.get(b.getUniversityId()));
+                        })
+                .toList();
+    }
+
+    private static List<UUID> distinctIds(
+            List<BookingEntity> list, Function<BookingEntity, UUID> idOf) {
+        return list.stream().map(idOf).distinct().toList();
+    }
+
+    private static <T> Map<UUID, T> byId(List<T> entities, Function<T, UUID> idOf) {
+        return entities.stream().collect(Collectors.toMap(idOf, Function.identity()));
     }
 
     /**
@@ -305,6 +364,42 @@ public class BookingService {
                         .orElseThrow(() -> new NotFoundException("Cart item not found"));
         bookings.delete(b);
         return getCart(participant.getId());
+    }
+
+    /**
+     * Clear the whole cart (CTL-91): hard-delete all of the participant's DRAFT items (a
+     * user-initiated empty, so the rows go, audit trail cascading with them — same as a single
+     * {@link #removeCartItem}). Returns the now-empty cart; a no-op when already empty.
+     */
+    @Transactional
+    public List<CartItemResponse> clearCart(UserEntity participant) {
+        List<BookingEntity> items = cartItems(participant.getId());
+        if (!items.isEmpty()) {
+            bookings.deleteAll(items);
+        }
+        return List.of();
+    }
+
+    /**
+     * Retire stale cart items (CTL-91): every DRAFT whose scheduled start has passed, or that has
+     * been carted longer than the {@link #MAX_CART_AGE} retention, is marked {@link
+     * BookingStatus#EXPIRED} (system-actor audit row) rather than deleted, so the record is kept
+     * and the item simply drops out of the DRAFT-only cart listing. A carted DRAFT reserves
+     * nothing, so expiring it releases no slot. Returns how many were expired. Driven by {@code
+     * CartExpiryJob}.
+     */
+    @Transactional
+    public int expireStaleCartItems() {
+        Instant now = Instant.now();
+        List<BookingEntity> stale =
+                bookings.findStaleDrafts(BookingStatus.DRAFT, now, now.minus(MAX_CART_AGE));
+        for (BookingEntity b : stale) {
+            b.setStatus(BookingStatus.EXPIRED);
+            b.setCancelledAt(now);
+            bookings.save(b);
+            recordTransition(b, BookingStatus.DRAFT, BookingActor.SYSTEM, null, "CART_EXPIRED");
+        }
+        return stale.size();
     }
 
     /**
@@ -670,13 +765,24 @@ public class BookingService {
     }
 
     /** Append one row to the booking_status_history audit trail. */
+    /** Append a participant-actor row to the booking_status_history audit trail. */
     private void recordTransition(
             BookingEntity b, BookingStatus previous, UUID actorUserId, String reasonCode) {
+        recordTransition(b, previous, BookingActor.PARTICIPANT, actorUserId, reasonCode);
+    }
+
+    /** Append one row to the booking_status_history audit trail with an explicit actor. */
+    private void recordTransition(
+            BookingEntity b,
+            BookingStatus previous,
+            BookingActor actor,
+            UUID actorUserId,
+            String reasonCode) {
         BookingStatusHistoryEntity h = new BookingStatusHistoryEntity();
         h.setBookingId(b.getId());
         h.setPreviousStatus(previous);
         h.setNewStatus(b.getStatus());
-        h.setActorType(BookingActor.PARTICIPANT);
+        h.setActorType(actor);
         h.setActorUserId(actorUserId);
         h.setReasonCode(reasonCode);
         statusHistory.save(h);
@@ -688,18 +794,29 @@ public class BookingService {
      * CartItemStatus}. Bounded per read (the cart is capped at {@link #MAX_CART_ITEMS}); the
      * display is non-atomic — see {@link #getCart}.
      */
+    /** Single-item mapping (add/replay): resolves the related rows per item, then delegates. */
     private CartItemResponse toCartItem(BookingEntity b) {
         TourOfferingEntity offering = offerings.findById(b.getTourOfferingId()).orElse(null);
         GuideProfileEntity guide = guides.findById(b.getGuideId()).orElse(null);
         UniversityEntity university = universities.findById(b.getUniversityId()).orElse(null);
+        UserEntity guideUser =
+                guide == null ? null : users.findById(guide.getUserId()).orElse(null);
+        return toCartItem(b, offering, guide, guideUser, university);
+    }
 
+    /**
+     * Builds the cart-item response from already-resolved related rows (any of which may be null →
+     * name fallbacks). Shared by the single-item {@link #toCartItem(BookingEntity)} and the batched
+     * {@link #getCart} path so the two never diverge on shape or status computation.
+     */
+    private CartItemResponse toCartItem(
+            BookingEntity b,
+            TourOfferingEntity offering,
+            GuideProfileEntity guide,
+            UserEntity guideUser,
+            UniversityEntity university) {
         String offeringTitle = offering != null ? offering.getTitle() : "Tour";
-        String guideName =
-                guide == null
-                        ? ""
-                        : users.findById(guide.getUserId())
-                                .map(UserEntity::getDisplayName)
-                                .orElse("");
+        String guideName = guideUser != null ? guideUser.getDisplayName() : "";
         String universityName = university != null ? university.getName() : "";
         long currentPriceCents =
                 offering != null ? offering.getPriceCents() : b.getBasePriceCents();
