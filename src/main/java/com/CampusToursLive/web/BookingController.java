@@ -162,7 +162,7 @@ public class BookingController {
     @Operation(
             summary = "Book a tour",
             description =
-                    "Creates a booking for a bookable offering (ACTIVE offering by an APPROVED"
+                    "Creates a booking for a bookable offering (ACTIVE offering by a VERIFIED"
                             + " guide at an ACTIVE university). The offering's price and duration"
                             + " are snapshotted onto the booking, which starts in"
                             + " PENDING_GUIDE_ACCEPTANCE with a 90-minute guide response window."

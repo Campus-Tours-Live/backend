@@ -6,6 +6,8 @@ import static org.mockito.Mockito.*;
 import com.CampusToursLive.domain.booking.BookingService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
+import com.CampusToursLive.error.ForbiddenException;
+import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.dto.BookingDetailResponse;
 import com.CampusToursLive.web.dto.CancelBookingRequest;
@@ -74,6 +76,34 @@ class BookingControllerTest {
         when(bookingService.getNextTour(u.getId())).thenReturn(Optional.empty());
 
         assertNull(controller().getNextTour().data());
+    }
+
+    // CTL-97 Task 6: requireRole(PARTICIPANT) is gated by requireProvisioned() — pending -> coded
+    // 404 (never a bare 401, I10), provisioned non-holder -> coded 403. getNextTour stands in for
+    // the whole controller, since every endpoint delegates to the same requireRole call.
+
+    @Test
+    void getNextTour_404_withCode_whenPendingCaller() {
+        when(currentUser.requireRole(UserRole.PARTICIPANT))
+                .thenThrow(
+                        new NotFoundException(
+                                "Account not provisioned", "ACCOUNT_NOT_PROVISIONED"));
+
+        NotFoundException ex =
+                assertThrows(NotFoundException.class, () -> controller().getNextTour());
+        assertEquals("ACCOUNT_NOT_PROVISIONED", ex.code());
+    }
+
+    @Test
+    void getNextTour_403_withCode_whenProvisionedNonHolder() {
+        when(currentUser.requireRole(UserRole.PARTICIPANT))
+                .thenThrow(
+                        new ForbiddenException(
+                                "Missing required role: PARTICIPANT", "ROLE_REQUIRED"));
+
+        ForbiddenException ex =
+                assertThrows(ForbiddenException.class, () -> controller().getNextTour());
+        assertEquals("ROLE_REQUIRED", ex.code());
     }
 
     // ── getUpcoming ──────────────────────────────────────────────────────────

@@ -7,14 +7,14 @@ import java.util.List;
 /**
  * PATCH /guide/profile body — guide application / onboarding.
  *
- * <p>Maps to: users (firstName, lastName, displayName) + guide_profiles (universityId, major,
- * classYear, bio, languages, specialties, basePriceCents) + guide_verifications (method
- * UNIVERSITY_EMAIL, verificationEmail).
+ * <p>Maps to: users (firstName, lastName, displayName) + guide_profiles (bio, spokenLanguages,
+ * tourTopics) + guide_universities (universityId, major, classYear, degree, entryYear, schoolEmail
+ * from verificationEmail, method UNIVERSITY_EMAIL implied).
  *
  * <p>When {@code submit} is true the application is finalized: required fields (university, major,
  * verification email) are enforced, a verification row is created, the GUIDE role is granted
- * (user_roles) and the guide's own application_status moves to PENDING_REVIEW. The account-level
- * status is unchanged — role lifecycle lives on the profile, not the account.
+ * (user_roles) and the guide's own guide_status moves to PENDING. The account-level status is
+ * unchanged — role lifecycle lives on the profile, not the account.
  */
 @Schema(
         name = "GuideProfileUpdateRequest",
@@ -44,9 +44,13 @@ public record GuideProfileUpdateRequest(
                 String major,
         @Schema(
                         description =
-                                "Class year. Free-text (no controlled vocabulary); typical values"
-                                        + " are Freshman/Sophomore/Junior/Senior/Graduate.",
-                        example = "Junior",
+                                "Class year, as a 4-digit year (e.g. graduating class). Must fall"
+                                        + " inside the window derived from entryYear and degree —"
+                                        + " see GET /v1/meta/enrollment-years for that window.",
+                        // Quoted so swagger-core parses this as a JSON string rather than coercing
+                        // a numeric-looking example to a number and failing Spectral's
+                        // oas3-valid-schema-example check — see GuideOnboardingRequest.classYear.
+                        example = "\"2027\"",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 String classYear,
         @Schema(
@@ -60,25 +64,17 @@ public record GuideProfileUpdateRequest(
                                         description = "Languages the guide speaks.",
                                         requiredMode = Schema.RequiredMode.NOT_REQUIRED),
                         schema = @Schema(description = "BCP-47 language tag.", example = "en-US"))
-                List<String> languages,
+                List<String> spokenLanguages,
         @ArraySchema(
                         arraySchema =
                                 @Schema(
-                                        description = "Tour specialties the guide focuses on.",
+                                        description = "Tour topics the guide focuses on.",
                                         requiredMode = Schema.RequiredMode.NOT_REQUIRED),
                         schema =
                                 @Schema(
-                                        description = "Free-text specialty label.",
+                                        description = "Free-text tour topic label.",
                                         example = "Dorm & housing tours"))
-                List<String> specialties,
-        @Schema(
-                        description =
-                                "Default per-tour price in integer US cents (e.g. 2500 ="
-                                        + " $25.00).",
-                        example = "4200",
-                        minimum = "0",
-                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                Long basePriceCents,
+                List<String> tourTopics,
         @Schema(
                         description =
                                 "University email used for verification (method UNIVERSITY_EMAIL);"
@@ -89,7 +85,7 @@ public record GuideProfileUpdateRequest(
         @Schema(
                         description =
                                 "When true, finalize the application (enforce required fields,"
-                                        + " grant the GUIDE role, move status to PENDING_REVIEW).",
+                                        + " grant the GUIDE role, move status to PENDING).",
                         example = "true",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 Boolean submit,
@@ -100,4 +96,14 @@ public record GuideProfileUpdateRequest(
                                         + " Scorecard credential title).",
                         example = "Bachelor's Degree",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String degree) {}
+                String degree,
+        @Schema(
+                        description =
+                                "Year the guide entered this university, e.g. 2023. Optional only"
+                                        + " when the guide already has an affiliation row for this"
+                                        + " universityId, whose stored value is then reused;"
+                                        + " naming a university the guide is not yet affiliated"
+                                        + " with requires it, and omitting it there is a 422.",
+                        example = "2023",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                Integer entryYear) {}

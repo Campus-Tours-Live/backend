@@ -215,7 +215,7 @@ DevTools is dev-only: it's excluded from a packaged/`java -jar` run, so it never
 ```bash
 curl http://localhost:8080/actuator/health           # {"status":"UP"}
 curl -s -o /dev/null -w '%{http_code}\n' \
-     http://localhost:8080/userinfo                  # 401 — security chain is up (unauthenticated)
+     http://localhost:8080/users/me                  # 401 — security chain is up (unauthenticated)
 ```
 
 Then explore the API interactively at **<http://localhost:8080/swagger-ui.html>** (Swagger UI) — see
@@ -285,17 +285,14 @@ The full set of variables (optional for local dev unless marked otherwise; some 
 - **Flyway owns the schema** (`spring.jpa.hibernate.ddl-auto=none`); Hibernate never alters it.
 - Migrations live in `src/main/resources/db/migration/`:
 
-  | File                                    | Purpose                                                                                     |
-  | --------------------------------------- | ------------------------------------------------------------------------------------------- |
-  | `V1__schema.sql`                        | The complete baseline schema (tables, enums, constraints, indexes).                         |
-  | `V2__seed_universities.sql`             | Seeds the university catalog (~1,900 rows, idempotent). **Frozen.**                         |
-  | `V3__seed_demo_data.sql`                | Seeds demo guides + tour offerings for the marketplace.                                     |
-  | `V4__backfill_university_image_url.sql` | Forward-only backfill of `image_url`/`name` for rows V2's `ON CONFLICT DO NOTHING` skipped. |
+  | File                     | Purpose                                                                                                       |
+  | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+  | `V1__schema.sql`         | The complete baseline schema (tables, enums, constraints, indexes — includes the availability engine, `guide_universities`, etc.). |
+  | `V2__seed_demo_data.sql` | Seeds the university catalog (~1,900 rows) plus demo guides + tour offerings for the marketplace/local MVP.  |
 
 - **Conventions:** `V<n>__<snake_case>.sql`, applied in ascending order. Migrations are
   **immutable history** — once a version is applied anywhere you do **not** edit or delete it
-  (this includes reformatting or adding data to it); you add a new `V<n+1>`. `V2` carries an
-  `APPLIED MIGRATION — do not edit` header for exactly this reason.
+  (this includes reformatting or adding data to it); you add a new `V<n+1>`.
 - **Reset a local DB** (after a schema change, or a Flyway checksum error):
 
   ```bash
@@ -311,9 +308,9 @@ The full set of variables (optional for local dev unless marked otherwise; some 
     migration for the data.** Be aware of the boundary: **`flyway:repair` only re-aligns the
     `flyway_schema_history` checksum — it does NOT re-run the migration**, so a drifted DB never
     receives any data the edit added (e.g. the `image_url`/`name` values). Repair fixes the
-    _checksum_, not the _data_; a new forward migration (like `V4`, an idempotent `UPDATE` keyed
-    by the stable `slug`) is what reconciles the data. Never set `spring.flyway.validate-on-migrate=false`
-    to paper over a mismatch.
+    _checksum_, not the _data_; a new forward migration (an idempotent `UPDATE` keyed by a stable
+    unique column, e.g. `slug`) is what reconciles the data. Never set
+    `spring.flyway.validate-on-migrate=false` to paper over a mismatch.
 
 ---
 
@@ -354,8 +351,8 @@ Key principles:
   plus 409 for a constraint conflict and 500 as the catch-all. (One deliberate exception: the
   `Idempotency-Key` filter runs before the handler and emits its own 409/422, so those do not pass
   through the handler and do not appear in the generated spec.)
-- **DTOs:** responses are immutable `record`s (e.g. `MeResponse`, `TourOfferingResponse`) — no
-  stringly-typed maps on the wire.
+- **DTOs:** responses are immutable `record`s (e.g. `CurrentUserResponse`, `TourOfferingResponse`)
+  — no stringly-typed maps on the wire.
 - The deeper multi-role / role-switching design is captured in the project's design docs; the role
   model is summarized under [Authentication & roles](#authentication--roles).
 
@@ -445,9 +442,9 @@ envelope; errors are `application/problem+json`.
 | Method        | Path                              | Purpose                                                   |
 | ------------- | --------------------------------- | --------------------------------------------------------- |
 | `GET`         | `/actuator/health`                | Liveness/readiness (Actuator)                             |
-| `GET`         | `/userinfo`                       | Current principal (`MeResponse`)                          |
+| `GET`         | `/users/me`                       | Current principal, read-only (`CurrentUserResponse`)       |
+| `GET`         | `/users/me/role-eligibility`      | Can the caller acquire the given role (`?role=`)           |
 | `POST`        | `/session`                        | Resolve/provision the account by intent (signin / signup) |
-| `POST`        | `/session/active-role`            | Switch the UX active role (PARTICIPANT ↔ GUIDE)           |
 | `GET` `PATCH` | `/participant/profile`            | Read / upsert the participant profile                     |
 | `GET` `PATCH` | `/guide/profile`                  | Read / upsert the guide profile (+ submit application)    |
 | `GET` `POST`  | `/guide/offerings`                | List / create a guide's tour offerings                    |
@@ -471,8 +468,9 @@ envelope; errors are `application/problem+json`.
 > paths (`/bookings*`, `/cart*`), _not_ under a `/participant/` prefix. The **PARTICIPANT** role is
 > enforced inside the controller (`requireRole(PARTICIPANT)`), so the Core owns one canonical path
 > per resource and the BFF exposes it verbatim under `/v1` (`/v1/bookings*`, `/v1/cart*`). This
-> mirrors how `/session/active-role`, `/tours`, and the other cross-role resources are already
-> modelled — role is a property of the token, not the URL.
+> mirrors how `/tours` and the other cross-role resources are already modelled — role is a
+> property of the token, not the URL. Active-role/session context (which role a browser session is
+> currently using) is owned by the BFF session, not Core — Core exposes identity + held roles only.
 
 ### Tour catalog (`GET /tours`)
 
@@ -578,8 +576,11 @@ with.)
 - **Identity:** the token's `sub` claim maps to `users.oidc_subject`. Accounts are provisioned
   just-in-time on first sign-up (a "bare" account with no role).
 - **AuthZ:** authorization always reads the authoritative `user_roles` set (via
-  `CurrentUser.requireRole(...)`), **never** `users.last_active_role` (which is UX context only).
-  Roles: `PARTICIPANT`, `GUIDE`, `ADMIN`, `SUPPORT`.
+  `CurrentUser.requireRole(...)`). Roles: `PARTICIPANT`, `GUIDE`, `ADMIN`, `SUPPORT`.
+- **Active role / session context** (which role a browser session is currently using) is **not**
+  Core state at all — it is owned entirely by the BFF's server-side session. Core has no
+  `last_active_role` column and no active-role endpoint; it exposes identity + held roles
+  (`GET /users/me`) and an eligibility check (`GET /users/me/role-eligibility`) only.
 
 ---
 

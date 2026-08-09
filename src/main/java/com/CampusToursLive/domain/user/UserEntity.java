@@ -32,11 +32,6 @@ public class UserEntity {
     @Column(name = "email_verified", nullable = false)
     private boolean emailVerified;
 
-    // Which area the UI lands in. UX context only — never used for authorization.
-    @Enumerated(EnumType.STRING)
-    @Column(name = "last_active_role", columnDefinition = "user_role")
-    private UserRole lastActiveRole;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "account_status", columnDefinition = "account_status", nullable = false)
     private AccountStatus accountStatus;

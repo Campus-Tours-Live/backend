@@ -7,9 +7,9 @@ import com.CampusToursLive.domain.availability.GuideAvailabilityOccurrenceEntity
 import com.CampusToursLive.domain.availability.GuideAvailabilityOccurrenceRepository;
 import com.CampusToursLive.domain.availability.GuideBookingSettingsEntity;
 import com.CampusToursLive.domain.availability.GuideBookingSettingsRepository;
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.tour.TourOfferingEntity;
 import com.CampusToursLive.domain.tour.TourOfferingRepository;
 import com.CampusToursLive.domain.tour.TourStatus;
@@ -86,9 +86,7 @@ class BookingWriteIntegrationTest {
         GuideProfileEntity g = new GuideProfileEntity();
         g.setId(UUID.randomUUID());
         g.setUserId(guideUser.getId());
-        g.setUniversityId(university.getId());
-        g.setMajor("Computer Science");
-        g.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        g.setStatus(GuideStatus.VERIFIED);
         guide = guides.save(g);
 
         TourOfferingEntity o = new TourOfferingEntity();

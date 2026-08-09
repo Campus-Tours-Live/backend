@@ -67,7 +67,6 @@ CREATE TYPE public.acceptance_mode AS ENUM (
 --
 
 CREATE TYPE public.account_status AS ENUM (
-    'PENDING_VERIFICATION',
     'ACTIVE',
     'SUSPENDED',
     'DELETED'
@@ -163,11 +162,9 @@ CREATE TYPE public.guardian_consent_status AS ENUM (
 --
 
 CREATE TYPE public.guide_application_status AS ENUM (
-    'DRAFT',
-    'PENDING_REVIEW',
-    'APPROVED',
-    'REJECTED',
-    'SUSPENDED'
+    'PENDING',
+    'VERIFIED',
+    'REJECTED'
 );
 
 
@@ -651,45 +648,17 @@ CREATE TABLE public.guide_booking_settings (
 CREATE TABLE public.guide_profiles (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     user_id uuid NOT NULL,
-    university_id uuid NOT NULL,
-    major text NOT NULL,
-    class_year text,
-    degree text,
-    entry_year smallint,
     bio text,
-    languages jsonb DEFAULT '["en-US"]'::jsonb NOT NULL,
-    specialties jsonb DEFAULT '[]'::jsonb NOT NULL,
+    spoken_languages jsonb DEFAULT '["en-US"]'::jsonb NOT NULL,
+    tour_topics jsonb DEFAULT '[]'::jsonb NOT NULL,
     favorite_spots jsonb DEFAULT '[]'::jsonb NOT NULL,
-    application_status public.guide_application_status DEFAULT 'DRAFT'::public.guide_application_status NOT NULL,
-    verification_status public.guide_verification_status DEFAULT 'NOT_SUBMITTED'::public.guide_verification_status NOT NULL,
-    base_price_cents bigint DEFAULT 2800 NOT NULL,
-    currency character(3) DEFAULT 'USD'::bpchar NOT NULL,
+    guide_status public.guide_application_status DEFAULT 'PENDING'::public.guide_application_status NOT NULL,
     avg_rating numeric(3,2) DEFAULT 0 NOT NULL,
     review_count integer DEFAULT 0 NOT NULL,
     completed_tours integer DEFAULT 0 NOT NULL,
     stripe_account_id text,
     payouts_enabled boolean DEFAULT false NOT NULL,
     approved_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT guide_profiles_base_price_cents_check CHECK (((base_price_cents >= 2000) AND (base_price_cents <= 20000)))
-);
-
-
---
--- Name: guide_verifications; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.guide_verifications (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    guide_id uuid NOT NULL,
-    method text NOT NULL,
-    university_email public.citext,
-    document_key text,
-    status public.guide_verification_status DEFAULT 'PENDING'::public.guide_verification_status NOT NULL,
-    reviewed_by uuid,
-    reviewed_at timestamp with time zone,
-    rejection_reason text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -1040,8 +1009,7 @@ CREATE TABLE public.users (
     oidc_subject text,
     email public.citext,
     email_verified boolean DEFAULT false NOT NULL,
-    last_active_role public.user_role,
-    account_status public.account_status DEFAULT 'PENDING_VERIFICATION'::public.account_status NOT NULL,
+    account_status public.account_status DEFAULT 'ACTIVE'::public.account_status NOT NULL,
     date_of_birth date,
     age_band public.age_band,
     first_name text,
@@ -1183,14 +1151,6 @@ ALTER TABLE ONLY public.guide_profiles
 
 ALTER TABLE ONLY public.guide_profiles
     ADD CONSTRAINT guide_profiles_user_id_key UNIQUE (user_id);
-
-
---
--- Name: guide_verifications guide_verifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.guide_verifications
-    ADD CONSTRAINT guide_verifications_pkey PRIMARY KEY (id);
 
 
 --
@@ -1495,24 +1455,10 @@ CREATE INDEX ix_guardians_participant ON public.guardians USING btree (participa
 
 
 --
--- Name: ix_guide_app_status; Type: INDEX; Schema: public; Owner: -
+-- Name: ix_guide_status; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX ix_guide_app_status ON public.guide_profiles USING btree (application_status);
-
-
---
--- Name: ix_guide_univ; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX ix_guide_univ ON public.guide_profiles USING btree (university_id);
-
-
---
--- Name: ix_gverif_guide; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX ix_gverif_guide ON public.guide_verifications USING btree (guide_id);
+CREATE INDEX ix_guide_status ON public.guide_profiles USING btree (guide_status);
 
 
 --
@@ -1646,13 +1592,6 @@ CREATE TRIGGER trg_guardians_updated BEFORE UPDATE ON public.guardians FOR EACH 
 --
 
 CREATE TRIGGER trg_guide_updated BEFORE UPDATE ON public.guide_profiles FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-
-
---
--- Name: guide_verifications trg_gverif_updated; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_gverif_updated BEFORE UPDATE ON public.guide_verifications FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -1862,35 +1801,11 @@ ALTER TABLE ONLY public.guide_booking_settings
 
 
 --
--- Name: guide_profiles guide_profiles_university_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.guide_profiles
-    ADD CONSTRAINT guide_profiles_university_id_fkey FOREIGN KEY (university_id) REFERENCES public.universities(id);
-
-
---
 -- Name: guide_profiles guide_profiles_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.guide_profiles
     ADD CONSTRAINT guide_profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
-
---
--- Name: guide_verifications guide_verifications_guide_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.guide_verifications
-    ADD CONSTRAINT guide_verifications_guide_id_fkey FOREIGN KEY (guide_id) REFERENCES public.guide_profiles(id) ON DELETE CASCADE;
-
-
---
--- Name: guide_verifications guide_verifications_reviewed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.guide_verifications
-    ADD CONSTRAINT guide_verifications_reviewed_by_fkey FOREIGN KEY (reviewed_by) REFERENCES public.users(id);
 
 
 --
@@ -2075,6 +1990,36 @@ ALTER TABLE ONLY public.tour_offerings
 
 ALTER TABLE ONLY public.user_roles
     ADD CONSTRAINT user_roles_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: guide_universities; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.guide_universities (
+  id                   uuid PRIMARY KEY,
+  guide_profile_id     uuid NOT NULL REFERENCES public.guide_profiles(id) ON DELETE CASCADE,
+  university_id        uuid NOT NULL REFERENCES public.universities(id),
+  major                text,
+  degree               text,
+  class_year           text,
+  -- entry_year NOT NULL and the version column were added by EDITING this already-applied
+  -- migration (CTL-97), not by a new V<n> -- a deliberate exception taken while nothing was
+  -- deployed and every database was disposable. A database that applied the earlier V1 will
+  -- fail Flyway validation on checksum drift; recover with `docker compose down -v && docker
+  -- compose up -d`. Do NOT use flyway:repair -- it realigns the checksum WITHOUT re-running
+  -- this file, leaving entry_year nullable and version missing under code that requires both.
+  entry_year           integer NOT NULL,
+  version              bigint NOT NULL DEFAULT 0,
+  school_email         public.citext,                          -- PII, never serialized
+  verification_status  public.guide_verification_status NOT NULL DEFAULT 'NOT_SUBMITTED',
+  verification_sent_at timestamptz,
+  verified_at          timestamptz,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  updated_at           timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (guide_profile_id, university_id)
+);
+CREATE INDEX ix_guide_universities_profile ON public.guide_universities (guide_profile_id);
 
 
 --

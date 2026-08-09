@@ -28,5 +28,5 @@ public interface SchoolDirectory {
     SchoolRef getSchool(String schoolId);
 
     /** A school's core identity from the directory. */
-    record SchoolRef(String id, String name, String city, String state) {}
+    record SchoolRef(String id, String name, String shortName, String city, String state) {}
 }

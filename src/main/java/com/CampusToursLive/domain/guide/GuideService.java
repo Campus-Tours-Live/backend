@@ -12,34 +12,36 @@ import com.CampusToursLive.domain.user.RoleGrantService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
-import com.CampusToursLive.error.NotFoundException;
+import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
+import com.CampusToursLive.security.GuideProfileSnapshot;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
+import com.CampusToursLive.web.dto.GuideUniversityView;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.time.Year;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Guide application / onboarding. Upserts {@code guide_profiles}, records a student-verification
- * submission, and (on submit) grants the GUIDE role (user_roles) and sets the guide's own
- * application_status to PENDING_REVIEW for admin review. Account-wide accountStatus is NOT touched
- * — guide approval is a role-level state, kept on the guide profile rather than the account.
+ * Guide application / onboarding. Upserts {@code guide_profiles} and its per-university {@code
+ * guide_universities} row, and (on submit) grants the GUIDE role (user_roles) and sets the guide's
+ * own guide_status to PENDING. Verification (the stubbed email-verify flow, tracked on
+ * guide_universities.verification_status) is what later flips guide_status to VERIFIED — admin
+ * review has been retired. Account-wide accountStatus is NOT touched — guide approval is a
+ * role-level state, kept on the guide profile rather than the account.
  */
 @Service
 public class GuideService {
 
-    private static final long MIN_PRICE_CENTS = 2000L; // $20
-    private static final long MAX_PRICE_CENTS = 20000L; // $200
-
     private final GuideProfileRepository guides;
-    private final GuideVerificationRepository verifications;
+    private final GuideUniversityRepository guideUniversities;
     private final UniversityRepository universities;
     private final ParticipantProfileRepository participants;
     private final UserRepository users;
@@ -47,19 +49,21 @@ public class GuideService {
     private final SchoolDirectory schools;
     private final CampusImageUrls campusImages;
     private final ObjectMapper mapper;
+    private final EnrollmentYearRules rules;
 
     public GuideService(
             GuideProfileRepository guides,
-            GuideVerificationRepository verifications,
+            GuideUniversityRepository guideUniversities,
             UniversityRepository universities,
             ParticipantProfileRepository participants,
             UserRepository users,
             RoleGrantService roleGrant,
             SchoolDirectory schools,
             CampusImageUrls campusImages,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            EnrollmentYearRules rules) {
         this.guides = guides;
-        this.verifications = verifications;
+        this.guideUniversities = guideUniversities;
         this.universities = universities;
         this.participants = participants;
         this.users = users;
@@ -67,12 +71,30 @@ public class GuideService {
         this.schools = schools;
         this.campusImages = campusImages;
         this.mapper = mapper;
+        this.rules = rules;
     }
 
     @Transactional(readOnly = true)
     public GuideProfileResponse getProfile(UserEntity user) {
         GuideProfileEntity profile = guides.findByUserId(user.getId()).orElse(null);
-        return toResponse(user, profile);
+        return toResponse(profile);
+    }
+
+    /**
+     * {@code GET /guide/profile}'s read path: builds the response directly from the {@link
+     * GuideProfileSnapshot} {@link com.CampusToursLive.security.CurrentUser#requireGuide()} already
+     * resolved (account + role-profile pairing already asserted there) — no second {@code
+     * guide_profiles} lookup. Only the per-university affiliations still require their own read
+     * (there is no snapshot equivalent for {@code guide_universities}).
+     */
+    @Transactional(readOnly = true)
+    public GuideProfileResponse getProfile(GuideProfileSnapshot profile) {
+        return new GuideProfileResponse(
+                profile.status() != null ? profile.status().name() : null,
+                buildUniversityViews(profile.id()),
+                profile.bio(),
+                readArray(profile.spokenLanguages()),
+                readArray(profile.tourTopics()));
     }
 
     @Transactional
@@ -91,8 +113,8 @@ public class GuideService {
             if (!full.isEmpty()) user.setDisplayName(full);
         }
 
-        // guide_profiles requires university_id + major (NOT NULL), so enforce them
-        // whenever we create/persist the row.
+        // A guide always needs a university + major (enforced here even though they now live on
+        // the per-university guide_universities row, not on guide_profiles itself).
         UUID universityId = parseUniversity(req.universityId());
         String major = req.major() == null ? null : req.major().trim();
         if (universityId == null) {
@@ -105,7 +127,6 @@ public class GuideService {
         if (degree == null || degree.isEmpty()) {
             throw new ValidationException("degree is required");
         }
-        validateClassYear(req.classYear(), degree);
 
         GuideProfileEntity profile =
                 guides.findByUserId(user.getId())
@@ -117,29 +138,54 @@ public class GuideService {
                                     return p;
                                 });
 
-        profile.setUniversityId(universityId);
-        profile.setMajor(major);
-        if (req.classYear() != null) profile.setClassYear(req.classYear().trim());
-        profile.setDegree(degree);
+        // The stored guide_universities row for THIS profile + university, if one already exists.
+        // Null on a first-time create (onboarding), where Task 3's @NotNull on
+        // GuideOnboardingRequest guarantees entryYear arrived in the request — but ALSO null on
+        // PATCH, which has no such guarantee: GuideProfileUpdateRequest.entryYear is optional and
+        // the lookup is keyed on universityId, so any PATCH naming a university this guide has no
+        // row for lands here with nothing to merge against. See the mergedEntryYear guard below.
+        GuideUniversityEntity existingUniversity =
+                findGuideUniversity(profile.getId(), universityId).orElse(null);
+        Integer storedEntryYear =
+                existingUniversity == null ? null : existingUniversity.getEntryYear();
+        String storedClassYear =
+                existingUniversity == null ? null : existingUniversity.getClassYear();
+
+        // Partial update: a null field means "leave alone", so validate the pair that will EXIST
+        // after the write, not just the half the request carried. Without this, editing entryYear
+        // alone can leave a stored classYear outside its window (spec I3).
+        //
+        // `??`-style merging is only sound because null unambiguously means "leave alone" for both
+        // fields — neither has a "clear it" representation. If classYear ever gains one, this merge
+        // must move to explicit presence tracking; see spec D7.
+        Integer mergedEntryYear = req.entryYear() != null ? req.entryYear() : storedEntryYear;
+        String mergedClassYear = req.classYear() != null ? req.classYear() : storedClassYear;
+        // Replaces Task 2's request-only call. There is exactly ONE validateYears call in this
+        // method when this task is done. storedEntryYear rides along so validateYears can tell a
+        // newly supplied entry year from one that is merely being carried forward — see its
+        // javadoc.
+        validateYears(mergedEntryYear, storedEntryYear, mergedClassYear, degree);
+        // entryYear is REQUIRED on the row that is about to be written, and the merge above is not
+        // enough to guarantee one. The reachable path: a guide who already holds GUIDE PATCHes with
+        // a universityId they have no guide_universities row for — the multi-school case, not a
+        // theoretical one — so storedEntryYear is null; the PATCH DTO has no @NotNull on entryYear,
+        // so req.entryYear() may be null too. validateYears lets that pass (a null entryYear skips
+        // the range check, and a null classYear returns early), writeGuideUniversity then INSERTs a
+        // fresh row with no entry_year, and the NOT NULL column rejects it as SQLSTATE 23502 —
+        // which no handler maps, so the caller sees a 500. Reject it here as the missing required
+        // field it is, so it surfaces as a 422 naming the field like every other one.
+        if (mergedEntryYear == null) {
+            throw new ValidationException("entryYear is required");
+        }
+
         if (req.bio() != null) profile.setBio(req.bio().trim());
-        if (req.languages() != null) {
+        if (req.spokenLanguages() != null) {
             List<String> langs =
-                    req.languages().stream().filter(s -> s != null && !s.isBlank()).toList();
-            profile.setLanguages(writeJson(langs.isEmpty() ? List.of("en-US") : langs));
+                    req.spokenLanguages().stream().filter(s -> s != null && !s.isBlank()).toList();
+            profile.setSpokenLanguages(writeJson(langs.isEmpty() ? List.of("en-US") : langs));
         }
-        if (req.specialties() != null) {
-            profile.setSpecialties(writeJson(validateTopics(req.specialties())));
-        }
-        if (req.basePriceCents() != null) {
-            long price = req.basePriceCents();
-            if (price < MIN_PRICE_CENTS || price > MAX_PRICE_CENTS) {
-                throw new ValidationException(
-                        "basePriceCents must be between "
-                                + MIN_PRICE_CENTS
-                                + " and "
-                                + MAX_PRICE_CENTS);
-            }
-            profile.setBasePriceCents(price);
+        if (req.tourTopics() != null) {
+            profile.setTourTopics(writeJson(validateTopics(req.tourTopics())));
         }
 
         if (submit) {
@@ -150,8 +196,7 @@ public class GuideService {
                     .ifPresent(
                             pp -> {
                                 if (pp.getParticipantType() == ParticipantType.PARENT) {
-                                    throw new ValidationException(
-                                            "Parent or guardian accounts cannot become guides.");
+                                    throw ConflictException.roleNotEligible(UserRole.GUIDE.name());
                                 }
                             });
 
@@ -167,31 +212,83 @@ public class GuideService {
             if (profile.getBio() == null || profile.getBio().isBlank()) {
                 throw new ValidationException("A short bio is required to submit your application");
             }
-            if (readArray(profile.getSpecialties()).isEmpty()) {
+            if (readArray(profile.getTourTopics()).isEmpty()) {
                 throw new ValidationException(
                         "At least one tour specialty is required to submit your application");
             }
-            profile.setApplicationStatus(GuideApplicationStatus.PENDING_REVIEW);
-            profile.setVerificationStatus(GuideVerificationStatus.PENDING);
+            profile.setStatus(GuideStatus.PENDING);
             guides.save(profile);
 
-            GuideVerificationEntity v = new GuideVerificationEntity();
-            v.setId(UUID.randomUUID());
-            v.setGuideId(profile.getId());
-            v.setMethod("UNIVERSITY_EMAIL");
-            v.setUniversityEmail(email);
-            v.setStatus(GuideVerificationStatus.PENDING);
-            verifications.save(v);
+            // Submission lives entirely on guide_universities (the per-university row):
+            // school_email + verification_status=PENDING, keyed off the request's
+            // university/major/degree/classYear.
+            GuideUniversityEntity guideUniversity =
+                    writeGuideUniversity(
+                            profile, universityId, major, degree, req.classYear(), req.entryYear());
+            guideUniversity.setSchoolEmail(email);
+            guideUniversity.setVerificationStatus(GuideVerificationStatus.PENDING);
+            guideUniversities.save(guideUniversity);
 
             // Grant the GUIDE role (user_roles); approval is tracked on the guide
-            // profile's application_status, NOT on the account-wide accountStatus.
+            // profile's guide_status, NOT on the account-wide accountStatus.
             roleGrant.grant(user, UserRole.GUIDE);
         } else {
             guides.save(profile);
+            guideUniversities.save(
+                    writeGuideUniversity(
+                            profile,
+                            universityId,
+                            major,
+                            degree,
+                            req.classYear(),
+                            req.entryYear()));
         }
 
         users.save(user);
-        return toResponse(user, profile);
+        return toResponse(profile);
+    }
+
+    /**
+     * Upsert the {@code guide_universities} row for {@code universityId} (keyed by {@code
+     * (guide_profile_id, university_id)}, single school today), writing
+     * major/degree/classYear/entryYear directly from the request — {@code guide_profiles} no longer
+     * carries these flat columns. Does NOT save — callers persist it (after possibly layering on
+     * submit-only fields like {@code schoolEmail}).
+     */
+    private GuideUniversityEntity writeGuideUniversity(
+            GuideProfileEntity profile,
+            UUID universityId,
+            String major,
+            String degree,
+            String classYear,
+            Integer entryYear) {
+        GuideUniversityEntity entry =
+                findGuideUniversity(profile.getId(), universityId)
+                        .orElseGet(
+                                () -> {
+                                    GuideUniversityEntity g = new GuideUniversityEntity();
+                                    g.setId(UUID.randomUUID());
+                                    g.setGuideProfileId(profile.getId());
+                                    g.setUniversityId(universityId);
+                                    return g;
+                                });
+        entry.setMajor(major);
+        entry.setDegree(degree);
+        if (classYear != null) entry.setClassYear(classYear.trim());
+        if (entryYear != null) entry.setEntryYear(entryYear);
+        return entry;
+    }
+
+    /**
+     * The existing {@code guide_universities} row for this profile + university (single school
+     * today, keyed by {@code (guide_profile_id, university_id)}), if one exists yet. Shared by the
+     * merged-validation read in {@link #updateProfile} and the upsert in {@link
+     * #writeGuideUniversity} so the lookup logic lives in exactly one place.
+     */
+    private Optional<GuideUniversityEntity> findGuideUniversity(UUID profileId, UUID universityId) {
+        return guideUniversities.findByGuideProfileId(profileId).stream()
+                .filter(g -> universityId.equals(g.getUniversityId()))
+                .findFirst();
     }
 
     /**
@@ -224,10 +321,26 @@ public class GuideService {
                             if (s == null) {
                                 throw new ValidationException("Unknown university: " + scorecardId);
                             }
+                            // Reuse-by-name absorption: a legacy seed row (human slug) sharing this
+                            // Scorecard school's exact name gets re-keyed into the sc-<id>
+                            // namespace
+                            // instead of creating a duplicate row. This converges the catalog to
+                            // Scorecard-keyed rows over time. city/region/imageUrl are left as-is —
+                            // only the slug (always) and shortName (when Scorecard has one) change.
+                            UniversityEntity existing =
+                                    universities.findFirstByName(s.name()).orElse(null);
+                            if (existing != null) {
+                                existing.setSlug(slug);
+                                if (s.shortName() != null && !s.shortName().isBlank()) {
+                                    existing.setShortName(s.shortName());
+                                }
+                                return universities.save(existing).getId();
+                            }
                             UniversityEntity u = new UniversityEntity();
                             u.setId(UUID.randomUUID());
                             u.setSlug(slug);
                             u.setName(s.name());
+                            u.setShortName(s.shortName());
                             u.setCity(s.city() == null || s.city().isBlank() ? "N/A" : s.city());
                             u.setRegion(s.state());
                             u.setTimezone(tzForState(s.state()));
@@ -286,112 +399,104 @@ public class GuideService {
     }
 
     /**
-     * Class year (expected graduation year) must, when present, be a 4-digit year inside a bounded
-     * window: 10 years back (recent alumni can guide) up to this year plus a per-degree buffer (a
-     * current student's remaining program length). Mirrors the client-side rule — defense in depth,
-     * since a direct API call bypasses the browser. Year granularity keeps term/quarter timing from
-     * ever making a year invalid.
+     * Range-checks both year fields (spec R1/R2). A null {@code entryYear} is a PATCH that is not
+     * touching it; the caller has already merged in the stored value, so a null reaching here means
+     * there is genuinely nothing to check — and {@code classYear} cannot be checked without it.
+     *
+     * <p><b>The entry-year window applies to a NEWLY SUPPLIED value, not to one that is already
+     * stored</b> (spec D1a). {@code storedEntryYear} is the value currently on the {@code
+     * guide_universities} row (null when there is no row yet), and this comparison is the ONE place
+     * that decides whether the window is enforced. The reason: the window is {@code [serverYear −
+     * 10, serverYear + 1]} and it ADVANCES every 1 January, while a stored entry year does not. Any
+     * stored value therefore ages out of it within ten years. Re-measuring an unchanged value
+     * against a window that has moved underneath it locks the guide out of saving ANY profile
+     * change — the edit form sends every server-required field on every PATCH, so the year comes
+     * back on requests that are not about it — and the rejection is about a fact that is true and
+     * was in range on the day it was entered.
+     *
+     * <p>Skipping the check when nothing changed does not open a way in: setting a value is always
+     * a difference (onboarding compares against a null stored value; a real edit against the old
+     * one), so an out-of-window year can never be WRITTEN — an existing one merely survives.
+     * Compared with {@link Objects#equals} because these are boxed {@code Integer}s: {@code ==}
+     * would hold inside the {@code -128..127} cache and fail for every real year.
+     *
+     * <p>Scope: this exemption is for the entry-year window ONLY. {@code classYear} is still
+     * checked against the window derived from the merged entry year, exactly as before — an
+     * aged-out enrolment simply yields a graduation window that lies in the past, which is correct.
      */
-    private static void validateClassYear(String classYear, String degree) {
-        if (classYear == null || classYear.isBlank()) return;
+    private void validateYears(
+            Integer entryYear, Integer storedEntryYear, String classYear, String degree) {
+        if (entryYear != null && !Objects.equals(entryYear, storedEntryYear)) {
+            EnrollmentYearRules.YearRange entry = rules.entryYearRange();
+            if (entryYear < entry.min() || entryYear > entry.max()) {
+                throw new ValidationException(
+                        "entryYear must be between " + entry.min() + " and " + entry.max());
+            }
+        }
+        // null = "leave alone". BLANK is not the same thing and is rejected: treating "   " as
+        // absent makes a user who cleared the box get a silent no-op, and letting it through
+        // writes an empty string into class_year — a value that is neither a year nor null. The
+        // pre-existing code did the latter (`if (classYear != null) setClassYear(trim())`).
+        if (classYear == null) return;
+        if (classYear.isBlank()) {
+            throw new ValidationException("classYear must be a 4-digit year");
+        }
         String cy = classYear.trim();
         if (!cy.matches("\\d{4}")) {
             throw new ValidationException("classYear must be a 4-digit year");
         }
+        if (entryYear == null) {
+            throw new ValidationException("entryYear is required to validate classYear");
+        }
+        EnrollmentYearRules.YearRange window = rules.classYearRange(entryYear, degree);
         int year = Integer.parseInt(cy);
-        int current = Year.now().getValue();
-        int min = current - 10;
-        int max = current + gradYearBufferForDegree(degree);
-        if (year < min || year > max) {
-            throw new ValidationException("classYear must be between " + min + " and " + max);
+        if (year < window.min() || year > window.max()) {
+            throw new ValidationException(
+                    "classYear must be between " + window.min() + " and " + window.max());
         }
     }
 
-    /**
-     * Upper-bound buffer (years past this year) for an expected graduation year, by degree level.
-     * Package-private so each per-level branch is unit-tested directly (see GuideServiceTest).
-     */
-    static int gradYearBufferForDegree(String degree) {
-        String t = degree == null ? "" : degree.toLowerCase();
-        if (t.contains("doctor") || t.contains("first professional")) return 9;
-        if (t.contains("master") || t.contains("post-baccalaureate")) return 3;
-        if (t.contains("bachelor")) return 6;
-        if (t.contains("associate") || t.contains("certificate") || t.contains("diploma")) return 3;
-        return 8;
-    }
-
-    /**
-     * Admin review of a guide application (called by AdminController after requireRole(ADMIN)).
-     * Sets the guide's application_status; approving also marks the verification VERIFIED. This is
-     * what makes APPROVED reachable, so the live-action gate on offerings
-     * (TourOfferingService.activate) can pass.
-     */
-    @Transactional
-    public GuideProfileResponse reviewApplication(UUID guideUserId, String decision) {
-        String d = decision == null ? null : decision.trim().toUpperCase();
-        GuideApplicationStatus next;
-        if ("APPROVED".equals(d)) {
-            next = GuideApplicationStatus.APPROVED;
-        } else if ("REJECTED".equals(d)) {
-            next = GuideApplicationStatus.REJECTED;
-        } else {
-            throw new ValidationException("decision must be APPROVED or REJECTED");
-        }
-
-        GuideProfileEntity profile =
-                guides.findByUserId(guideUserId)
-                        .orElseThrow(
-                                () -> new NotFoundException("No guide application for that user"));
-        profile.setApplicationStatus(next);
-        if (next == GuideApplicationStatus.APPROVED) {
-            profile.setVerificationStatus(GuideVerificationStatus.VERIFIED);
-        }
-        guides.save(profile);
-
-        UserEntity guideUser =
-                users.findById(guideUserId)
-                        .orElseThrow(() -> new NotFoundException("User not found"));
-        return toResponse(guideUser, profile);
-    }
-
-    private GuideProfileResponse toResponse(UserEntity user, GuideProfileEntity profile) {
-        UniversityEntity university =
-                profile != null && profile.getUniversityId() != null
-                        ? universities.findById(profile.getUniversityId()).orElse(null)
-                        : null;
-
+    private GuideProfileResponse toResponse(GuideProfileEntity profile) {
         return new GuideProfileResponse(
-                user.getId().toString(),
-                user.getFirstName(),
-                user.getLastName(),
-                user.getDisplayName(),
-                user.getEmail(),
-                user.getAccountStatus() != null ? user.getAccountStatus().name() : null,
                 profile == null
                         ? null
-                        : (profile.getUniversityId() != null
-                                ? profile.getUniversityId().toString()
-                                : null),
-                university != null ? university.getName() : null,
-                university != null ? university.getShortName() : null,
-                profile == null ? null : profile.getMajor(),
-                profile == null ? null : profile.getClassYear(),
+                        : (profile.getStatus() != null ? profile.getStatus().name() : null),
+                profile == null ? List.of() : buildUniversityViews(profile.getId()),
                 profile == null ? null : profile.getBio(),
-                profile == null ? null : readArray(profile.getLanguages()),
-                profile == null ? null : readArray(profile.getSpecialties()),
-                profile == null ? null : profile.getBasePriceCents(),
-                profile == null ? null : profile.getCurrency(),
-                profile == null
-                        ? null
-                        : (profile.getApplicationStatus() != null
-                                ? profile.getApplicationStatus().name()
-                                : null),
-                profile == null
-                        ? null
-                        : (profile.getVerificationStatus() != null
-                                ? profile.getVerificationStatus().name()
-                                : null),
-                profile == null ? null : profile.getDegree());
+                profile == null ? null : readArray(profile.getSpokenLanguages()),
+                profile == null ? null : readArray(profile.getTourTopics()));
+    }
+
+    /**
+     * One {@link GuideUniversityView} per {@code guide_universities} row for this profile,
+     * resolving each row's university name/shortName. {@code schoolEmail} (PII) is intentionally
+     * never read into the view.
+     */
+    private List<GuideUniversityView> buildUniversityViews(UUID profileId) {
+        return guideUniversities.findByGuideProfileId(profileId).stream()
+                .map(
+                        row -> {
+                            UniversityEntity uni =
+                                    row.getUniversityId() != null
+                                            ? universities
+                                                    .findById(row.getUniversityId())
+                                                    .orElse(null)
+                                            : null;
+                            return new GuideUniversityView(
+                                    row.getUniversityId() != null
+                                            ? row.getUniversityId().toString()
+                                            : null,
+                                    uni != null ? uni.getName() : null,
+                                    uni != null ? uni.getShortName() : null,
+                                    row.getMajor(),
+                                    row.getDegree(),
+                                    row.getClassYear(),
+                                    row.getEntryYear(),
+                                    row.getVerificationStatus() != null
+                                            ? row.getVerificationStatus().name()
+                                            : null);
+                        })
+                .toList();
     }
 
     private List<String> readArray(String json) {

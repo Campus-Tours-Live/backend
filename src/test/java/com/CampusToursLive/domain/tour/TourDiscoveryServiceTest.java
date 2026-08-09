@@ -13,9 +13,11 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.CampusToursLive.domain.guide.GuideApplicationStatus;
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
+import com.CampusToursLive.domain.guide.GuideStatus;
+import com.CampusToursLive.domain.guide.GuideUniversityEntity;
+import com.CampusToursLive.domain.guide.GuideUniversityRepository;
 import com.CampusToursLive.domain.university.UniversityEntity;
 import com.CampusToursLive.domain.university.UniversityRepository;
 import com.CampusToursLive.domain.university.UniversityStatus;
@@ -43,17 +45,19 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 
-/** Public marketplace discovery — only ACTIVE offerings from APPROVED guides are visible. */
+/** Public marketplace discovery — only ACTIVE offerings from VERIFIED guides are visible. */
 @ExtendWith(MockitoExtension.class)
 class TourDiscoveryServiceTest {
 
     @Mock TourOfferingRepository offerings;
     @Mock GuideProfileRepository guides;
+    @Mock GuideUniversityRepository guideUniversities;
     @Mock UniversityRepository universities;
     @Mock UserRepository users;
 
     private TourDiscoveryService service() {
-        return new TourDiscoveryService(offerings, guides, universities, users, new ObjectMapper());
+        return new TourDiscoveryService(
+                offerings, guides, guideUniversities, universities, users, new ObjectMapper());
     }
 
     private static TourOfferingEntity offering(UUID id, UUID guideId, UUID universityId) {
@@ -92,10 +96,19 @@ class TourDiscoveryServiceTest {
         guide.setId(gid);
         guide.setUserId(uid);
         guide.setBio("Student guide");
-        guide.setMajor("Computer Science");
-        guide.setDegree("BS");
-        guide.setEntryYear(2023);
         when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
+
+        // major/degree/entryYear now live on the guide's guide_universities row for THIS
+        // offering's school, not on the flat guide_profiles row.
+        GuideUniversityEntity guideUniversity = new GuideUniversityEntity();
+        guideUniversity.setId(UUID.randomUUID());
+        guideUniversity.setGuideProfileId(gid);
+        guideUniversity.setUniversityId(univId);
+        guideUniversity.setMajor("Computer Science");
+        guideUniversity.setDegree("BS");
+        guideUniversity.setEntryYear(2023);
+        when(guideUniversities.findByGuideProfileIdIn(List.of(gid)))
+                .thenReturn(List.of(guideUniversity));
 
         UserEntity user = new UserEntity();
         user.setId(uid);
@@ -132,6 +145,97 @@ class TourDiscoveryServiceTest {
         assertEquals(4200L, res.getContent().get(0).priceCents());
         assertEquals(4.5, res.getContent().get(0).avgRating());
         assertEquals(12, res.getContent().get(0).reviewCount());
+    }
+
+    @Test
+    void list_picksTheGuideUniversityRow_matchingTheOfferingsOwnSchool() {
+        // A guide can hold guide_universities rows for several schools; the card must show the
+        // major/degree for THIS offering's university, not just any row on the guide.
+        UUID oid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uid = UUID.randomUUID();
+        UUID univId = UUID.randomUUID();
+        UUID otherUnivId = UUID.randomUUID();
+
+        TourOfferingEntity row = offering(oid, gid, univId);
+        when(offerings.findDiscoverable(
+                        eq(null), eq(false), anyList(), eq(""), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(gid);
+        guide.setUserId(uid);
+        when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
+
+        GuideUniversityEntity otherSchoolRow = new GuideUniversityEntity();
+        otherSchoolRow.setId(UUID.randomUUID());
+        otherSchoolRow.setGuideProfileId(gid);
+        otherSchoolRow.setUniversityId(otherUnivId);
+        otherSchoolRow.setMajor("Wrong School Major");
+        otherSchoolRow.setDegree("Wrong School Degree");
+
+        GuideUniversityEntity thisOfferingsSchoolRow = new GuideUniversityEntity();
+        thisOfferingsSchoolRow.setId(UUID.randomUUID());
+        thisOfferingsSchoolRow.setGuideProfileId(gid);
+        thisOfferingsSchoolRow.setUniversityId(univId);
+        thisOfferingsSchoolRow.setMajor("Correct Major");
+        thisOfferingsSchoolRow.setDegree("Correct Degree");
+
+        when(guideUniversities.findByGuideProfileIdIn(List.of(gid)))
+                .thenReturn(List.of(otherSchoolRow, thisOfferingsSchoolRow));
+
+        UserEntity user = new UserEntity();
+        user.setId(uid);
+        user.setDisplayName("Maya Chen");
+        when(users.findAllById(List.of(uid))).thenReturn(List.of(user));
+
+        UniversityEntity university = new UniversityEntity();
+        university.setId(univId);
+        university.setName("North Coast University");
+        when(universities.findAllById(List.of(univId))).thenReturn(List.of(university));
+
+        Page<TourSummaryResponse> res =
+                service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 20);
+
+        assertEquals("Correct Major", res.getContent().get(0).guideMajor());
+        assertEquals("Correct Degree", res.getContent().get(0).guideDegree());
+    }
+
+    @Test
+    void list_guideMajorAndDegreeAreNull_whenNoGuideUniversityRowMatchesTheOffering() {
+        // No guide_universities row at all for this offering's university → the card degrades
+        // gracefully (null major/degree) instead of throwing.
+        UUID oid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uid = UUID.randomUUID();
+        UUID univId = UUID.randomUUID();
+
+        TourOfferingEntity row = offering(oid, gid, univId);
+        when(offerings.findDiscoverable(
+                        eq(null), eq(false), anyList(), eq(""), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(gid);
+        guide.setUserId(uid);
+        when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
+        // No stub for guideUniversities.findByGuideProfileIdIn(...) → Mockito's default empty list.
+
+        UserEntity user = new UserEntity();
+        user.setId(uid);
+        user.setDisplayName("Maya Chen");
+        when(users.findAllById(List.of(uid))).thenReturn(List.of(user));
+
+        UniversityEntity university = new UniversityEntity();
+        university.setId(univId);
+        university.setName("North Coast University");
+        when(universities.findAllById(List.of(univId))).thenReturn(List.of(university));
+
+        Page<TourSummaryResponse> res =
+                service().list(null, null, "", TourDiscoverySort.RECOMMENDED, 0, 20);
+
+        assertNull(res.getContent().get(0).guideMajor());
+        assertNull(res.getContent().get(0).guideDegree());
     }
 
     @Test
@@ -259,7 +363,7 @@ class TourDiscoveryServiceTest {
         GuideProfileEntity guide = new GuideProfileEntity();
         guide.setId(gid);
         guide.setUserId(uid);
-        guide.setApplicationStatus(GuideApplicationStatus.APPROVED);
+        guide.setStatus(GuideStatus.VERIFIED);
         guide.setBio("Bio text");
         when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
 
