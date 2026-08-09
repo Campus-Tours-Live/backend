@@ -1,7 +1,7 @@
 package com.CampusToursLive.web;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.when;
 
 import com.CampusToursLive.domain.reschedule.RescheduleService;
 import com.CampusToursLive.domain.user.AccountStatus;

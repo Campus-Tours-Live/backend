@@ -2,12 +2,9 @@ package com.CampusToursLive.web.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-@Schema(name = "CreateRescheduleProposalRequest", description = "Propose a new booking start time.")
+@Schema(description = "Propose a new booking start time.")
 public record CreateRescheduleProposalRequest(
-        @Schema(
-                        description = "Proposed start (ISO-8601 UTC).",
-                        example = "2026-08-05T17:00:00Z",
-                        requiredMode = Schema.RequiredMode.REQUIRED)
+        @Schema(description = "Proposed start (ISO-8601 UTC).", example = "2026-08-05T17:00:00Z")
                 String proposedStartAt,
         @Schema(
                         description = "Viewer IANA timezone (display only).",

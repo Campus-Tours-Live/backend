@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** CTL-50 propose endpoint. Non-owners → 404 in the service. */
+/** CTL-50 propose. Non-owners → 404 in the service. */
 @RestController
 @RequestMapping("/bookings")
 @Tag(name = "Reschedule", description = "Propose moving a CONFIRMED booking to a new time.")
@@ -37,8 +37,8 @@ public class RescheduleController {
     @Operation(
             summary = "Propose a reschedule",
             description =
-                    "PENDING_COUNTERPARTY proposal for a CONFIRMED booking owned by the caller."
-                            + " Validates notice/advance, availability, and slot conflicts.")
+                    "PENDING_COUNTERPARTY proposal for a CONFIRMED booking; validates"
+                            + " notice/advance, availability, and slot conflicts.")
     @ApiResponse(
             responseCode = "200",
             description = "Pending proposal.",

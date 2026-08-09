@@ -73,7 +73,6 @@ public final class ConflictException extends RuntimeException implements CodedPr
                 Map.of("role", role));
     }
 
-    /** CTL-50: only CONFIRMED bookings accept a reschedule proposal. */
     public static ConflictException bookingNotConfirmedForReschedule() {
         return new ConflictException(
                 "Only a confirmed booking can be rescheduled",
@@ -81,7 +80,6 @@ public final class ConflictException extends RuntimeException implements CodedPr
                 Map.of());
     }
 
-    /** CTL-50: a booking that has already started cannot be moved. */
     public static ConflictException bookingAlreadyStarted() {
         return new ConflictException(
                 "A booking that has already started cannot be rescheduled",
@@ -89,9 +87,6 @@ public final class ConflictException extends RuntimeException implements CodedPr
                 Map.of());
     }
 
-    /**
-     * CTL-50: at most one PENDING_COUNTERPARTY proposal per booking ({@code uq_reschedule_active}).
-     */
     public static ConflictException rescheduleAlreadyPending() {
         return new ConflictException(
                 "A reschedule proposal is already pending for this booking",
@@ -99,7 +94,6 @@ public final class ConflictException extends RuntimeException implements CodedPr
                 Map.of());
     }
 
-    /** CTL-50 / CTL-54: proposed interval is not covered by guide availability. */
     public static ConflictException proposedOutsideAvailability() {
         return new ConflictException(
                 "The proposed time is outside the guide's availability",
@@ -107,7 +101,6 @@ public final class ConflictException extends RuntimeException implements CodedPr
                 Map.of());
     }
 
-    /** CTL-50: proposed slot overlaps another holding booking for the same guide. */
     public static ConflictException guideSlotConflict() {
         return new ConflictException(
                 "The guide already has a booking at the proposed time",
@@ -115,7 +108,6 @@ public final class ConflictException extends RuntimeException implements CodedPr
                 Map.of());
     }
 
-    /** CTL-50: proposed slot overlaps another holding booking for the same participant. */
     public static ConflictException participantSlotConflict() {
         return new ConflictException(
                 "The participant already has a booking that overlaps the proposed time",

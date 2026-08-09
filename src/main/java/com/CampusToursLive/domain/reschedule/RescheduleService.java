@@ -48,7 +48,7 @@ public class RescheduleService {
         this.settings = settings;
     }
 
-    /** Propose; same party + same start replays the active proposal, else active → 409. */
+    /** Same party + same start replays active proposal; else active → 409. */
     @Transactional
     public RescheduleProposalResponse propose(
             UUID callerUserId, UUID bookingId, CreateRescheduleProposalRequest req) {
@@ -56,46 +56,37 @@ public class RescheduleService {
                 bookings.findById(bookingId)
                         .orElseThrow(() -> new NotFoundException("Booking not found"));
         BookingActor requestedBy = resolveActor(callerUserId, booking);
-
         if (booking.getStatus() != BookingStatus.CONFIRMED) {
             throw ConflictException.bookingNotConfirmedForReschedule();
         }
-
         Instant now = Instant.now();
         if (!booking.getScheduledStartAt().isAfter(now)) {
             throw ConflictException.bookingAlreadyStarted();
         }
-
         Instant proposedStart = parseProposedStart(req.proposedStartAt());
         requireReasonWithinCap(req.reason());
         if (proposedStart.equals(booking.getScheduledStartAt())) {
             throw new ValidationException(
                     "The proposed time is the same as the booking's current time");
         }
-
         GuideBookingSettingsEntity guideSettings = loadSettings(booking.getGuideId());
         requireWithinNoticeAndAdvance(proposedStart, now, guideSettings);
-
-        Duration tourDuration =
-                Duration.between(booking.getScheduledStartAt(), booking.getScheduledEndAt());
-        Instant proposedEnd = proposedStart.plus(tourDuration);
-
+        Instant proposedEnd =
+                proposedStart.plus(
+                        Duration.between(
+                                booking.getScheduledStartAt(), booking.getScheduledEndAt()));
         Optional<RescheduleProposalEntity> active =
                 proposals.findByBookingIdAndStatus(
                         bookingId, RescheduleStatus.PENDING_COUNTERPARTY);
         if (active.isPresent()) {
             RescheduleProposalEntity existing = active.get();
-            boolean sameReplay =
-                    existing.getRequestedBy() == requestedBy
-                            && existing.getProposedStartAt().equals(proposedStart);
-            if (sameReplay) {
+            if (existing.getRequestedBy() == requestedBy
+                    && existing.getProposedStartAt().equals(proposedStart)) {
                 return toResponse(existing);
             }
             throw ConflictException.rescheduleAlreadyPending();
         }
-
         requireSlotAvailable(booking, proposedStart, proposedEnd, guideSettings);
-
         RescheduleProposalEntity p = new RescheduleProposalEntity();
         p.setId(UUID.randomUUID());
         p.setBookingId(booking.getId());
@@ -119,11 +110,9 @@ public class RescheduleService {
         if (booking.getParticipantUserId().equals(callerUserId)) {
             return BookingActor.PARTICIPANT;
         }
-        boolean isBookingsGuide =
-                guides.findById(booking.getGuideId())
-                        .map(g -> g.getUserId().equals(callerUserId))
-                        .orElse(false);
-        if (isBookingsGuide) {
+        if (guides.findById(booking.getGuideId())
+                .map(g -> g.getUserId().equals(callerUserId))
+                .orElse(false)) {
             return BookingActor.GUIDE;
         }
         throw new NotFoundException("Booking not found");

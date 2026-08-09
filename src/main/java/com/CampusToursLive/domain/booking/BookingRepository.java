@@ -91,7 +91,6 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
                     Instant newEnd,
                     Instant newStart);
 
-    /** Guide overlap probe excluding one booking id (reschedule may overlap its own slot). */
     boolean existsByIdNotAndGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
             UUID excludedBookingId,
             UUID guideId,
@@ -99,7 +98,6 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
             Instant newEnd,
             Instant newStart);
 
-    /** Participant-side twin of the id-excluding guide overlap probe. */
     boolean
             existsByIdNotAndParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
                     UUID excludedBookingId,
