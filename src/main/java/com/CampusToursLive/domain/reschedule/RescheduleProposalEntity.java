@@ -65,6 +65,10 @@ public class RescheduleProposalEntity {
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
 
+    /** Optional free-text reason from the proposer (max 1000 chars, enforced in service). */
+    @Column(name = "reason")
+    private String reason;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private Instant createdAt;
 

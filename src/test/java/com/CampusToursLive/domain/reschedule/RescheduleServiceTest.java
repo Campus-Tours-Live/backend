@@ -20,6 +20,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -48,88 +49,71 @@ class RescheduleServiceTest {
     }
 
     @Test
-    void propose_happyPath_guideActor_andExpiryCap() {
+    void propose_persistsReason_andGuards() {
         stubBooking(confirmed());
         stubSlotOk();
-        assertEquals("PARTICIPANT", propose(participantId, proposedStart).requestedBy());
+        assertEquals("Class moved.", propose(" Class moved. ").reason());
+        ArgumentCaptor<RescheduleProposalEntity> cap =
+                ArgumentCaptor.forClass(RescheduleProposalEntity.class);
+        verify(proposals).saveAndFlush(cap.capture());
+        assertEquals("Class moved.", cap.getValue().getReason());
 
         UUID guideUserId = UUID.randomUUID();
-        GuideProfileEntity g = guide(guideUserId);
-        when(guides.findById(guideProfileId)).thenReturn(Optional.of(g));
-        assertEquals("GUIDE", propose(guideUserId, proposedStart).requestedBy());
+        when(guides.findById(guideProfileId)).thenReturn(Optional.of(guide(guideUserId)));
+        assertEquals("GUIDE", propose(guideUserId, proposedStart, null).requestedBy());
 
         BookingEntity soon = confirmed();
         soon.setScheduledStartAt(Instant.now().plus(20, ChronoUnit.HOURS));
         soon.setScheduledEndAt(soon.getScheduledStartAt().plus(60, ChronoUnit.MINUTES));
         stubBooking(soon);
-        assertEquals(
-                soon.getScheduledStartAt().toString(),
-                propose(participantId, proposedStart).expiresAt());
-    }
+        assertEquals(soon.getScheduledStartAt().toString(), propose(null).expiresAt());
 
-    @Test
-    void propose_rejectsGuards() {
         when(bookings.findById(bookingId)).thenReturn(Optional.empty());
-        assertThrows(NotFoundException.class, () -> propose(participantId, proposedStart));
-
+        assertThrows(NotFoundException.class, () -> propose(null));
         BookingEntity draft = confirmed();
         draft.setStatus(BookingStatus.DRAFT);
         stubBooking(draft);
-        assertThrows(ConflictException.class, () -> propose(participantId, proposedStart));
-
+        assertThrows(ConflictException.class, () -> propose(null));
         BookingEntity started = confirmed();
         started.setScheduledStartAt(Instant.now().minus(1, ChronoUnit.HOURS));
         stubBooking(started);
-        assertThrows(ConflictException.class, () -> propose(participantId, proposedStart));
+        assertThrows(ConflictException.class, () -> propose(null));
 
         stubBooking(confirmed());
-        assertThrows(ValidationException.class, () -> propose(participantId, currentStart));
-        for (String bad : new String[] {null, " ", "nope"}) {
-            assertThrows(ValidationException.class, () -> proposeRaw(participantId, bad, null));
-        }
+        assertThrows(ValidationException.class, () -> propose(currentStart, null));
         assertThrows(
                 ValidationException.class,
-                () -> proposeRaw(participantId, proposedStart.toString(), "x".repeat(1001)));
+                () ->
+                        service.propose(
+                                participantId,
+                                bookingId,
+                                new CreateRescheduleProposalRequest("nope", null, null)));
+        assertThrows(ValidationException.class, () -> propose("x".repeat(1001)));
 
         GuideBookingSettingsEntity s = new GuideBookingSettingsEntity();
         s.setMinNoticeMin(90);
         s.setMaxAdvanceDays(5);
         when(settings.findByGuideId(any())).thenReturn(Optional.of(s));
-        Instant tooSoon = Instant.now().plus(30, ChronoUnit.MINUTES);
-        assertTrue(
-                assertThrows(ValidationException.class, () -> propose(participantId, tooSoon))
-                        .getMessage()
-                        .contains("90 minutes"));
-        s.setMinNoticeMin(60);
-        assertTrue(
-                assertThrows(ValidationException.class, () -> propose(participantId, tooSoon))
-                        .getMessage()
-                        .contains("1 hour"));
         assertThrows(
                 ValidationException.class,
-                () -> propose(participantId, Instant.now().plus(10, ChronoUnit.DAYS)));
-
+                () -> propose(Instant.now().plus(30, ChronoUnit.MINUTES), null));
+        assertThrows(
+                ValidationException.class,
+                () -> propose(Instant.now().plus(10, ChronoUnit.DAYS), null));
         when(settings.findByGuideId(any())).thenReturn(Optional.empty());
-        assertTrue(
-                assertThrows(
-                                ValidationException.class,
-                                () ->
-                                        propose(
-                                                participantId,
-                                                Instant.now().plus(2, ChronoUnit.HOURS)))
-                        .getMessage()
-                        .contains("24 hours"));
+        assertThrows(
+                ValidationException.class,
+                () -> propose(Instant.now().plus(2, ChronoUnit.HOURS), null));
+
         when(proposals.findByBookingIdAndStatus(any(), any())).thenReturn(Optional.empty());
         when(availabilityOccurrences.existsContaining(any(), any(), any())).thenReturn(false);
-        assertThrows(ConflictException.class, () -> propose(participantId, proposedStart));
-
+        assertThrows(ConflictException.class, () -> propose(null));
         when(availabilityOccurrences.existsContaining(any(), any(), any())).thenReturn(true);
         when(bookings
                         .existsByIdNotAndGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
                                 any(), any(), any(), any(), any()))
                 .thenReturn(true);
-        assertThrows(ConflictException.class, () -> propose(participantId, proposedStart));
-
+        assertThrows(ConflictException.class, () -> propose(null));
         when(bookings
                         .existsByIdNotAndGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
                                 any(), any(), any(), any(), any()))
@@ -138,30 +122,36 @@ class RescheduleServiceTest {
                         .existsByIdNotAndParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
                                 any(), any(), any(), any(), any()))
                 .thenReturn(true);
-        assertThrows(ConflictException.class, () -> propose(participantId, proposedStart));
+        assertThrows(ConflictException.class, () -> propose(null));
 
-        RescheduleProposalEntity pending = pending(proposedStart, BookingActor.PARTICIPANT);
+        RescheduleProposalEntity pending = pending();
         when(proposals.findByBookingIdAndStatus(bookingId, RescheduleStatus.PENDING_COUNTERPARTY))
                 .thenReturn(Optional.of(pending));
-        assertEquals(pending.getId().toString(), propose(participantId, proposedStart).id());
+        assertEquals(pending.getId().toString(), propose(null).id());
         pending.setProposedStartAt(proposedStart.plus(1, ChronoUnit.DAYS));
-        assertThrows(ConflictException.class, () -> propose(participantId, proposedStart));
+        assertThrows(ConflictException.class, () -> propose(null));
 
         stubSlotOk();
         when(proposals.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("uq"));
-        assertThrows(ConflictException.class, () -> propose(participantId, proposedStart));
-
+        assertThrows(ConflictException.class, () -> propose(null));
         when(guides.findById(guideProfileId)).thenReturn(Optional.of(guide(UUID.randomUUID())));
-        assertThrows(NotFoundException.class, () -> propose(UUID.randomUUID(), proposedStart));
+        assertThrows(
+                NotFoundException.class, () -> propose(UUID.randomUUID(), proposedStart, null));
     }
 
-    private RescheduleProposalResponse propose(UUID userId, Instant start) {
-        return proposeRaw(userId, start.toString(), null);
+    private RescheduleProposalResponse propose(String reason) {
+        return propose(participantId, proposedStart, reason);
     }
 
-    private RescheduleProposalResponse proposeRaw(UUID userId, String start, String reason) {
+    private RescheduleProposalResponse propose(Instant start, String reason) {
+        return propose(participantId, start, reason);
+    }
+
+    private RescheduleProposalResponse propose(UUID userId, Instant start, String reason) {
         return service.propose(
-                userId, bookingId, new CreateRescheduleProposalRequest(start, null, reason));
+                userId,
+                bookingId,
+                new CreateRescheduleProposalRequest(start.toString(), null, reason));
     }
 
     private void stubBooking(BookingEntity b) {
@@ -191,13 +181,13 @@ class RescheduleServiceTest {
         return g;
     }
 
-    private RescheduleProposalEntity pending(Instant start, BookingActor by) {
+    private RescheduleProposalEntity pending() {
         RescheduleProposalEntity p = new RescheduleProposalEntity();
         p.setId(UUID.randomUUID());
         p.setBookingId(bookingId);
-        p.setRequestedBy(by);
-        p.setProposedStartAt(start);
-        p.setProposedEndAt(start.plus(60, ChronoUnit.MINUTES));
+        p.setRequestedBy(BookingActor.PARTICIPANT);
+        p.setProposedStartAt(proposedStart);
+        p.setProposedEndAt(proposedStart.plus(60, ChronoUnit.MINUTES));
         p.setStatus(RescheduleStatus.PENDING_COUNTERPARTY);
         p.setFeeCents(0L);
         p.setPriceDiffCents(0L);

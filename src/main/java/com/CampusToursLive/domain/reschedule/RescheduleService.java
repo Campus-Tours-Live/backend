@@ -64,7 +64,7 @@ public class RescheduleService {
             throw ConflictException.bookingAlreadyStarted();
         }
         Instant proposedStart = parseProposedStart(req.proposedStartAt());
-        requireReasonWithinCap(req.reason());
+        String reason = normalizeReason(req.reason());
         if (proposedStart.equals(booking.getScheduledStartAt())) {
             throw new ValidationException(
                     "The proposed time is the same as the booking's current time");
@@ -98,6 +98,7 @@ public class RescheduleService {
         p.setFeeCents(0L);
         p.setPriceDiffCents(0L);
         p.setExpiresAt(computeExpiry(now, booking));
+        p.setReason(reason);
         try {
             proposals.saveAndFlush(p);
         } catch (DataIntegrityViolationException raceLost) {
@@ -170,11 +171,16 @@ public class RescheduleService {
         }
     }
 
-    private static void requireReasonWithinCap(String reason) {
-        if (reason != null && reason.trim().length() > MAX_REASON_LENGTH) {
+    private static String normalizeReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return null;
+        }
+        String trimmed = reason.trim();
+        if (trimmed.length() > MAX_REASON_LENGTH) {
             throw new ValidationException(
                     "reason must be at most " + MAX_REASON_LENGTH + " characters");
         }
+        return trimmed;
     }
 
     private GuideBookingSettingsEntity loadSettings(UUID guideId) {
@@ -216,6 +222,7 @@ public class RescheduleService {
                 p.getProposedEndAt().toString(),
                 p.getFeeCents(),
                 p.getPriceDiffCents(),
-                p.getExpiresAt().toString());
+                p.getExpiresAt().toString(),
+                p.getReason());
     }
 }

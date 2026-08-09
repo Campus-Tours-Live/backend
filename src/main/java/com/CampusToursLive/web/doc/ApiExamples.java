@@ -397,7 +397,8 @@ public interface ApiExamples {
                     + "\"requestedBy\":\"PARTICIPANT\",\"status\":\"PENDING_COUNTERPARTY\","
                     + "\"proposedStartAt\":\"2026-08-05T17:00:00Z\","
                     + "\"proposedEndAt\":\"2026-08-05T18:00:00Z\",\"feeCents\":0,"
-                    + "\"priceDiffCents\":0,\"expiresAt\":\"2026-08-03T17:00:00Z\"},"
+                    + "\"priceDiffCents\":0,\"expiresAt\":\"2026-08-03T17:00:00Z\","
+                    + "\"reason\":\"Class moved.\"},"
                     + META
                     + "}";
 }

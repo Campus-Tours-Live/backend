@@ -38,7 +38,8 @@ class RescheduleControllerTest {
                         "2026-08-05T18:00:00Z",
                         0L,
                         0L,
-                        "2026-08-03T17:00:00Z");
+                        "2026-08-03T17:00:00Z",
+                        null);
         when(currentUser.requireProvisioned())
                 .thenReturn(
                         new ProvisionedAccount(
@@ -50,7 +51,7 @@ class RescheduleControllerTest {
                                 "A B",
                                 AccountStatus.ACTIVE,
                                 null,
-                                Instant.parse("2024-01-01T00:00:00Z"),
+                                Instant.EPOCH,
                                 Set.of()));
         when(rescheduleService.propose(userId, bookingId, req)).thenReturn(detail);
         assertSame(

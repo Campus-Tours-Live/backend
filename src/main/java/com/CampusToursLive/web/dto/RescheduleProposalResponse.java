@@ -17,4 +17,6 @@ public record RescheduleProposalResponse(
         @Schema(description = "Fee cents (0 in MVP).", example = "0") long feeCents,
         @Schema(description = "Price diff cents (0 in MVP).", example = "0") long priceDiffCents,
         @Schema(description = "Expiry instant (UTC).", example = "2026-08-03T17:00:00Z")
-                String expiresAt) {}
+                String expiresAt,
+        @Schema(description = "Optional propose reason.", example = "Class moved.")
+                String reason) {}
