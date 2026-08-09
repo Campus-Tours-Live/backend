@@ -29,58 +29,56 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        http.csrf(AbstractHttpConfigurer::disable)
-                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(
-                        auth ->
-                                auth.requestMatchers(
-                                                "/health",
-                                                "/actuator/health",
-                                                "/actuator/health/**",
-                                                "/v3/api-docs/**",
-                                                "/swagger-ui/**",
-                                                "/swagger-ui.html")
-                                        .permitAll()
-                                        // Public marketplace: the tour catalog + reference-data
-                                        // lookups are readable without a session.
-                                        //
-                                        // HEAD is listed alongside GET deliberately. Without
-                                        // it a HEAD fell through to anyRequest().authenticated()
-                                        // and
-                                        // 401'd -- and because the BFF forwards public paths
-                                        // anonymously and turns any Core 401 into requireReauth ->
-                                        // clearSession, a single HEAD from a signed-in user's
-                                        // browser, a prefetcher or an uptime probe DESTROYED their
-                                        // session. A publicly readable resource must be publicly
-                                        // HEAD-able; anything else makes a metadata request a
-                                        // logout.
-                                        .requestMatchers(
-                                                org.springframework.http.HttpMethod.GET,
-                                                "/tours",
-                                                "/tours/**",
-                                                "/meta/**",
-                                                // The browsable university directory: counts per
-                                                // state and each state's list. Public for the same
-                                                // reason the tour catalog is — it is what an
-                                                // anonymous visitor came to look at.
-                                                "/universities",
-                                                "/universities/**")
-                                        .permitAll()
-                                        .requestMatchers(
-                                                org.springframework.http.HttpMethod.HEAD,
-                                                "/tours",
-                                                "/tours/**",
-                                                "/meta/**",
-                                                // The browsable university directory: counts per
-                                                // state and each state's list. Public for the same
-                                                // reason the tour catalog is — it is what an
-                                                // anonymous visitor came to look at.
-                                                "/universities",
-                                                "/universities/**")
-                                        .permitAll()
-                                        .anyRequest()
-                                        .authenticated())
-                .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()));
+
+        // 1. Basic security configuration
+        http.csrf(AbstractHttpConfigurer::disable);
+
+        http.sessionManagement(
+                session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+
+        // 2. Authorization rules
+        http.authorizeHttpRequests(
+                auth ->
+                        auth
+
+                                // Health + API documentation
+                                .requestMatchers(
+                                        "/health",
+                                        "/actuator/health",
+                                        "/actuator/health/**",
+                                        "/v3/api-docs/**",
+                                        "/swagger-ui/**",
+                                        "/swagger-ui.html")
+                                .permitAll()
+
+                                // Public GET APIs
+                                .requestMatchers(
+                                        HttpMethod.GET,
+                                        "/tours",
+                                        "/tours/**",
+                                        "/meta/**",
+                                        "/universities",
+                                        "/universities/**")
+                                .permitAll()
+
+                                // Public HEAD APIs
+                                .requestMatchers(
+                                        HttpMethod.HEAD,
+                                        "/tours",
+                                        "/tours/**",
+                                        "/meta/**",
+                                        "/universities",
+                                        "/universities/**")
+                                .permitAll()
+
+                                // Everything else requires login
+                                .anyRequest()
+                                .authenticated());
+
+        // 3. JWT authentication
+        http.oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()));
+
+        // 4. Build the filter chain
         return http.build();
     }
 
