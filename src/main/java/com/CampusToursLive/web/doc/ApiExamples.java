@@ -305,6 +305,7 @@ public interface ApiExamples {
                     + "\"topic\":\"GENERAL_CAMPUS\","
                     + "\"description\":\"A guided walk through the north campus.\","
                     + "\"languages\":[\"en-US\"],"
+                    + "\"features\":[\"Q_AND_A\"],"
                     + "\"universityId\":\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"universityName\":\"North Coast University\","
                     + "\"universityImageUrl\":\"https://pub-3225b84a9a0b4728b11f261ee52251ba.r2"
