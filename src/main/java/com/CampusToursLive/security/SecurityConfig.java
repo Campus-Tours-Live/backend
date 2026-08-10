@@ -58,13 +58,25 @@ public class SecurityConfig {
                                                 org.springframework.http.HttpMethod.GET,
                                                 "/tours",
                                                 "/tours/**",
-                                                "/meta/**")
+                                                "/meta/**",
+                                                // The browsable university directory: counts per
+                                                // state and each state's list. Public for the same
+                                                // reason the tour catalog is — it is what an
+                                                // anonymous visitor came to look at.
+                                                "/universities",
+                                                "/universities/**")
                                         .permitAll()
                                         .requestMatchers(
                                                 org.springframework.http.HttpMethod.HEAD,
                                                 "/tours",
                                                 "/tours/**",
-                                                "/meta/**")
+                                                "/meta/**",
+                                                // The browsable university directory: counts per
+                                                // state and each state's list. Public for the same
+                                                // reason the tour catalog is — it is what an
+                                                // anonymous visitor came to look at.
+                                                "/universities",
+                                                "/universities/**")
                                         .permitAll()
                                         .anyRequest()
                                         .authenticated())

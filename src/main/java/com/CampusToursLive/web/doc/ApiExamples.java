@@ -238,6 +238,21 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String STATE_UNIVERSITY_COUNTS =
+            "{\"data\":{\"byState\":{\"AL\":31,\"AK\":3,\"CA\":148,\"NY\":167,"
+                    + "\"TX\":101,\"WY\":1},\"total\":1903},"
+                    + META
+                    + "}";
+
+    String STATE_UNIVERSITIES =
+            "{\"data\":{\"state\":\"CA\",\"universities\":["
+                    + "{\"id\":\"110635\",\"name\":\"University of California-Berkeley\","
+                    + "\"city\":\"Berkeley\"},"
+                    + "{\"id\":\"243744\",\"name\":\"Stanford University\","
+                    + "\"city\":\"Stanford\"}],\"total\":148},"
+                    + META
+                    + "}";
+
     String MAJORS_LIVE =
             "{\"data\":[{\"value\":\"Computer Science\",\"label\":\"Computer Science\"}],"
                     + META

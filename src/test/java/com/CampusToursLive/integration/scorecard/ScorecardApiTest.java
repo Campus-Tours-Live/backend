@@ -33,6 +33,118 @@ class ScorecardApiTest {
         return new Fixture(new ScorecardApi(builder.build(), apiKey), server);
     }
 
+    // --- the directory boundary -------------------------------------------------------------
+
+    /**
+     * The boundary is what makes "university" mean the same thing to the onboarding picker and to
+     * the browse-by-state pages. Without it Scorecard answers with all 6,273 schools it knows —
+     * trade and certificate programmes included — and a guide typing "academy" is offered them.
+     *
+     * <p>Asserted on the wire, not on a constant: the filter only exists if it reaches the query
+     * string, and a refactor that dropped it would leave any in-Java assertion green.
+     */
+    @Test
+    void bothTheSearchAndTheDirectoryAreScopedToTheBoundary() {
+        Fixture search = fixture("KEY");
+        search.server()
+                .expect(requestTo(Matchers.allOf(BOUNDARY_IN_QUERY)))
+                .andRespond(withSuccess("{\"results\":[]}", MediaType.APPLICATION_JSON));
+        search.api().searchSchools("academy", 5);
+        search.server().verify();
+
+        Fixture directory = fixture("KEY");
+        directory
+                .server()
+                .expect(requestTo(Matchers.allOf(BOUNDARY_IN_QUERY)))
+                .andRespond(
+                        withSuccess(
+                                "{\"metadata\":{\"total\":0},\"results\":[]}",
+                                MediaType.APPLICATION_JSON));
+        directory.api().directoryPage(0);
+        directory.server().verify();
+    }
+
+    private static final org.hamcrest.Matcher<String> BOUNDARY_IN_QUERY =
+            Matchers.allOf(
+                    Matchers.containsString("school.operating=1"),
+                    Matchers.containsString("school.degrees_awarded.predominant=3"));
+
+    // --- directoryPage ----------------------------------------------------------------------
+
+    @Test
+    void directoryPage_parsesRowsAndUpstreamsTotal() {
+        Fixture f = fixture("KEY");
+        f.server()
+                .expect(
+                        requestTo(
+                                Matchers.allOf(
+                                        Matchers.containsString("per_page=100"),
+                                        Matchers.containsString("page=2"))))
+                .andRespond(
+                        withSuccess(
+                                """
+                                {"metadata":{"total":1944,"page":2},
+                                 "results":[
+                                   {"id":243744,"school.name":"Stanford University",
+                                    "school.city":"Stanford","school.state":"CA"}
+                                 ]}
+                                """,
+                                MediaType.APPLICATION_JSON));
+
+        ScorecardApi.DirectoryPage page = f.api().directoryPage(2);
+
+        assertThat(page.total()).isEqualTo(1944);
+        assertThat(page.rows())
+                .containsExactly(
+                        new ScorecardApi.DirectoryRow(
+                                "243744", "Stanford University", "Stanford", "CA"));
+        f.server().verify();
+    }
+
+    /**
+     * Rows are returned UNFILTERED, blanks and all. The caller counts them against upstream's total
+     * to prove nothing was lost, so dropping a row here would make a healthy page look short and
+     * discard a perfectly good directory.
+     */
+    @Test
+    void directoryPage_keepsEveryRow_soTheIntegrityCheckDownstreamIsMeaningful() {
+        Fixture f = fixture("KEY");
+        f.server()
+                .expect(requestTo(Matchers.containsString("/schools")))
+                .andRespond(
+                        withSuccess(
+                                """
+                                {"metadata":{"total":3},
+                                 "results":[
+                                   {"id":"","school.name":"No Id"},
+                                   {"id":"2","school.name":""},
+                                   {"id":"3","school.name":"Real College",
+                                    "school.city":"Town","school.state":"OH"}
+                                 ]}
+                                """,
+                                MediaType.APPLICATION_JSON));
+
+        assertThat(f.api().directoryPage(0).rows()).hasSize(3);
+    }
+
+    @Test
+    void directoryPage_returnsNullWhenItCannotKnow() {
+        assertThat(fixture("").api().directoryPage(0)).isNull();
+        assertThat(fixture("KEY").api().directoryPage(-1)).isNull();
+
+        Fixture broken = fixture("KEY");
+        broken.server()
+                .expect(requestTo(Matchers.containsString("/schools")))
+                .andRespond(withServerError());
+        assertThat(broken.api().directoryPage(0)).isNull();
+
+        Fixture noTotal = fixture("KEY");
+        noTotal.server()
+                .expect(requestTo(Matchers.containsString("/schools")))
+                .andRespond(withSuccess("{\"results\":[]}", MediaType.APPLICATION_JSON));
+        assertThat(noTotal.api().directoryPage(0)).isNull();
+    }
+
     // --- searchSchools ----------------------------------------------------------------------
 
     @Test
@@ -334,6 +446,7 @@ class ScorecardApiTest {
                             assertThat(api.degreesForSchoolRateLimited("243744", limitHit))
                                     .isEmpty();
                             assertThat(api.getSchoolRateLimited("243744", limitHit)).isNull();
+                            assertThat(api.directoryPageRateLimited(0, limitHit)).isNull();
                         })
                 .doesNotThrowAnyException();
     }
