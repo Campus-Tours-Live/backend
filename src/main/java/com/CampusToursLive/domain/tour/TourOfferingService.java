@@ -13,6 +13,7 @@ import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateOfferingRequest;
 import com.CampusToursLive.web.dto.TourOfferingResponse;
+import com.CampusToursLive.web.dto.UpdateOfferingRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashSet;
@@ -151,6 +152,108 @@ public class TourOfferingService {
         return toResponse(o);
     }
 
+    /** Updates a non-public offering. Guides pause an active offering before changing it. */
+    @Transactional
+    public TourOfferingResponse update(
+            UserEntity user, UUID offeringId, UpdateOfferingRequest req) {
+        GuideProfileEntity guide = requireGuideProfile(user);
+        TourOfferingEntity offering = findOwned(offeringId, guide);
+        if (offering.getStatus() != TourStatus.DRAFT && offering.getStatus() != TourStatus.PAUSED) {
+            throw new ValidationException("Only a draft or paused offering can be edited");
+        }
+        if (req == null || req.isEmpty()) {
+            throw new ValidationException("Provide at least one field to update");
+        }
+
+        TourTopic nextTopic = offering.getTopic();
+        if (req.topic() != null) nextTopic = parseTopic(req.topic());
+
+        if (req.universityId() != null) {
+            UUID universityId = parseUuid(req.universityId());
+            if (!isGuidesVerifiedUniversity(guide, universityId)) {
+                throw new ValidationException(
+                        "universityId must be a university you are verified for");
+            }
+            offering.setUniversityId(universityId);
+        }
+        if (req.title() != null) {
+            String title = requireTitle(req.title());
+            if (!title.equals(offering.getTitle())) {
+                offering.setSlug(uniqueSlug(guide.getId(), slugify(title)));
+            }
+            offering.setTitle(title);
+        }
+        if (req.durationMin() != null) offering.setDurationMin(requireDuration(req.durationMin()));
+        if (req.priceCents() != null) offering.setPriceCents(requirePrice(req.priceCents()));
+        if (req.description() != null) offering.setDescription(req.description().trim());
+        offering.setTopic(nextTopic);
+        if (req.languages() != null)
+            offering.setLanguages(writeJson(SupportedLanguages.requireSupported(req.languages())));
+        if (req.features() != null) {
+            offering.setFeatures(writeJson(validateFeatures(req.features(), nextTopic)));
+        } else if (req.topic() != null) {
+            // A topic change cannot leave feature codes that the new topic does not permit.
+            validateFeatures(readStringArray(offering.getFeatures()), nextTopic);
+        }
+        offerings.save(offering);
+        return toResponse(offering);
+    }
+
+    /** Stops new marketplace bookings while preserving the offering for a later re-publish. */
+    @Transactional
+    public TourOfferingResponse pause(UserEntity user, UUID offeringId) {
+        TourOfferingEntity offering = findOwned(offeringId, requireGuideProfile(user));
+        if (offering.getStatus() == TourStatus.PAUSED) return toResponse(offering);
+        if (offering.getStatus() != TourStatus.ACTIVE) {
+            throw new ValidationException("Only an active offering can be paused");
+        }
+        offering.setStatus(TourStatus.PAUSED);
+        offerings.save(offering);
+        return toResponse(offering);
+    }
+
+    /**
+     * Permanently removes an offering from discovery. Existing bookings are intentionally
+     * unchanged.
+     */
+    @Transactional
+    public TourOfferingResponse retire(UserEntity user, UUID offeringId) {
+        TourOfferingEntity offering = findOwned(offeringId, requireGuideProfile(user));
+        if (offering.getStatus() == TourStatus.ARCHIVED) return toResponse(offering);
+        offering.setStatus(TourStatus.ARCHIVED);
+        offerings.save(offering);
+        return toResponse(offering);
+    }
+
+    /** Clones an owned offering into an unpublished draft with a unique copy title and slug. */
+    @Transactional
+    public TourOfferingResponse duplicate(UserEntity user, UUID offeringId) {
+        GuideProfileEntity guide = requireGuideProfile(user);
+        TourOfferingEntity source = findOwned(offeringId, guide);
+        TourOfferingEntity copy = new TourOfferingEntity();
+        copy.setId(UUID.randomUUID());
+        copy.setGuideId(guide.getId());
+        copy.setUniversityId(source.getUniversityId());
+        copy.setTitle(uniqueCopyTitle(guide.getId(), source.getTitle()));
+        copy.setSlug(uniqueSlug(guide.getId(), slugify(copy.getTitle())));
+        copy.setDescription(source.getDescription());
+        copy.setTopic(source.getTopic());
+        copy.setDurationMin(source.getDurationMin());
+        copy.setPriceCents(source.getPriceCents());
+        copy.setCurrency(source.getCurrency());
+        copy.setLanguages(source.getLanguages());
+        copy.setFeatures(source.getFeatures());
+        copy.setStatus(TourStatus.DRAFT);
+        offerings.save(copy);
+        return toResponse(copy);
+    }
+
+    private TourOfferingEntity findOwned(UUID offeringId, GuideProfileEntity guide) {
+        return offerings
+                .findByIdAndGuideId(offeringId, guide.getId())
+                .orElseThrow(() -> new NotFoundException("Offering not found"));
+    }
+
     private GuideProfileEntity requireGuideProfile(UserEntity user) {
         return guides.findByUserId(user.getId())
                 .orElseThrow(
@@ -193,6 +296,47 @@ public class TourOfferingService {
         } catch (IllegalArgumentException ex) {
             throw new ValidationException("Invalid topic: " + raw);
         }
+    }
+
+    private static String requireTitle(String raw) {
+        String title = raw == null ? null : raw.trim();
+        if (title == null || title.isEmpty()) throw new ValidationException("title is required");
+        return title;
+    }
+
+    private static int requireDuration(Integer duration) {
+        if (duration == null || !DURATIONS.contains(duration)) {
+            throw new ValidationException("durationMin must be one of 30, 45, 60, 90");
+        }
+        return duration;
+    }
+
+    private static long requirePrice(Long price) {
+        if (price == null || price < MIN_PRICE_CENTS || price > MAX_PRICE_CENTS) {
+            throw new ValidationException(
+                    "priceCents must be between " + MIN_PRICE_CENTS + " and " + MAX_PRICE_CENTS);
+        }
+        return price;
+    }
+
+    private String uniqueSlug(UUID guideId, String candidate) {
+        String base = candidate.isBlank() ? "tour" : candidate;
+        String slug = base;
+        int suffix = 2;
+        while (offerings.existsByGuideIdAndSlug(guideId, slug)) {
+            slug = base + "-" + suffix++;
+        }
+        return slug;
+    }
+
+    private String uniqueCopyTitle(UUID guideId, String title) {
+        String base = "Copy of " + (title == null || title.isBlank() ? "tour" : title.trim());
+        String candidate = base;
+        int suffix = 2;
+        while (offerings.existsByGuideIdAndSlug(guideId, slugify(candidate))) {
+            candidate = base + " " + suffix++;
+        }
+        return candidate;
     }
 
     private static String slugify(String s) {

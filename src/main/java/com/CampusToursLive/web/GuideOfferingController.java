@@ -8,6 +8,7 @@ import com.CampusToursLive.web.dto.ApiEnvelope;
 import com.CampusToursLive.web.dto.CreateOfferingRequest;
 import com.CampusToursLive.web.dto.Problem;
 import com.CampusToursLive.web.dto.TourOfferingResponse;
+import com.CampusToursLive.web.dto.UpdateOfferingRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -18,6 +19,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -160,5 +162,66 @@ public class GuideOfferingController {
             @Parameter(description = "Id (UUID) of the offering to activate.") @PathVariable
                     UUID id) {
         return ApiEnvelope.of(offerings.activate(currentUser.requireRole(UserRole.GUIDE), id));
+    }
+
+    @Operation(
+            summary = "Update an offering",
+            description = "Updates editable fields of an owned DRAFT or PAUSED offering.")
+    @ApiResponse(responseCode = "200", description = "The updated offering.")
+    @ApiResponse(
+            responseCode = "404",
+            description = "No offering with that id belongs to the caller.")
+    @ApiResponse(
+            responseCode = "422",
+            description = "The offering is active or archived, or a supplied field is invalid.")
+    @PatchMapping("/{id}")
+    public ApiEnvelope<TourOfferingResponse> update(
+            @Parameter(description = "Id (UUID) of the offering to update.") @PathVariable UUID id,
+            @RequestBody UpdateOfferingRequest req) {
+        return ApiEnvelope.of(offerings.update(currentUser.requireRole(UserRole.GUIDE), id, req));
+    }
+
+    @Operation(
+            summary = "Pause an offering",
+            description =
+                    "Removes an ACTIVE offering from marketplace discovery without retiring it.")
+    @ApiResponse(responseCode = "200", description = "The paused offering.")
+    @ApiResponse(
+            responseCode = "404",
+            description = "No offering with that id belongs to the caller.")
+    @ApiResponse(responseCode = "422", description = "Only an ACTIVE offering can be paused.")
+    @PostMapping("/{id}/pause")
+    public ApiEnvelope<TourOfferingResponse> pause(
+            @Parameter(description = "Id (UUID) of the offering to pause.") @PathVariable UUID id) {
+        return ApiEnvelope.of(offerings.pause(currentUser.requireRole(UserRole.GUIDE), id));
+    }
+
+    @Operation(
+            summary = "Retire an offering",
+            description =
+                    "Archives an owned offering so it can no longer be discovered; existing bookings are unchanged.")
+    @ApiResponse(responseCode = "200", description = "The retired offering.")
+    @ApiResponse(
+            responseCode = "404",
+            description = "No offering with that id belongs to the caller.")
+    @PostMapping("/{id}/retire")
+    public ApiEnvelope<TourOfferingResponse> retire(
+            @Parameter(description = "Id (UUID) of the offering to retire.") @PathVariable
+                    UUID id) {
+        return ApiEnvelope.of(offerings.retire(currentUser.requireRole(UserRole.GUIDE), id));
+    }
+
+    @Operation(
+            summary = "Duplicate an offering",
+            description = "Copies an owned offering into a new DRAFT with a unique title and slug.")
+    @ApiResponse(responseCode = "200", description = "The new draft copy.")
+    @ApiResponse(
+            responseCode = "404",
+            description = "No offering with that id belongs to the caller.")
+    @PostMapping("/{id}/duplicate")
+    public ApiEnvelope<TourOfferingResponse> duplicate(
+            @Parameter(description = "Id (UUID) of the offering to duplicate.") @PathVariable
+                    UUID id) {
+        return ApiEnvelope.of(offerings.duplicate(currentUser.requireRole(UserRole.GUIDE), id));
     }
 }
