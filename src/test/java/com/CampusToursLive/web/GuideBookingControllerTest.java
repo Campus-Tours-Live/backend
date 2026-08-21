@@ -142,4 +142,23 @@ class GuideBookingControllerTest {
         mvc.perform(post("/guide/bookings/" + id + "/accept"))
                 .andExpect(status().isUnprocessableEntity());
     }
+
+    @Test
+    void list_defaultsFilterToAll_whenParamOmitted() throws Exception {
+        UserEntity u = user();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(bookings.listForGuide(u, GuideBookingFilter.ALL)).thenReturn(List.of());
+
+        mvc.perform(get("/guide/bookings")).andExpect(status().isOk());
+
+        verify(bookings).listForGuide(u, GuideBookingFilter.ALL);
+    }
+
+    @Test
+    void list_mapsInvalidFilterTo422() throws Exception {
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(user());
+
+        mvc.perform(get("/guide/bookings").param("filter", "nope"))
+                .andExpect(status().isUnprocessableEntity());
+    }
 }
