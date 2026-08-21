@@ -1732,4 +1732,201 @@ class BookingServiceTest {
 
         return b;
     }
+
+    // ── Guide inbox (accept / decline / list) ────────────────────────────────
+
+    @Test
+    void acceptBooking_confirmsPending_andRecordsGuideActor() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.PENDING_GUIDE_ACCEPTANCE,
+                        Instant.now().plus(2, ChronoUnit.DAYS),
+                        Instant.now().plus(2, ChronoUnit.DAYS).plus(60, ChronoUnit.MINUTES));
+        b.setGuideResponseDeadlineAt(Instant.now().plus(1, ChronoUnit.HOURS));
+        b.setParticipantUserId(UUID.randomUUID());
+
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByIdAndGuideId(b.getId(), guideProfileId)).thenReturn(Optional.of(b));
+        when(bookings.save(b)).thenReturn(b);
+        stubGuideDetailLookups(b);
+
+        var resp = service().acceptBooking(guideUser, b.getId());
+        assertEquals("CONFIRMED", resp.status());
+        assertEquals(BookingStatus.CONFIRMED, b.getStatus());
+        assertNotNull(b.getConfirmedAt());
+
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory).save(audit.capture());
+        assertEquals(BookingActor.GUIDE, audit.getValue().getActorType());
+        assertEquals("GUIDE_ACCEPTED", audit.getValue().getReasonCode());
+    }
+
+    @Test
+    void acceptBooking_isIdempotent_whenAlreadyConfirmed() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.CONFIRMED,
+                        Instant.now().plus(2, ChronoUnit.DAYS),
+                        Instant.now().plus(2, ChronoUnit.DAYS).plus(60, ChronoUnit.MINUTES));
+        b.setParticipantUserId(UUID.randomUUID());
+
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByIdAndGuideId(b.getId(), guideProfileId)).thenReturn(Optional.of(b));
+        stubGuideDetailLookups(b);
+
+        var resp = service().acceptBooking(guideUser, b.getId());
+        assertEquals("CONFIRMED", resp.status());
+        verify(bookings, never()).save(any());
+        verify(statusHistory, never()).save(any());
+    }
+
+    @Test
+    void acceptBooking_rejects_whenDeadlinePassed() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.PENDING_GUIDE_ACCEPTANCE,
+                        Instant.now().plus(2, ChronoUnit.DAYS),
+                        Instant.now().plus(2, ChronoUnit.DAYS).plus(60, ChronoUnit.MINUTES));
+        b.setGuideResponseDeadlineAt(Instant.now().minus(1, ChronoUnit.MINUTES));
+
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByIdAndGuideId(b.getId(), guideProfileId)).thenReturn(Optional.of(b));
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().acceptBooking(guideUser, b.getId()));
+        assertTrue(ex.getMessage().toLowerCase().contains("expired"));
+    }
+
+    @Test
+    void acceptBooking_rejects_whenWrongStatus() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.CANCELLED_BY_PARTICIPANT,
+                        Instant.now().plus(2, ChronoUnit.DAYS),
+                        Instant.now().plus(2, ChronoUnit.DAYS).plus(60, ChronoUnit.MINUTES));
+
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByIdAndGuideId(b.getId(), guideProfileId)).thenReturn(Optional.of(b));
+
+        assertThrows(
+                ValidationException.class, () -> service().acceptBooking(guideUser, b.getId()));
+    }
+
+    @Test
+    void acceptBooking_notFound_whenNotOwned() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+        UUID bookingId = UUID.randomUUID();
+
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByIdAndGuideId(bookingId, guideProfileId)).thenReturn(Optional.empty());
+
+        assertThrows(NotFoundException.class, () -> service().acceptBooking(guideUser, bookingId));
+    }
+
+    @Test
+    void declineBooking_declinesPending_withOptionalReason() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.PENDING_GUIDE_ACCEPTANCE,
+                        Instant.now().plus(2, ChronoUnit.DAYS),
+                        Instant.now().plus(2, ChronoUnit.DAYS).plus(60, ChronoUnit.MINUTES));
+        b.setParticipantUserId(UUID.randomUUID());
+
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByIdAndGuideId(b.getId(), guideProfileId)).thenReturn(Optional.of(b));
+        when(bookings.save(b)).thenReturn(b);
+        stubGuideDetailLookups(b);
+
+        var resp =
+                service()
+                        .declineBooking(
+                                guideUser,
+                                b.getId(),
+                                new CancelBookingRequest("Schedule conflict"));
+        assertEquals(BookingStatus.DECLINED_BY_GUIDE, b.getStatus());
+        assertEquals(BookingActor.GUIDE, b.getCancellationActor());
+        assertNotNull(b.getCancelledAt());
+        assertEquals("Schedule conflict", b.getCancellationReason());
+        assertEquals("CANCELLED", resp.status()); // displayStatus for DECLINED_BY_GUIDE
+
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory).save(audit.capture());
+        assertEquals(BookingActor.GUIDE, audit.getValue().getActorType());
+        assertEquals("GUIDE_DECLINED", audit.getValue().getReasonCode());
+    }
+
+    @Test
+    void listForGuide_pending_queriesPendingStatus() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByGuideIdAndStatusInOrderByScheduledStartAtAsc(
+                        eq(guideProfileId), eq(List.of(BookingStatus.PENDING_GUIDE_ACCEPTANCE))))
+                .thenReturn(List.of());
+
+        assertTrue(
+                service()
+                        .listForGuide(guideUser, BookingService.GuideBookingFilter.PENDING)
+                        .isEmpty());
+    }
+
+    /** Name lookups for toGuideDetailResponse (participant + offering + university). */
+    private void stubGuideDetailLookups(BookingEntity b) {
+        when(offerings.findById(b.getTourOfferingId()))
+                .thenReturn(Optional.of(offering(b.getTourOfferingId(), "Campus Walk")));
+        when(users.findById(b.getParticipantUserId()))
+                .thenReturn(Optional.of(user(b.getParticipantUserId(), "Sam Rivera")));
+        when(universities.findById(b.getUniversityId()))
+                .thenReturn(Optional.of(university(b.getUniversityId(), "Test University")));
+    }
 }

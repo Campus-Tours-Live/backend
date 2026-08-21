@@ -94,6 +94,31 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String GUIDE_BOOKING_DETAIL =
+            "{\"data\":{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"status\":\"WAITING_FOR_GUIDE\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
+                    + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
+                    + "\"offeringTitle\":\"North Campus highlights\","
+                    + "\"participantName\":\"Sam Rivera\","
+                    + "\"participantNotes\":\"Please meet at the main gate.\","
+                    + "\"guideResponseDeadline\":\"2026-07-30T15:00:00Z\","
+                    + "\"universityName\":\"North Coast University\",\"durationMin\":60,"
+                    + "\"priceCents\":4200,\"currency\":\"USD\"},"
+                    + META
+                    + "}";
+
+    String GUIDE_BOOKING_LIST =
+            "{\"data\":[{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"status\":\"WAITING_FOR_GUIDE\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
+                    + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
+                    + "\"offeringTitle\":\"North Campus highlights\","
+                    + "\"participantName\":\"Sam Rivera\",\"participantNotes\":null,"
+                    + "\"guideResponseDeadline\":\"2026-07-30T15:00:00Z\","
+                    + "\"universityName\":\"North Coast University\",\"durationMin\":60,"
+                    + "\"priceCents\":4200,\"currency\":\"USD\"}],"
+                    + META
+                    + "}";
+
     String CART_LIST =
             "{\"data\":[{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
                     + "\"status\":\"DRAFT\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
