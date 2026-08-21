@@ -20,7 +20,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** CTL-50 propose. Non-owners → 404 in the service. */
 @RestController
 @RequestMapping("/bookings")
 @Tag(name = "Reschedule", description = "Propose moving a CONFIRMED booking to a new time.")
@@ -36,9 +35,7 @@ public class RescheduleController {
 
     @Operation(
             summary = "Propose a reschedule",
-            description =
-                    "PENDING_COUNTERPARTY proposal for a CONFIRMED booking; validates"
-                            + " notice/advance, availability, and slot conflicts.")
+            description = "PENDING_COUNTERPARTY proposal for a CONFIRMED booking.")
     @ApiResponse(
             responseCode = "200",
             description = "Pending proposal.",
@@ -54,14 +51,6 @@ public class RescheduleController {
                             mediaType = "application/json",
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_409)))
-    @ApiResponse(
-            responseCode = "422",
-            description = "Validation failed.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(implementation = Problem.class),
-                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
     @PostMapping("/{bookingId}/reschedule-proposals")
     public ApiEnvelope<RescheduleProposalResponse> propose(
             @PathVariable UUID bookingId, @RequestBody CreateRescheduleProposalRequest req) {

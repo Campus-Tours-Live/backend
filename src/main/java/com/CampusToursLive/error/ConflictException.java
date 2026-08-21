@@ -74,44 +74,41 @@ public final class ConflictException extends RuntimeException implements CodedPr
     }
 
     public static ConflictException bookingNotConfirmedForReschedule() {
-        return new ConflictException(
+        return reschedule(
                 "Only a confirmed booking can be rescheduled",
-                "BOOKING_NOT_CONFIRMED_FOR_RESCHEDULE",
-                Map.of());
+                "BOOKING_NOT_CONFIRMED_FOR_RESCHEDULE");
     }
 
     public static ConflictException bookingAlreadyStarted() {
-        return new ConflictException(
+        return reschedule(
                 "A booking that has already started cannot be rescheduled",
-                "BOOKING_ALREADY_STARTED",
-                Map.of());
+                "BOOKING_ALREADY_STARTED");
     }
 
     public static ConflictException rescheduleAlreadyPending() {
-        return new ConflictException(
+        return reschedule(
                 "A reschedule proposal is already pending for this booking",
-                "RESCHEDULE_ALREADY_PENDING",
-                Map.of());
+                "RESCHEDULE_ALREADY_PENDING");
     }
 
     public static ConflictException proposedOutsideAvailability() {
-        return new ConflictException(
+        return reschedule(
                 "The proposed time is outside the guide's availability",
-                "PROPOSED_OUTSIDE_AVAILABILITY",
-                Map.of());
+                "PROPOSED_OUTSIDE_AVAILABILITY");
     }
 
     public static ConflictException guideSlotConflict() {
-        return new ConflictException(
-                "The guide already has a booking at the proposed time",
-                "GUIDE_SLOT_CONFLICT",
-                Map.of());
+        return reschedule(
+                "The guide already has a booking at the proposed time", "GUIDE_SLOT_CONFLICT");
     }
 
     public static ConflictException participantSlotConflict() {
-        return new ConflictException(
+        return reschedule(
                 "The participant already has a booking that overlaps the proposed time",
-                "PARTICIPANT_SLOT_CONFLICT",
-                Map.of());
+                "PARTICIPANT_SLOT_CONFLICT");
+    }
+
+    private static ConflictException reschedule(String message, String code) {
+        return new ConflictException(message, code, Map.of());
     }
 }

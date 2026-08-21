@@ -19,7 +19,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
 class RescheduleControllerTest {
-
     @Mock CurrentUser currentUser;
     @Mock RescheduleService rescheduleService;
 
@@ -44,7 +43,7 @@ class RescheduleControllerTest {
                 .thenReturn(
                         new ProvisionedAccount(
                                 userId,
-                                "sub",
+                                "s",
                                 "a@b.c",
                                 "A",
                                 "B",

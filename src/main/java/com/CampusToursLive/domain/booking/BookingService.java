@@ -65,21 +65,20 @@ public class BookingService {
             List.of(BookingStatus.PENDING_PAYMENT_AUTH, BookingStatus.PAYMENT_ACTION_REQUIRED);
 
     /**
-     * Statuses that hold a slot — mirrors the WHERE clause of the DB exclusion constraints.
-     * Package-private (not {@code private}) so {@link SlotGenerationService} can subtract the SAME
-     * set of held bookings from candidate slots — a CONFIRMED-only view (like {@link
-     * BookingRepository
-     * #findByGuideIdAndStatusAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc}, used
-     * by Task 7) would under-count what actually occupies a guide's calendar.
+     * Statuses that hold a slot (DB exclusion mirrors). Package-private for {@link
+     * SlotGenerationService}; other packages use {@link #slotHoldingStatuses()}.
      */
-    /** Shared with reschedule overlap probes (CTL-50). */
-    public static final List<BookingStatus> SLOT_HOLDING_STATUSES =
+    static final List<BookingStatus> SLOT_HOLDING_STATUSES =
             List.of(
                     BookingStatus.PENDING_PAYMENT_AUTH,
                     BookingStatus.PENDING_GUIDE_ACCEPTANCE,
                     BookingStatus.PAYMENT_ACTION_REQUIRED,
                     BookingStatus.CONFIRMED,
                     BookingStatus.IN_PROGRESS);
+
+    public static List<BookingStatus> slotHoldingStatuses() {
+        return SLOT_HOLDING_STATUSES;
+    }
 
     /** Statuses a participant may cancel from (before the tour starts). */
     private static final List<BookingStatus> PARTICIPANT_CANCELLABLE_STATUSES =

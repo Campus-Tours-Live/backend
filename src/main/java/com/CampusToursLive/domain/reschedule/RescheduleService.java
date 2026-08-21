@@ -136,7 +136,7 @@ public class RescheduleService {
                 .existsByIdNotAndGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
                         booking.getId(),
                         booking.getGuideId(),
-                        BookingService.SLOT_HOLDING_STATUSES,
+                        BookingService.slotHoldingStatuses(),
                         reservedEnd,
                         reservedStart)) {
             throw ConflictException.guideSlotConflict();
@@ -145,7 +145,7 @@ public class RescheduleService {
                 .existsByIdNotAndParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
                         booking.getId(),
                         booking.getParticipantUserId(),
-                        BookingService.SLOT_HOLDING_STATUSES,
+                        BookingService.slotHoldingStatuses(),
                         proposedEnd,
                         proposedStart)) {
             throw ConflictException.participantSlotConflict();
