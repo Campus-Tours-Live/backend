@@ -209,4 +209,10 @@ public class GuideController {
                 req.degree(),
                 req.entryYear());
     }
+
+    // temp controller test
+    @GetMapping("/examtest")
+    public String tempAPTTest() {
+        return "OK";
+    }
 }

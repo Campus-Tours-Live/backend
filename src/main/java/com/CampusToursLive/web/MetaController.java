@@ -242,4 +242,10 @@ public class MetaController {
                 .header(HttpHeaders.CACHE_CONTROL, "public, max-age=" + snap.cacheMaxAgeSeconds())
                 .body(ApiEnvelope.of(body));
     }
+
+    // temp controller test
+    @GetMapping("/examtest")
+    public String tempAPTTest() {
+        return "OK";
+    }
 }
