@@ -161,4 +161,10 @@ public class GuideOfferingController {
                     UUID id) {
         return ApiEnvelope.of(offerings.activate(currentUser.requireRole(UserRole.GUIDE), id));
     }
+
+    // temp controller test
+    @GetMapping("/examtest")
+    public String tempAPTTest() {
+        return "OK";
+    }
 }

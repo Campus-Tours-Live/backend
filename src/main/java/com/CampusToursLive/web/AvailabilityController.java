@@ -1031,4 +1031,10 @@ public class AvailabilityController {
                                                         + " first"));
         return guide.getId();
     }
+
+    // temp controller test
+    @GetMapping("/examtest")
+    public String tempAPTTest() {
+        return "OK";
+    }
 }

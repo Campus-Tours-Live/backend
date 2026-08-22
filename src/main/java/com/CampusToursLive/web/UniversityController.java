@@ -186,4 +186,10 @@ public class UniversityController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, "public, max-age=" + DIRECTORY_MAX_AGE_SECONDS);
     }
+
+    // temp controller test
+    @GetMapping("/examtest")
+    public String tempAPTTest() {
+        return "OK";
+    }
 }

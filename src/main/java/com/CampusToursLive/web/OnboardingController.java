@@ -152,4 +152,10 @@ public class OnboardingController {
             @Valid @RequestBody ParticipantOnboardingRequest req) {
         return ApiEnvelope.of(onboardingService.onboardParticipant(jwt, req));
     }
+
+    // temp controller test
+    @GetMapping("/examtest")
+    public String tempAPTTest() {
+        return "OK";
+    }
 }
