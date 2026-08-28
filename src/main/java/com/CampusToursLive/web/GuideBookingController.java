@@ -88,6 +88,32 @@ public class GuideBookingController {
     }
 
     @Operation(
+            summary = "Get a guide booking",
+            description =
+                    "Returns one booking owned by the current guide, including the status audit"
+                            + " trail.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The booking detail.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples =
+                                    @ExampleObject(value = ApiExamples.GUIDE_BOOKING_FULL_DETAIL)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "Booking not found for this guide.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @GetMapping("/{id}")
+    public ApiEnvelope<GuideBookingDetailResponse> get(@PathVariable UUID id) {
+        return ApiEnvelope.of(bookings.getForGuide(currentUser.requireRole(UserRole.GUIDE), id));
+    }
+
+    @Operation(
             summary = "Accept a booking request",
             description =
                     "Confirms a PENDING_GUIDE_ACCEPTANCE booking owned by the current guide."

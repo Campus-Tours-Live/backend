@@ -82,6 +82,7 @@ class BookingServiceTest {
         b.setScheduledEndAt(end);
         b.setBasePriceCents(5000L);
         b.setCurrency("USD");
+        b.setBookingNumber("CTL-TEST-001");
         return b;
     }
 
@@ -2121,5 +2122,49 @@ class BookingServiceTest {
                 .thenReturn(Optional.of(user(b.getParticipantUserId(), "Sam Rivera")));
         when(universities.findById(b.getUniversityId()))
                 .thenReturn(Optional.of(university(b.getUniversityId(), "Test University")));
+    }
+
+    @Test
+    void getForGuide_returnsDetailWithStatusHistory() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.CONFIRMED,
+                        Instant.parse("2026-08-01T15:00:00Z"),
+                        Instant.parse("2026-08-01T16:00:00Z"));
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByIdAndGuideId(b.getId(), guideProfileId)).thenReturn(Optional.of(b));
+        stubGuideDetailLookups(b);
+
+        BookingStatusHistoryEntity created = new BookingStatusHistoryEntity();
+        created.setNewStatus(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
+        created.setActorType(BookingActor.PARTICIPANT);
+        created.setReasonCode("PARTICIPANT_CREATED");
+        created.setCreatedAt(Instant.parse("2026-07-29T10:00:00Z"));
+
+        BookingStatusHistoryEntity accepted = new BookingStatusHistoryEntity();
+        accepted.setPreviousStatus(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
+        accepted.setNewStatus(BookingStatus.CONFIRMED);
+        accepted.setActorType(BookingActor.GUIDE);
+        accepted.setReasonCode("GUIDE_ACCEPTED");
+        accepted.setCreatedAt(Instant.parse("2026-07-29T11:00:00Z"));
+
+        when(statusHistory.findByBookingIdOrderByCreatedAtAsc(b.getId()))
+                .thenReturn(List.of(created, accepted));
+
+        var resp = service().getForGuide(guideUser, b.getId());
+
+        assertEquals("CTL-TEST-001", resp.bookingNumber());
+        assertEquals("CONFIRMED", resp.status());
+        assertNotNull(resp.statusHistory());
+        assertEquals(2, resp.statusHistory().size());
+        assertEquals("GUIDE_ACCEPTED", resp.statusHistory().get(1).reasonCode());
     }
 }

@@ -52,6 +52,7 @@ class GuideBookingControllerTest {
     private static GuideBookingDetailResponse detail(String id, String status) {
         return new GuideBookingDetailResponse(
                 id,
+                "CTL-2026-00042",
                 status,
                 "2026-08-01T15:00:00Z",
                 "o1",
@@ -62,7 +63,8 @@ class GuideBookingControllerTest {
                 "Test University",
                 60,
                 4200L,
-                "USD");
+                "USD",
+                null);
     }
 
     @Test
@@ -160,5 +162,28 @@ class GuideBookingControllerTest {
 
         mvc.perform(get("/guide/bookings").param("filter", "nope"))
                 .andExpect(status().isUnprocessableEntity());
+    }
+
+    @Test
+    void get_returnsEnvelope_whenAuthorized() throws Exception {
+        UserEntity u = user();
+        UUID id = UUID.randomUUID();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(bookings.getForGuide(u, id)).thenReturn(detail(id.toString(), "CONFIRMED"));
+
+        mvc.perform(get("/guide/bookings/" + id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(id.toString()))
+                .andExpect(jsonPath("$.data.bookingNumber").value("CTL-2026-00042"));
+    }
+
+    @Test
+    void get_mapsNotFound() throws Exception {
+        UserEntity u = user();
+        UUID id = UUID.randomUUID();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(bookings.getForGuide(u, id)).thenThrow(new NotFoundException("Booking not found"));
+
+        mvc.perform(get("/guide/bookings/" + id)).andExpect(status().isNotFound());
     }
 }

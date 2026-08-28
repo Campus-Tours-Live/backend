@@ -1,6 +1,8 @@
 package com.CampusToursLive.web.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.util.List;
 
 /**
  * A guide's booking, flattened for the booking inbox. Combines fields from the booking, its
@@ -10,7 +12,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * the internal {@code BookingStatus} by {@code BookingStatus.displayStatus()}.
  *
  * <p>Time fields are ISO-8601 strings (UTC). {@code guideResponseDeadline} is null when the booking
- * has no response deadline.
+ * has no response deadline. {@code statusHistory} is populated on GET /guide/bookings/{id} only.
  */
 @Schema(
         name = "GuideBookingDetailResponse",
@@ -21,6 +23,11 @@ public record GuideBookingDetailResponse(
                         example = "b1a2c3d4-0000-4000-8000-000000000001",
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 String id,
+        @Schema(
+                        description = "Human-readable booking reference.",
+                        example = "CTL-2026-00042",
+                        requiredMode = Schema.RequiredMode.REQUIRED)
+                String bookingNumber,
         @Schema(
                         description =
                                 "Frontend-facing booking status mapped from the internal"
@@ -79,4 +86,11 @@ public record GuideBookingDetailResponse(
                         description = "ISO-4217 currency code for priceCents.",
                         example = "USD",
                         requiredMode = Schema.RequiredMode.REQUIRED)
-                String currency) {}
+                String currency,
+        @Schema(
+                        description =
+                                "Status transition audit trail; present on GET /guide/bookings/{id}"
+                                        + " only.",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                @JsonInclude(JsonInclude.Include.NON_NULL)
+                List<GuideBookingStatusEventResponse> statusHistory) {}

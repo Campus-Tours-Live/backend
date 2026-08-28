@@ -20,6 +20,7 @@ import com.CampusToursLive.web.dto.BookingDetailResponse;
 import com.CampusToursLive.web.dto.CancelBookingRequest;
 import com.CampusToursLive.web.dto.CreateBookingRequest;
 import com.CampusToursLive.web.dto.GuideBookingDetailResponse;
+import com.CampusToursLive.web.dto.GuideBookingStatusEventResponse;
 import com.CampusToursLive.web.dto.PendingActionsResponse;
 import java.security.SecureRandom;
 import java.time.Duration;
@@ -719,6 +720,20 @@ public class BookingService {
         return rows.stream().map(this::toGuideDetailResponse).toList();
     }
 
+    /** Fetch one booking owned by this guide, including the status audit trail. */
+    @Transactional(readOnly = true)
+    public GuideBookingDetailResponse getForGuide(UserEntity guideUser, UUID bookingId) {
+        GuideProfileEntity guide = requireGuideProfile(guideUser);
+        BookingEntity b =
+                bookings.findByIdAndGuideId(bookingId, guide.getId())
+                        .orElseThrow(() -> new NotFoundException("Booking not found"));
+        List<GuideBookingStatusEventResponse> history =
+                statusHistory.findByBookingIdOrderByCreatedAtAsc(b.getId()).stream()
+                        .map(this::toGuideStatusEvent)
+                        .toList();
+        return toGuideDetailResponse(b, history);
+    }
+
     /**
      * Accept a pending booking. Idempotent when already CONFIRMED for this guide. Rejects when the
      * response deadline has passed.
@@ -843,6 +858,11 @@ public class BookingService {
     }
 
     private GuideBookingDetailResponse toGuideDetailResponse(BookingEntity b) {
+        return toGuideDetailResponse(b, null);
+    }
+
+    private GuideBookingDetailResponse toGuideDetailResponse(
+            BookingEntity b, List<GuideBookingStatusEventResponse> statusHistoryEvents) {
         String offeringTitle = resolveOfferingTitle(b.getTourOfferingId());
         String participantName = resolveParticipantName(b.getParticipantUserId());
         String universityName = resolveUniversityName(b.getUniversityId());
@@ -855,6 +875,7 @@ public class BookingService {
 
         return new GuideBookingDetailResponse(
                 b.getId().toString(),
+                b.getBookingNumber(),
                 b.getStatus().displayStatus(),
                 b.getScheduledStartAt().toString(),
                 b.getTourOfferingId().toString(),
@@ -865,7 +886,19 @@ public class BookingService {
                 universityName,
                 durationMin,
                 b.getBasePriceCents(),
-                b.getCurrency());
+                b.getCurrency(),
+                statusHistoryEvents);
+    }
+
+    private GuideBookingStatusEventResponse toGuideStatusEvent(BookingStatusHistoryEntity h) {
+        String previous =
+                h.getPreviousStatus() != null ? h.getPreviousStatus().displayStatus() : null;
+        return new GuideBookingStatusEventResponse(
+                h.getNewStatus().displayStatus(),
+                previous,
+                h.getActorType().name(),
+                h.getReasonCode(),
+                h.getCreatedAt().toString());
     }
 
     private String resolveOfferingTitle(UUID offeringId) {
