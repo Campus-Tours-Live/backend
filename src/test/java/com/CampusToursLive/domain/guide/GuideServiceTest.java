@@ -928,7 +928,7 @@ class GuideServiceTest {
                         "CS",
                         "2026",
                         "bio",
-                        List.of("en-US", "fr-FR"),
+                        List.of("en-US", "fr"),
                         List.of("GENERAL_CAMPUS"),
                         null,
                         false,
@@ -1660,6 +1660,32 @@ class GuideServiceTest {
         GuideProfileResponse res = service().updateProfile(u, r);
 
         assertEquals(List.of("en-US"), res.spokenLanguages());
+    }
+
+    @Test
+    void update_throws422_whenSpokenLanguageUnsupported() {
+        UUID uid = UUID.randomUUID();
+        UUID uni = UUID.randomUUID();
+        UserEntity u = user(uid);
+        when(universities.existsById(uni)).thenReturn(true);
+        when(guides.findByUserId(uid)).thenReturn(Optional.empty());
+
+        GuideProfileUpdateRequest r =
+                new GuideProfileUpdateRequest(
+                        null,
+                        null,
+                        uni.toString(),
+                        "CS",
+                        null,
+                        null,
+                        List.of("xx-YY"),
+                        null,
+                        null,
+                        false,
+                        "Bachelor's Degree",
+                        VALID_ENTRY_YEAR);
+
+        assertThrows(ValidationException.class, () -> service().updateProfile(u, r));
     }
 
     @Test
