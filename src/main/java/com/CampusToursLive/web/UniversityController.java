@@ -1,17 +1,21 @@
 package com.CampusToursLive.web;
 
+import com.CampusToursLive.domain.university.UniversityReadService;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.UniversityDirectory;
 import com.CampusToursLive.integration.scorecard.UniversityDirectory.DirectorySchool;
 import com.CampusToursLive.integration.scorecard.UniversityDirectory.Snapshot;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
+import com.CampusToursLive.web.dto.Problem;
 import com.CampusToursLive.web.dto.StateUniversitiesResponse;
 import com.CampusToursLive.web.dto.StateUniversityCountsResponse;
+import com.CampusToursLive.web.dto.UniversityDetailResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -21,6 +25,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -36,10 +41,21 @@ import org.springframework.web.server.ResponseStatusException;
  * searches this same population (see the directory boundary on {@code ScorecardApi}).
  *
  * <p>Public, like the tour catalog: this is what an anonymous visitor came to look at.
+ *
+ * <p><strong>Two populations live here, and the difference is load-bearing.</strong> The two browse
+ * endpoints read the national College Scorecard directory — every U.S. school, whether or not it
+ * has anything to do with this platform. {@code GET /universities/{slug}} reads the {@code
+ * universities} table: only the schools actually onboarded, the ones that can carry a tour. The
+ * browse list is therefore far larger than the set of slugs that resolve, and a 404 from the detail
+ * endpoint usually means "real school, not on the platform" rather than "no such school".
  */
 @RestController
 @RequestMapping("/universities")
-@Tag(name = "Universities", description = "The browsable U.S. university directory, by state.")
+@Tag(
+        name = "Universities",
+        description =
+                "The browsable U.S. university directory by state, plus the profile of a single"
+                        + " university onboarded onto the platform.")
 public class UniversityController {
 
     /**
@@ -50,9 +66,12 @@ public class UniversityController {
     private static final long DIRECTORY_MAX_AGE_SECONDS = 86_400;
 
     private final UniversityDirectory directory;
+    private final UniversityReadService platformUniversities;
 
-    public UniversityController(UniversityDirectory directory) {
+    public UniversityController(
+            UniversityDirectory directory, UniversityReadService platformUniversities) {
         this.directory = directory;
+        this.platformUniversities = platformUniversities;
     }
 
     @Operation(
@@ -160,6 +179,69 @@ public class UniversityController {
                         ApiEnvelope.of(
                                 new StateUniversitiesResponse(
                                         code, universities, universities.size())));
+    }
+
+    @Operation(
+            summary = "Get one university",
+            description =
+                    "One platform university's public profile, addressed by slug, plus how many"
+                            + " bookable tours it has and what the cheapest one costs. Public:"
+                            + " served anonymously.\n\n"
+                            + "Serves the **platform** population — the schools onboarded onto"
+                            + " Campus Tours Live — which is a small subset of the national"
+                            + " directory the two endpoints above browse. A school that appears in"
+                            + " GET /universities?state= but has never been onboarded has no"
+                            + " profile here and answers 404; a caller listing a state should not"
+                            + " link every row to this endpoint.\n\n"
+                            + "Not cacheable, unlike its two siblings: their day-long max-age suits"
+                            + " annually-published directory data, but tourCount and fromPriceCents"
+                            + " change the moment a guide activates or pauses an offering.")
+    @ApiResponses({
+        @ApiResponse(
+                responseCode = "200",
+                description = "The university profile.",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                examples = {
+                                    @ExampleObject(
+                                            name = "hasTours",
+                                            value = ApiExamples.UNIVERSITY_DETAIL),
+                                    @ExampleObject(
+                                            name = "noToursYet",
+                                            value = ApiExamples.UNIVERSITY_DETAIL_NO_TOURS)
+                                })),
+        @ApiResponse(
+                responseCode = "404",
+                description =
+                        "No platform university carries that slug — either the slug is wrong, or"
+                                + " the school exists in the national directory but has not been"
+                                + " onboarded.",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = Problem.class),
+                                examples = @ExampleObject(value = ApiExamples.PROBLEM_404))),
+        @ApiResponse(
+                responseCode = "422",
+                description = "`slug` is blank.",
+                content =
+                        @Content(
+                                mediaType = "application/json",
+                                schema = @Schema(implementation = Problem.class),
+                                examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    })
+    @GetMapping("/{slug}")
+    public ApiEnvelope<UniversityDetailResponse> bySlug(
+            @Parameter(
+                            description =
+                                    "URL-safe slug of the university, as returned in a tour's"
+                                            + " universitySlug.",
+                            example = "north-coast",
+                            required = true)
+                    @PathVariable
+                    String slug) {
+        return ApiEnvelope.of(platformUniversities.getBySlug(slug));
     }
 
     /**
