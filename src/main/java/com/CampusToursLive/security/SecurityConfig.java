@@ -64,7 +64,12 @@ public class SecurityConfig {
                                                 // reason the tour catalog is — it is what an
                                                 // anonymous visitor came to look at.
                                                 "/universities",
-                                                "/universities/**")
+                                                "/universities/**",
+                                                // Published reviews on a guide/offering page —
+                                                // public for the same reason: marketplace content
+                                                // an anonymous visitor reads before signing in.
+                                                "/guides/*/reviews",
+                                                "/offerings/*/reviews")
                                         .permitAll()
                                         .requestMatchers(
                                                 org.springframework.http.HttpMethod.HEAD,
@@ -76,7 +81,12 @@ public class SecurityConfig {
                                                 // reason the tour catalog is — it is what an
                                                 // anonymous visitor came to look at.
                                                 "/universities",
-                                                "/universities/**")
+                                                "/universities/**",
+                                                // Published reviews on a guide/offering page —
+                                                // public for the same reason: marketplace content
+                                                // an anonymous visitor reads before signing in.
+                                                "/guides/*/reviews",
+                                                "/offerings/*/reviews")
                                         .permitAll()
                                         .anyRequest()
                                         .authenticated())
