@@ -385,6 +385,7 @@ class TourDiscoveryServiceTest {
         assertEquals("Campus walk", res.title());
         assertEquals("A great tour", res.description());
         assertEquals(List.of("en-US"), res.languages());
+        assertEquals(List.of("Q_AND_A"), res.features());
         assertEquals("north-coast", res.universitySlug());
         assertEquals("Bio text", res.guideBio());
         assertEquals("https://r2.example/Stanford%20University.png", res.universityImageUrl());
