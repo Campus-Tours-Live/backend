@@ -74,6 +74,17 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
             findByGuideIdAndStatusInAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc(
                     UUID guideId, List<BookingStatus> statuses, Instant from);
 
+    /** Guide past terminal outcomes (completed / no-show): newest scheduled start first. */
+    List<BookingEntity> findByGuideIdAndStatusInOrderByScheduledStartAtDesc(
+            UUID guideId, List<BookingStatus> statuses);
+
+    /**
+     * Guide overdue confirmed tours: statuses whose scheduled end is already past, newest first.
+     */
+    List<BookingEntity>
+            findByGuideIdAndStatusInAndScheduledEndAtLessThanOrderByScheduledStartAtDesc(
+                    UUID guideId, List<BookingStatus> statuses, Instant before);
+
     /**
      * Does any slot-holding booking already reserve part of [{@code newStart}, {@code newEnd}) for
      * this guide? Two intervals overlap iff existing.start &lt; new.end AND existing.end &gt;

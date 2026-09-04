@@ -178,6 +178,46 @@ class GuideBookingControllerTest {
     }
 
     @Test
+    void complete_returnsCompleted() throws Exception {
+        UserEntity u = user();
+        UUID id = UUID.randomUUID();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(bookings.completeBooking(u, id)).thenReturn(detail(id.toString(), "COMPLETED"));
+
+        mvc.perform(post("/guide/bookings/" + id + "/complete"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"));
+    }
+
+    @Test
+    void noShow_passesOptionalBody() throws Exception {
+        UserEntity u = user();
+        UUID id = UUID.randomUUID();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(bookings.markParticipantNoShow(eq(u), eq(id), any(CancelBookingRequest.class)))
+                .thenReturn(detail(id.toString(), "PARTICIPANT_NO_SHOW"));
+
+        mvc.perform(
+                        post("/guide/bookings/" + id + "/no-show")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"reason\":\"Never arrived\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PARTICIPANT_NO_SHOW"));
+    }
+
+    @Test
+    void list_past_filter() throws Exception {
+        UserEntity u = user();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(bookings.listForGuide(u, GuideBookingFilter.PAST))
+                .thenReturn(List.of(detail("b-past", "COMPLETED")));
+
+        mvc.perform(get("/guide/bookings").param("filter", "past"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].status").value("COMPLETED"));
+    }
+
+    @Test
     void get_mapsNotFound() throws Exception {
         UserEntity u = user();
         UUID id = UUID.randomUUID();

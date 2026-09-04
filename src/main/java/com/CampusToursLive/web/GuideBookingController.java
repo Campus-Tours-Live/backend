@@ -36,8 +36,9 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(
         name = "Guide bookings",
         description =
-                "Guide booking inbox: list pending and upcoming tours, accept or decline requests."
-                        + " Every operation requires the GUIDE role.")
+                "Guide booking inbox: list pending, upcoming, and past tours; accept, decline,"
+                        + " complete, or mark participant no-show. Every operation requires the"
+                        + " GUIDE role.")
 public class GuideBookingController {
 
     private final CurrentUser currentUser;
@@ -52,7 +53,9 @@ public class GuideBookingController {
             summary = "List guide bookings",
             description =
                     "Lists this guide's bookings. filter=pending (awaiting accept/decline),"
-                            + " upcoming (CONFIRMED starting now or later), or all (default).")
+                            + " upcoming (CONFIRMED starting now or later), past (completed /"
+                            + " no-show / overdue confirmed, newest first), or all (pending +"
+                            + " upcoming; default).")
     @ApiResponse(
             responseCode = "200",
             description = "The guide's bookings for the requested filter.",
@@ -78,7 +81,7 @@ public class GuideBookingController {
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
     @GetMapping
     public ApiEnvelope<List<GuideBookingDetailResponse>> list(
-            @Parameter(description = "pending | upcoming | all (default all)")
+            @Parameter(description = "pending | upcoming | past | all (default all)")
                     @RequestParam(required = false)
                     String filter) {
         return ApiEnvelope.of(
@@ -211,5 +214,107 @@ public class GuideBookingController {
             @PathVariable UUID id, @RequestBody(required = false) CancelBookingRequest body) {
         return ApiEnvelope.of(
                 bookings.declineBooking(currentUser.requireRole(UserRole.GUIDE), id, body));
+    }
+
+    @Operation(
+            summary = "Mark a booking completed",
+            description =
+                    "Marks a CONFIRMED (or IN_PROGRESS) booking as COMPLETED after its scheduled"
+                            + " start. Idempotent if already COMPLETED.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The completed booking.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_DETAIL)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "Booking not found for this guide.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @ApiResponse(
+            responseCode = "422",
+            description = "Booking cannot be completed (wrong status or not yet started).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @PostMapping("/{id}/complete")
+    public ApiEnvelope<GuideBookingDetailResponse> complete(@PathVariable UUID id) {
+        return ApiEnvelope.of(
+                bookings.completeBooking(currentUser.requireRole(UserRole.GUIDE), id));
+    }
+
+    @Operation(
+            summary = "Mark participant no-show",
+            description =
+                    "Marks a CONFIRMED (or IN_PROGRESS) booking as PARTICIPANT_NO_SHOW after its"
+                            + " scheduled start. Idempotent if already PARTICIPANT_NO_SHOW. Optional"
+                            + " reason body.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The no-show booking.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_DETAIL)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "Booking not found for this guide.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @ApiResponse(
+            responseCode = "422",
+            description = "Booking cannot be marked no-show (wrong status or not yet started).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @PostMapping("/{id}/no-show")
+    public ApiEnvelope<GuideBookingDetailResponse> noShow(
+            @PathVariable UUID id, @RequestBody(required = false) CancelBookingRequest body) {
+        return ApiEnvelope.of(
+                bookings.markParticipantNoShow(currentUser.requireRole(UserRole.GUIDE), id, body));
     }
 }

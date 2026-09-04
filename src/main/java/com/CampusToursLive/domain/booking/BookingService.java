@@ -666,10 +666,11 @@ public class BookingService {
     // Guide inbox (accept / decline)
     // ---------------------------------------------------------------------------
 
-    /** Inbox filter: pending response queue, confirmed upcoming, or both. */
+    /** Inbox filter: pending response queue, confirmed upcoming, past outcomes, or inbox both. */
     public enum GuideBookingFilter {
         PENDING,
         UPCOMING,
+        PAST,
         ALL;
 
         public static GuideBookingFilter fromParam(String raw) {
@@ -677,17 +678,28 @@ public class BookingService {
             return switch (raw.trim().toLowerCase()) {
                 case "pending" -> PENDING;
                 case "upcoming" -> UPCOMING;
+                case "past" -> PAST;
                 case "all" -> ALL;
                 default ->
                         throw new ValidationException(
-                                "filter must be one of: pending, upcoming, all");
+                                "filter must be one of: pending, upcoming, past, all");
             };
         }
     }
 
+    private static final List<BookingStatus> PAST_TERMINAL_STATUSES =
+            List.of(
+                    BookingStatus.COMPLETED,
+                    BookingStatus.PARTICIPANT_NO_SHOW,
+                    BookingStatus.GUIDE_NO_SHOW);
+
+    private static final List<BookingStatus> PAST_OVERDUE_STATUSES =
+            List.of(BookingStatus.CONFIRMED, BookingStatus.IN_PROGRESS);
+
     /**
      * List this guide's bookings for the inbox. {@code pending} = awaiting accept/decline; {@code
-     * upcoming} = CONFIRMED starting now or later; {@code all} = both, chronological.
+     * upcoming} = CONFIRMED starting now or later; {@code past} = completed / no-show / overdue
+     * confirmed (newest first); {@code all} = pending + upcoming only.
      */
     @Transactional(readOnly = true)
     public List<GuideBookingDetailResponse> listForGuide(
@@ -703,6 +715,16 @@ public class BookingService {
                             bookings
                                     .findByGuideIdAndStatusInAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc(
                                             guide.getId(), List.of(BookingStatus.CONFIRMED), now);
+                    case PAST -> {
+                        List<BookingEntity> terminal =
+                                bookings.findByGuideIdAndStatusInOrderByScheduledStartAtDesc(
+                                        guide.getId(), PAST_TERMINAL_STATUSES);
+                        List<BookingEntity> overdue =
+                                bookings
+                                        .findByGuideIdAndStatusInAndScheduledEndAtLessThanOrderByScheduledStartAtDesc(
+                                                guide.getId(), PAST_OVERDUE_STATUSES, now);
+                        yield mergeByScheduledStartDesc(terminal, overdue);
+                    }
                     case ALL -> {
                         List<BookingEntity> pending =
                                 bookings.findByGuideIdAndStatusInOrderByScheduledStartAtAsc(
@@ -795,12 +817,92 @@ public class BookingService {
         return toGuideDetailResponse(b);
     }
 
+    /**
+     * Mark a started confirmed tour as completed. Idempotent when already COMPLETED for this guide.
+     */
+    @Transactional
+    public GuideBookingDetailResponse completeBooking(UserEntity guideUser, UUID bookingId) {
+        GuideProfileEntity guide = requireGuideProfile(guideUser);
+        BookingEntity b =
+                bookings.findByIdAndGuideId(bookingId, guide.getId())
+                        .orElseThrow(() -> new NotFoundException("Booking not found"));
+
+        if (b.getStatus() == BookingStatus.COMPLETED) {
+            return toGuideDetailResponse(b); // idempotent
+        }
+        requireStartedConfirmedTour(b);
+
+        BookingStatus previous = b.getStatus();
+        Instant now = Instant.now();
+        b.setStatus(BookingStatus.COMPLETED);
+        b.setCompletedAt(now);
+        bookings.save(b);
+        recordTransition(
+                b, previous, BookingActor.GUIDE, guideUser.getId(), "GUIDE_MARKED_COMPLETED");
+        return toGuideDetailResponse(b);
+    }
+
+    /**
+     * Mark a started confirmed tour as participant no-show. Idempotent when already
+     * PARTICIPANT_NO_SHOW. Optional reason body.
+     */
+    @Transactional
+    public GuideBookingDetailResponse markParticipantNoShow(
+            UserEntity guideUser, UUID bookingId, CancelBookingRequest req) {
+        GuideProfileEntity guide = requireGuideProfile(guideUser);
+        BookingEntity b =
+                bookings.findByIdAndGuideId(bookingId, guide.getId())
+                        .orElseThrow(() -> new NotFoundException("Booking not found"));
+
+        if (b.getStatus() == BookingStatus.PARTICIPANT_NO_SHOW) {
+            return toGuideDetailResponse(b); // idempotent
+        }
+        requireStartedConfirmedTour(b);
+
+        BookingStatus previous = b.getStatus();
+        Instant now = Instant.now();
+        b.setStatus(BookingStatus.PARTICIPANT_NO_SHOW);
+        b.setCancellationActor(BookingActor.GUIDE);
+        b.setCancelledAt(now);
+        if (req != null) {
+            b.setCancellationReason(cleanFreeText(req.reason(), "reason"));
+        }
+        bookings.save(b);
+        recordTransition(
+                b,
+                previous,
+                BookingActor.GUIDE,
+                guideUser.getId(),
+                "GUIDE_MARKED_PARTICIPANT_NO_SHOW");
+        return toGuideDetailResponse(b);
+    }
+
+    /** CONFIRMED or IN_PROGRESS with scheduled start at or before now. */
+    private static void requireStartedConfirmedTour(BookingEntity b) {
+        if (b.getStatus() != BookingStatus.CONFIRMED
+                && b.getStatus() != BookingStatus.IN_PROGRESS) {
+            throw new ValidationException("This booking cannot be updated");
+        }
+        if (b.getScheduledStartAt().isAfter(Instant.now())) {
+            throw new ValidationException("This tour has not started yet");
+        }
+    }
+
     private static List<BookingEntity> mergeByScheduledStart(
             List<BookingEntity> a, List<BookingEntity> b) {
         java.util.ArrayList<BookingEntity> out = new java.util.ArrayList<>(a.size() + b.size());
         out.addAll(a);
         out.addAll(b);
         out.sort(java.util.Comparator.comparing(BookingEntity::getScheduledStartAt));
+        return out;
+    }
+
+    private static List<BookingEntity> mergeByScheduledStartDesc(
+            List<BookingEntity> a, List<BookingEntity> b) {
+        java.util.ArrayList<BookingEntity> out = new java.util.ArrayList<>(a.size() + b.size());
+        out.addAll(a);
+        out.addAll(b);
+        out.sort(java.util.Comparator.comparing(BookingEntity::getScheduledStartAt).reversed());
         return out;
     }
 
