@@ -21,8 +21,10 @@ import com.CampusToursLive.domain.user.AccountStatus;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.error.ConflictException;
+import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateReviewRequest;
+import com.CampusToursLive.web.dto.GuideReviewResponseRequest;
 import com.CampusToursLive.web.dto.ReviewResponse;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -200,6 +202,44 @@ class ReviewIntegrationTest {
         assertThat(resp.overallRating()).isEqualTo(4);
         assertThat(resp.comment()).isEqualTo("nice");
         assertThat(resp.privateFeedback()).isEqualTo("private note");
+    }
+
+    @Test
+    void respondToReview_persistsGuideResponse() {
+        BookingEntity booking = bookings.saveAndFlush(completedBooking(3));
+        ReviewResponse created =
+                service.createReview(
+                        participant,
+                        booking.getId(),
+                        new CreateReviewRequest(5, null, null, null, null, "loved it", null));
+        UUID reviewId = UUID.fromString(created.id());
+
+        ReviewResponse updated =
+                service.respondToReview(
+                        guide.getId(), reviewId, new GuideReviewResponseRequest("Thank you!"));
+
+        assertThat(updated.guideResponse()).isEqualTo("Thank you!");
+        assertThat(reviews.findById(reviewId).orElseThrow().getGuideResponse())
+                .isEqualTo("Thank you!");
+    }
+
+    @Test
+    void respondToReview_byAnotherGuide_isRejected() {
+        BookingEntity booking = bookings.saveAndFlush(completedBooking(3));
+        ReviewResponse created =
+                service.createReview(
+                        participant,
+                        booking.getId(),
+                        new CreateReviewRequest(5, null, null, null, null, null, null));
+        UUID reviewId = UUID.fromString(created.id());
+
+        assertThatThrownBy(
+                        () ->
+                                service.respondToReview(
+                                        UUID.randomUUID(), // not this review's guide
+                                        reviewId,
+                                        new GuideReviewResponseRequest("hi")))
+                .isInstanceOf(NotFoundException.class);
     }
 
     private BigDecimal guideAvg() {
