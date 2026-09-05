@@ -10,6 +10,7 @@ import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateReviewRequest;
+import com.CampusToursLive.web.dto.GuideReviewResponseRequest;
 import com.CampusToursLive.web.dto.ReviewResponse;
 import java.time.Instant;
 import java.util.UUID;
@@ -139,10 +140,42 @@ public class ReviewService {
         return toResponse(review);
     }
 
+    /**
+     * Set (or replace) the guide's public response to a review of their own tour.
+     *
+     * @throws NotFoundException the review does not exist, or its guide is not the caller — same
+     *     404 either way, so one guide can't probe for another's reviews.
+     * @throws ValidationException the response text is blank or too long.
+     */
+    @Transactional
+    public ReviewResponse respondToReview(
+            UUID guideProfileId, UUID reviewId, GuideReviewResponseRequest req) {
+        String response = requireText(req.response(), "response");
+        ReviewEntity review =
+                reviews.findById(reviewId)
+                        .filter(r -> r.getGuideId().equals(guideProfileId))
+                        .orElseThrow(() -> new NotFoundException("Review not found"));
+        review.setGuideResponse(response);
+        reviews.save(review);
+        return toResponse(review);
+    }
+
     private BookingEntity requireOwnedBooking(UUID bookingId, UUID participantUserId) {
         return bookings.findById(bookingId)
                 .filter(b -> b.getParticipantUserId().equals(participantUserId))
                 .orElseThrow(() -> new NotFoundException("Booking not found"));
+    }
+
+    private static String requireText(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new ValidationException(field + " is required");
+        }
+        String trimmed = value.strip();
+        if (trimmed.length() > MAX_FREE_TEXT_LENGTH) {
+            throw new ValidationException(
+                    field + " must be at most " + MAX_FREE_TEXT_LENGTH + " characters");
+        }
+        return trimmed;
     }
 
     private static short requireRating(Integer value, String field) {
