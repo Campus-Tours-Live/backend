@@ -42,20 +42,17 @@ import org.springframework.web.server.ResponseStatusException;
  *
  * <p>Public, like the tour catalog: this is what an anonymous visitor came to look at.
  *
- * <p><strong>Two populations live here, and the difference is load-bearing.</strong> The two browse
- * endpoints read the national College Scorecard directory — every U.S. school, whether or not it
- * has anything to do with this platform. {@code GET /universities/{slug}} reads the {@code
- * universities} table: only the schools actually onboarded, the ones that can carry a tour. The
- * browse list is therefore far larger than the set of slugs that resolve, and a 404 from the detail
- * endpoint usually means "real school, not on the platform" rather than "no such school".
+ * <p>Browse endpoints ({@code state-summary}, {@code ?state=}) use the national Scorecard
+ * directory; {@code GET /universities/{slug}} uses the platform {@code universities} table only — a
+ * directory school that was never onboarded 404s here.
  */
 @RestController
 @RequestMapping("/universities")
 @Tag(
         name = "Universities",
         description =
-                "The browsable U.S. university directory by state, plus the profile of a single"
-                        + " university onboarded onto the platform.")
+                "U.S. university directory by state, plus one onboarded platform university's"
+                        + " profile.")
 public class UniversityController {
 
     /**
@@ -184,18 +181,10 @@ public class UniversityController {
     @Operation(
             summary = "Get one university",
             description =
-                    "One platform university's public profile, addressed by slug, plus how many"
-                            + " bookable tours it has and what the cheapest one costs. Public:"
-                            + " served anonymously.\n\n"
-                            + "Serves the **platform** population — the schools onboarded onto"
-                            + " Campus Tours Live — which is a small subset of the national"
-                            + " directory the two endpoints above browse. A school that appears in"
-                            + " GET /universities?state= but has never been onboarded has no"
-                            + " profile here and answers 404; a caller listing a state should not"
-                            + " link every row to this endpoint.\n\n"
-                            + "Not cacheable, unlike its two siblings: their day-long max-age suits"
-                            + " annually-published directory data, but tourCount and fromPriceCents"
-                            + " change the moment a guide activates or pauses an offering.")
+                    "Platform university profile by slug, plus bookable tour count and lowest"
+                            + " price. Public. Serves onboarded schools only — Scorecard directory"
+                            + " schools without a platform row 404. Not cacheable (live tour"
+                            + " stats).")
     @ApiResponses({
         @ApiResponse(
                 responseCode = "200",
@@ -213,10 +202,7 @@ public class UniversityController {
                                 })),
         @ApiResponse(
                 responseCode = "404",
-                description =
-                        "No platform university carries that slug — either the slug is wrong, or"
-                                + " the school exists in the national directory but has not been"
-                                + " onboarded.",
+                description = "No platform university with that slug.",
                 content =
                         @Content(
                                 mediaType = "application/json",
@@ -234,9 +220,7 @@ public class UniversityController {
     @GetMapping("/{slug}")
     public ApiEnvelope<UniversityDetailResponse> bySlug(
             @Parameter(
-                            description =
-                                    "URL-safe slug of the university, as returned in a tour's"
-                                            + " universitySlug.",
+                            description = "URL-safe slug (same as a tour's universitySlug).",
                             example = "north-coast",
                             required = true)
                     @PathVariable

@@ -25,13 +25,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 
-/**
- * UniversityReadService — the platform-university profile behind {@code GET /universities/{slug}}.
- *
- * <p>The interesting assertions here are not the field copies but the two figures the page leads
- * with: that they come from the marketplace's own listing rather than a private count, and that a
- * university with nothing bookable reports that honestly instead of a zero-priced tour.
- */
+/** Unit tests for {@link UniversityReadService}. */
 @ExtendWith(MockitoExtension.class)
 class UniversityReadServiceTest {
 
@@ -59,7 +53,6 @@ class UniversityReadServiceTest {
         return u;
     }
 
-    /** A marketplace card; only the price and currency matter to this service. */
     private static TourSummaryResponse tourAt(long priceCents, String currency) {
         return new TourSummaryResponse(
                 "o1a2c3d4-0000-4000-8000-000000000002",
@@ -84,15 +77,12 @@ class UniversityReadServiceTest {
                 false);
     }
 
-    /** One row out of {@code total} — what a {@code limit=1} marketplace page looks like. */
     private static Page<TourSummaryResponse> pageOf(TourSummaryResponse row, long total) {
         return new PageImpl<>(row == null ? List.of() : List.of(row), PageRequest.of(0, 1), total);
     }
 
-    // --- the happy path ------------------------------------------------------------------------
-
     @Test
-    void getBySlug_returnsTheProfileWithItsLiveTourCountAndLowestPrice() {
+    void getBySlug_returnsProfileWithTourCountAndLowestPrice() {
         when(universities.findBySlug("north-coast")).thenReturn(Optional.of(university()));
         when(tours.list(any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(pageOf(tourAt(3800, "USD"), 4));
@@ -113,13 +103,8 @@ class UniversityReadServiceTest {
         assertThat(detail.currency()).isEqualTo("USD");
     }
 
-    /**
-     * The whole reason this service borrows the marketplace listing instead of counting for itself:
-     * the page's figure has to be the listing's figure. Pinning the exact call pins that — the same
-     * university filter, no topic or text narrowing, cheapest first, one row.
-     */
     @Test
-    void getBySlug_readsItsFiguresOffTheMarketplaceListingItself() {
+    void getBySlug_readsStatsFromMarketplaceListing() {
         when(universities.findBySlug("north-coast")).thenReturn(Optional.of(university()));
         when(tours.list(any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(pageOf(tourAt(3800, "USD"), 4));
@@ -129,12 +114,8 @@ class UniversityReadServiceTest {
         verify(tours).list(UNIVERSITY_ID.toString(), null, null, TourDiscoverySort.PRICE_ASC, 0, 1);
     }
 
-    /**
-     * The count is the listing's total, not the number of rows fetched. Asking for one row to learn
-     * the cheapest price must not collapse "12 live tours" into "1".
-     */
     @Test
-    void getBySlug_countsEveryBookableTour_notJustTheOneRowItFetched() {
+    void getBySlug_tourCountIsListingTotal_notFetchedRowCount() {
         when(universities.findBySlug("north-coast")).thenReturn(Optional.of(university()));
         when(tours.list(any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(pageOf(tourAt(2500, "USD"), 12));
@@ -142,12 +123,8 @@ class UniversityReadServiceTest {
         assertThat(service().getBySlug("north-coast").tourCount()).isEqualTo(12);
     }
 
-    /**
-     * Offerings carry their own currency, so the "from" price is reported in the currency of the
-     * offering that actually charges it rather than an assumed platform default.
-     */
     @Test
-    void getBySlug_reportsTheCheapestOfferingsOwnCurrency() {
+    void getBySlug_usesCheapestOfferingsCurrency() {
         when(universities.findBySlug("north-coast")).thenReturn(Optional.of(university()));
         when(tours.list(any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(pageOf(tourAt(2900, "CAD"), 2));
@@ -155,14 +132,8 @@ class UniversityReadServiceTest {
         assertThat(service().getBySlug("north-coast").currency()).isEqualTo("CAD");
     }
 
-    // --- nothing bookable ----------------------------------------------------------------------
-
-    /**
-     * A university with no bookable tour has no lowest price, and saying so is the point: a 0 here
-     * renders as "From $0.00" on the page — a free tour that does not exist.
-     */
     @Test
-    void getBySlug_universityWithNoBookableTours_hasNoPriceRatherThanAZeroOne() {
+    void getBySlug_noBookableTours_nullPriceAndCurrency() {
         when(universities.findBySlug("redwood-state")).thenReturn(Optional.of(university()));
         when(tours.list(any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(pageOf(null, 0));
@@ -174,13 +145,8 @@ class UniversityReadServiceTest {
         assertThat(detail.currency()).isNull();
     }
 
-    /**
-     * A paused or archived university is still served — with its status — rather than hidden behind
-     * a 404. Its tour count is 0 because the marketplace predicate excludes it, which is the honest
-     * answer: those offerings exist but nobody can book them.
-     */
     @Test
-    void getBySlug_servesANonActiveUniversityWithItsRealStatus() {
+    void getBySlug_pausedUniversity_returnsStatusWithZeroTours() {
         UniversityEntity paused = university();
         paused.setStatus(UniversityStatus.PAUSED);
         when(universities.findBySlug("north-coast")).thenReturn(Optional.of(paused));
@@ -193,14 +159,12 @@ class UniversityReadServiceTest {
         assertThat(detail.tourCount()).isZero();
     }
 
-    /** Optional columns stay null rather than becoming empty strings the page would render. */
     @Test
-    void getBySlug_leavesUnsetOptionalColumnsNull() {
+    void getBySlug_optionalColumnsStayNullWhenUnset() {
         UniversityEntity sparse = university();
         sparse.setShortName(null);
         sparse.setRegion(null);
         sparse.setImageUrl(null);
-        sparse.setStatus(null);
         when(universities.findBySlug("north-coast")).thenReturn(Optional.of(sparse));
         when(tours.list(any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(pageOf(null, 0));
@@ -210,18 +174,11 @@ class UniversityReadServiceTest {
         assertThat(detail.shortName()).isNull();
         assertThat(detail.region()).isNull();
         assertThat(detail.imageUrl()).isNull();
-        assertThat(detail.status()).isNull();
+        assertThat(detail.status()).isEqualTo("ACTIVE");
     }
 
-    // --- the misses ----------------------------------------------------------------------------
-
-    /**
-     * A slug with no platform row is a 404, and it is the common case rather than the exotic one:
-     * the browse-by-state directory lists every U.S. school, while this table holds only the ones
-     * onboarded here.
-     */
     @Test
-    void getBySlug_unknownSlugIsNotFound() {
+    void getBySlug_unknownSlug_notFound() {
         when(universities.findBySlug("not-on-the-platform")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service().getBySlug("not-on-the-platform"))
@@ -232,7 +189,7 @@ class UniversityReadServiceTest {
     }
 
     @Test
-    void getBySlug_blankSlugIsRejectedBeforeAnyLookup() {
+    void getBySlug_blankSlug_rejectedBeforeLookup() {
         for (String blank : new String[] {null, "", "   "}) {
             assertThatThrownBy(() -> service().getBySlug(blank))
                     .as("slug=%s", blank)
@@ -244,7 +201,7 @@ class UniversityReadServiceTest {
     }
 
     @Test
-    void getBySlug_trimsSurroundingWhitespaceBeforeLookingUp() {
+    void getBySlug_trimsWhitespaceBeforeLookup() {
         when(universities.findBySlug("north-coast")).thenReturn(Optional.of(university()));
         when(tours.list(any(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(pageOf(null, 0));

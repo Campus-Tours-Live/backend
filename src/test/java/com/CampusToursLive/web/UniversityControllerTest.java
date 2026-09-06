@@ -49,10 +49,6 @@ class UniversityControllerTest {
         return controllerOver(snapshot, Mockito.mock(UniversityReadService.class));
     }
 
-    /**
-     * The directory and the platform table are independent sources — the browse endpoints below
-     * never touch the read service, and the profile endpoint never touches the snapshot.
-     */
     private static UniversityController controllerOver(
             Snapshot snapshot, UniversityReadService platformUniversities) {
         return new UniversityController(() -> snapshot, platformUniversities);
@@ -250,13 +246,7 @@ class UniversityControllerTest {
         assertThat(body).isEqualTo(PROFILE);
     }
 
-    /**
-     * {@code /universities/state-summary} is a literal path that the {@code {slug}} template also
-     * matches. Spring resolves the literal first, but that is framework default ordering rather
-     * than anything this class states — so it is pinned here. Getting it wrong would not 404: it
-     * would quietly turn the browse page's counts into a lookup for a university slugged
-     * "state-summary".
-     */
+    /** Literal `/state-summary` must win over `/{slug}` — otherwise the browse page breaks. */
     @Test
     void stateSummaryStillResolvesAheadOfTheSlugTemplate() throws Exception {
         UniversityReadService reads = Mockito.mock(UniversityReadService.class);
@@ -269,7 +259,6 @@ class UniversityControllerTest {
         Mockito.verifyNoInteractions(reads);
     }
 
-    /** The state list keeps the root path; the slug template must not swallow it. */
     @Test
     void theStateListStillResolvesOnTheRootPath() throws Exception {
         UniversityReadService reads = Mockito.mock(UniversityReadService.class);
@@ -282,12 +271,7 @@ class UniversityControllerTest {
         Mockito.verifyNoInteractions(reads);
     }
 
-    /**
-     * The profile carries no cache headers while its directory siblings are held for a day. Their
-     * max-age suits data published once a year; tourCount changes the moment a guide activates an
-     * offering, and a day-old "4 live tours" over a listing showing five is exactly the
-     * disagreement the shared marketplace query exists to prevent.
-     */
+    /** Detail has no Cache-Control; directory siblings keep their day-long max-age. */
     @Test
     void theProfileIsNotCacheable_unlikeTheDirectoryItSitsBeside() throws Exception {
         MockMvc mvc = mvcOver(readServiceServing(PROFILE));
