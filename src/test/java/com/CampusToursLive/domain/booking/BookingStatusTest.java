@@ -24,7 +24,9 @@ class BookingStatusTest {
         assertEquals("CONFIRMED", BookingStatus.CONFIRMED.displayStatus());
         assertEquals("CONFIRMED", BookingStatus.IN_PROGRESS.displayStatus());
         assertEquals("COMPLETED", BookingStatus.COMPLETED.displayStatus());
-        // Everything else collapses to the catch-all "CANCELLED" (the default arm).
+        assertEquals("PARTICIPANT_NO_SHOW", BookingStatus.PARTICIPANT_NO_SHOW.displayStatus());
+        assertEquals("GUIDE_NO_SHOW", BookingStatus.GUIDE_NO_SHOW.displayStatus());
+        // Other terminal / cancelled variants collapse to "CANCELLED".
         assertEquals("CANCELLED", BookingStatus.DECLINED_BY_GUIDE.displayStatus());
         assertEquals("CANCELLED", BookingStatus.EXPIRED.displayStatus());
         assertEquals("CANCELLED", BookingStatus.CANCELLED_BY_PARTICIPANT.displayStatus());

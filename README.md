@@ -449,6 +449,14 @@ envelope; errors are `application/problem+json`.
 | `GET` `PATCH` | `/guide/profile`                  | Read / upsert the guide profile (+ submit application)    |
 | `GET` `POST`  | `/guide/offerings`                | List / create a guide's tour offerings                    |
 | `POST`        | `/guide/offerings/{id}/activate`  | Publish a draft offering (requires an APPROVED guide)     |
+| `GET`         | `/guide/bookings`                 | Guide inbox (`?filter=pending\|upcoming\|past\|all`)      |
+| `GET`         | `/guide/bookings/pending-actions` | Pending acceptance count for the guide dashboard          |
+| `GET`         | `/guide/bookings/{id}`            | One booking with status history                           |
+| `POST`        | `/guide/bookings/{id}/accept`     | Accept a pending booking request                          |
+| `POST`        | `/guide/bookings/{id}/decline`    | Decline a pending booking request (optional reason)       |
+| `POST`        | `/guide/bookings/{id}/cancel`     | Cancel a confirmed tour before start (optional reason)    |
+| `POST`        | `/guide/bookings/{id}/complete`   | Mark a started confirmed tour completed                   |
+| `POST`        | `/guide/bookings/{id}/no-show`    | Mark participant no-show (optional reason)                |
 | `GET`         | `/tours`                          | Public marketplace catalog (ACTIVE offerings only)        |
 | `GET`         | `/tours/{tourId}`                 | Single discoverable tour detail                           |
 | `GET`         | `/bookings/next-tour`             | Soonest upcoming CONFIRMED booking (dashboard card)       |

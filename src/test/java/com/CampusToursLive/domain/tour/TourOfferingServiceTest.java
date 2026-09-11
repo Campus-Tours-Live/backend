@@ -26,6 +26,7 @@ import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateOfferingRequest;
 import com.CampusToursLive.web.dto.TourOfferingResponse;
+import com.CampusToursLive.web.dto.UpdateOfferingRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Optional;
@@ -236,8 +237,21 @@ class TourOfferingServiceTest {
                         null,
                         List.of("en-US"),
                         List.of("Q_AND_A", "HIDDEN_SPOTS"));
-        service().create(user(uid), req);
+        TourOfferingResponse res = service().create(user(uid), req);
         assertEquals("[\"Q_AND_A\",\"HIDDEN_SPOTS\"]", saved.get().getFeatures());
+        assertEquals(List.of("Q_AND_A", "HIDDEN_SPOTS"), res.features());
+        assertEquals(List.of("en-US"), res.languages());
+    }
+
+    @Test
+    void create_throws422_whenLanguageUnsupported() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubCreateReady(uid, gid);
+        CreateOfferingRequest req =
+                new CreateOfferingRequest(
+                        "Walk", UNI, "GENERAL_CAMPUS", 60, 5000L, null, List.of("xx-YY"));
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
     }
 
     @Test
@@ -559,6 +573,202 @@ class TourOfferingServiceTest {
         when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.empty());
 
         assertThrows(NotFoundException.class, () -> service().activate(user(uid), oid));
+    }
+
+    // ---------- lifecycle management ----------
+
+    @Test
+    void update_updatesDraftFields() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity draft = offering(oid, gid, TourStatus.DRAFT);
+        draft.setTitle("Original walk");
+        draft.setSlug("original-walk");
+        draft.setTopic(TourTopic.GENERAL_CAMPUS);
+        draft.setUniversityId(UUID.fromString(UNI));
+        draft.setDurationMin(60);
+        draft.setPriceCents(4200);
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(draft));
+        when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
+        when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        TourOfferingResponse updated =
+                service()
+                        .update(
+                                user(uid),
+                                oid,
+                                new UpdateOfferingRequest(
+                                        "Updated walk",
+                                        null,
+                                        null,
+                                        90,
+                                        5000L,
+                                        "New details",
+                                        null,
+                                        null));
+
+        assertEquals("Updated walk", updated.title());
+        assertEquals(90, updated.durationMin());
+        assertEquals(5000L, updated.priceCents());
+        assertEquals("New details", updated.description());
+    }
+
+    @Test
+    void update_allowsPausedOffering_andKeepsAnUnchangedTitleSlug() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity paused = offering(oid, gid, TourStatus.PAUSED);
+        paused.setTitle("Campus walk");
+        paused.setSlug("campus-walk");
+        paused.setTopic(TourTopic.GENERAL_CAMPUS);
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(paused));
+        when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service()
+                .update(
+                        user(uid),
+                        oid,
+                        new UpdateOfferingRequest(
+                                "Campus walk", null, null, null, null, null, null, null));
+
+        assertEquals("campus-walk", paused.getSlug());
+        verify(offerings, never()).existsByGuideIdAndSlug(any(), anyString());
+    }
+
+    @Test
+    void update_rejectsPublicOrEmptyRequests() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity active = offering(oid, gid, TourStatus.ACTIVE);
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(active));
+
+        assertThrows(ValidationException.class, () -> service().update(user(uid), oid, null));
+
+        active.setStatus(TourStatus.DRAFT);
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .update(
+                                        user(uid),
+                                        oid,
+                                        new UpdateOfferingRequest(
+                                                null, null, null, null, null, null, null, null)));
+    }
+
+    @Test
+    void update_rejectsFeaturesThatDoNotMatchTheNewTopic() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity draft = offering(oid, gid, TourStatus.DRAFT);
+        draft.setTopic(TourTopic.GENERAL_CAMPUS);
+        draft.setFeatures("[\"HIDDEN_SPOTS\"]");
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(draft));
+
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .update(
+                                        user(uid),
+                                        oid,
+                                        new UpdateOfferingRequest(
+                                                null,
+                                                null,
+                                                "DORM_HOUSING",
+                                                null,
+                                                null,
+                                                null,
+                                                null,
+                                                null)));
+    }
+
+    @Test
+    void pause_movesActiveOfferingOffMarketplace() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity active = offering(oid, gid, TourStatus.ACTIVE);
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(active));
+        when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertEquals("PAUSED", service().pause(user(uid), oid).status());
+        assertEquals(TourStatus.PAUSED, active.getStatus());
+    }
+
+    @Test
+    void pause_isIdempotent_andRejectsNonActiveOfferings() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity paused = offering(oid, gid, TourStatus.PAUSED);
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(paused));
+
+        assertEquals("PAUSED", service().pause(user(uid), oid).status());
+        verify(offerings, never()).save(any());
+
+        paused.setStatus(TourStatus.DRAFT);
+        assertThrows(ValidationException.class, () -> service().pause(user(uid), oid));
+    }
+
+    @Test
+    void retire_archivesAnyOwnedOffering() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity active = offering(oid, gid, TourStatus.ACTIVE);
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(active));
+        when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertEquals("ARCHIVED", service().retire(user(uid), oid).status());
+        assertEquals(TourStatus.ARCHIVED, active.getStatus());
+    }
+
+    @Test
+    void retire_isIdempotentForArchivedOfferings() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity archived = offering(oid, gid, TourStatus.ARCHIVED);
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(archived));
+
+        assertEquals("ARCHIVED", service().retire(user(uid), oid).status());
+        verify(offerings, never()).save(any());
+    }
+
+    @Test
+    void duplicate_createsDraftCopy() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity source = offering(oid, gid, TourStatus.ACTIVE);
+        source.setTitle("Campus walk");
+        source.setUniversityId(UUID.fromString(UNI));
+        source.setTopic(TourTopic.GENERAL_CAMPUS);
+        source.setDurationMin(60);
+        source.setPriceCents(4200);
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(source));
+        when(offerings.existsByGuideIdAndSlug(eq(gid), anyString())).thenReturn(false);
+        when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        TourOfferingResponse copy = service().duplicate(user(uid), oid);
+
+        assertEquals("DRAFT", copy.status());
+        assertEquals("Copy of Campus walk", copy.title());
+        assertEquals("copy-of-campus-walk", copy.slug());
     }
 
     // ---------- listOwn ----------
