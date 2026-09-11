@@ -21,6 +21,7 @@ import com.CampusToursLive.web.dto.CancelBookingRequest;
 import com.CampusToursLive.web.dto.CreateBookingRequest;
 import com.CampusToursLive.web.dto.GuideBookingDetailResponse;
 import com.CampusToursLive.web.dto.GuideBookingStatusEventResponse;
+import com.CampusToursLive.web.dto.GuidePendingActionsResponse;
 import com.CampusToursLive.web.dto.PendingActionsResponse;
 import java.security.SecureRandom;
 import java.time.Duration;
@@ -815,6 +816,51 @@ public class BookingService {
         bookings.save(b);
         recordTransition(b, previous, BookingActor.GUIDE, guideUser.getId(), "GUIDE_DECLINED");
         return toGuideDetailResponse(b);
+    }
+
+    /**
+     * Cancel a confirmed tour before it starts. Idempotent when already CANCELLED_BY_GUIDE.
+     * Optional reason body.
+     */
+    @Transactional
+    public GuideBookingDetailResponse cancelConfirmedBooking(
+            UserEntity guideUser, UUID bookingId, CancelBookingRequest req) {
+        GuideProfileEntity guide = requireGuideProfile(guideUser);
+        BookingEntity b =
+                bookings.findByIdAndGuideId(bookingId, guide.getId())
+                        .orElseThrow(() -> new NotFoundException("Booking not found"));
+
+        if (b.getStatus() == BookingStatus.CANCELLED_BY_GUIDE) {
+            return toGuideDetailResponse(b); // idempotent
+        }
+        if (b.getStatus() != BookingStatus.CONFIRMED) {
+            throw new ValidationException("This booking can no longer be cancelled");
+        }
+        if (!b.getScheduledStartAt().isAfter(Instant.now())) {
+            throw new ValidationException(
+                    "This booking has already started and can no longer be cancelled");
+        }
+
+        BookingStatus previous = b.getStatus();
+        b.setStatus(BookingStatus.CANCELLED_BY_GUIDE);
+        b.setCancellationActor(BookingActor.GUIDE);
+        b.setCancelledAt(Instant.now());
+        if (req != null) {
+            b.setCancellationReason(cleanFreeText(req.reason(), "reason"));
+        }
+        bookings.save(b);
+        recordTransition(b, previous, BookingActor.GUIDE, guideUser.getId(), "GUIDE_CANCELLED");
+        return toGuideDetailResponse(b);
+    }
+
+    /** Count bookings awaiting this guide's accept/decline (dashboard badge / pending nav). */
+    @Transactional(readOnly = true)
+    public GuidePendingActionsResponse getPendingActionsForGuide(UserEntity guideUser) {
+        GuideProfileEntity guide = requireGuideProfile(guideUser);
+        long pending =
+                bookings.countByGuideIdAndStatus(
+                        guide.getId(), BookingStatus.PENDING_GUIDE_ACCEPTANCE);
+        return new GuidePendingActionsResponse(pending);
     }
 
     /**

@@ -2298,6 +2298,141 @@ class BookingServiceTest {
         assertEquals("GUIDE_MARKED_PARTICIPANT_NO_SHOW", audit.getValue().getReasonCode());
     }
 
+    @Test
+    void cancelConfirmedBooking_cancelsBeforeStart() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+        Instant start = Instant.now().plus(2, ChronoUnit.DAYS);
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.CONFIRMED,
+                        start,
+                        start.plus(60, ChronoUnit.MINUTES));
+        b.setParticipantUserId(UUID.randomUUID());
+
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByIdAndGuideId(b.getId(), guideProfileId)).thenReturn(Optional.of(b));
+        when(bookings.save(b)).thenReturn(b);
+        stubGuideDetailLookups(b);
+
+        var resp =
+                service()
+                        .cancelConfirmedBooking(
+                                guideUser,
+                                b.getId(),
+                                new CancelBookingRequest("Schedule conflict"));
+        assertEquals("CANCELLED", resp.status());
+        assertEquals(BookingStatus.CANCELLED_BY_GUIDE, b.getStatus());
+        assertEquals(BookingActor.GUIDE, b.getCancellationActor());
+        assertEquals("Schedule conflict", b.getCancellationReason());
+        assertNotNull(b.getCancelledAt());
+
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory).save(audit.capture());
+        assertEquals("GUIDE_CANCELLED", audit.getValue().getReasonCode());
+    }
+
+    @Test
+    void cancelConfirmedBooking_isIdempotent_whenAlreadyCancelledByGuide() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+        Instant start = Instant.now().plus(2, ChronoUnit.DAYS);
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.CANCELLED_BY_GUIDE,
+                        start,
+                        start.plus(60, ChronoUnit.MINUTES));
+        b.setParticipantUserId(UUID.randomUUID());
+
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByIdAndGuideId(b.getId(), guideProfileId)).thenReturn(Optional.of(b));
+        stubGuideDetailLookups(b);
+
+        service().cancelConfirmedBooking(guideUser, b.getId(), null);
+        verify(bookings, never()).save(any());
+        verify(statusHistory, never()).save(any());
+    }
+
+    @Test
+    void cancelConfirmedBooking_rejects_whenAlreadyStarted() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+        Instant start = Instant.now().minus(1, ChronoUnit.HOURS);
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.CONFIRMED,
+                        start,
+                        start.plus(60, ChronoUnit.MINUTES));
+
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByIdAndGuideId(b.getId(), guideProfileId)).thenReturn(Optional.of(b));
+
+        ValidationException ex =
+                assertThrows(
+                        ValidationException.class,
+                        () -> service().cancelConfirmedBooking(guideUser, b.getId(), null));
+        assertTrue(ex.getMessage().toLowerCase().contains("started"));
+    }
+
+    @Test
+    void cancelConfirmedBooking_rejects_whenWrongStatus() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+        Instant start = Instant.now().plus(2, ChronoUnit.DAYS);
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.PENDING_GUIDE_ACCEPTANCE,
+                        start,
+                        start.plus(60, ChronoUnit.MINUTES));
+
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByIdAndGuideId(b.getId(), guideProfileId)).thenReturn(Optional.of(b));
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().cancelConfirmedBooking(guideUser, b.getId(), null));
+    }
+
+    @Test
+    void getPendingActionsForGuide_countsPendingAcceptance() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.countByGuideIdAndStatus(
+                        guideProfileId, BookingStatus.PENDING_GUIDE_ACCEPTANCE))
+                .thenReturn(3L);
+
+        assertEquals(3L, service().getPendingActionsForGuide(guideUser).pendingAcceptance());
+    }
+
     /** Name lookups for toGuideDetailResponse (participant + offering + university). */
     private void stubGuideDetailLookups(BookingEntity b) {
         when(offerings.findById(b.getTourOfferingId()))

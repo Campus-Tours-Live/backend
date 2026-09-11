@@ -19,6 +19,7 @@ import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.dto.CancelBookingRequest;
 import com.CampusToursLive.web.dto.GuideBookingDetailResponse;
+import com.CampusToursLive.web.dto.GuidePendingActionsResponse;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -215,6 +216,33 @@ class GuideBookingControllerTest {
         mvc.perform(get("/guide/bookings").param("filter", "past"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].status").value("COMPLETED"));
+    }
+
+    @Test
+    void pendingActions_returnsCount() throws Exception {
+        UserEntity u = user();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(bookings.getPendingActionsForGuide(u)).thenReturn(new GuidePendingActionsResponse(4));
+
+        mvc.perform(get("/guide/bookings/pending-actions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.pendingAcceptance").value(4));
+    }
+
+    @Test
+    void cancel_returnsCancelled() throws Exception {
+        UserEntity u = user();
+        UUID id = UUID.randomUUID();
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(bookings.cancelConfirmedBooking(eq(u), eq(id), any(CancelBookingRequest.class)))
+                .thenReturn(detail(id.toString(), "CANCELLED"));
+
+        mvc.perform(
+                        post("/guide/bookings/" + id + "/cancel")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"reason\":\"Schedule conflict\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"));
     }
 
     @Test

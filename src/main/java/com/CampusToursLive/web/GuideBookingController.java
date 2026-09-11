@@ -8,6 +8,7 @@ import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
 import com.CampusToursLive.web.dto.CancelBookingRequest;
 import com.CampusToursLive.web.dto.GuideBookingDetailResponse;
+import com.CampusToursLive.web.dto.GuidePendingActionsResponse;
 import com.CampusToursLive.web.dto.Problem;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -37,8 +38,8 @@ import org.springframework.web.bind.annotation.RestController;
         name = "Guide bookings",
         description =
                 "Guide booking inbox: list pending, upcoming, and past tours; accept, decline,"
-                        + " complete, or mark participant no-show. Every operation requires the"
-                        + " GUIDE role.")
+                        + " cancel confirmed, complete, or mark participant no-show. Every"
+                        + " operation requires the GUIDE role.")
 public class GuideBookingController {
 
     private final CurrentUser currentUser;
@@ -88,6 +89,40 @@ public class GuideBookingController {
                 bookings.listForGuide(
                         currentUser.requireRole(UserRole.GUIDE),
                         GuideBookingFilter.fromParam(filter)));
+    }
+
+    @Operation(
+            summary = "Guide pending booking counts",
+            description =
+                    "Returns how many bookings are awaiting this guide's accept/decline. Used by"
+                            + " the guide dashboard.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "Pending action counts.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = GuidePendingActionsResponse.class)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @GetMapping("/pending-actions")
+    public ApiEnvelope<GuidePendingActionsResponse> pendingActions() {
+        return ApiEnvelope.of(
+                bookings.getPendingActionsForGuide(currentUser.requireRole(UserRole.GUIDE)));
     }
 
     @Operation(
@@ -316,5 +351,57 @@ public class GuideBookingController {
             @PathVariable UUID id, @RequestBody(required = false) CancelBookingRequest body) {
         return ApiEnvelope.of(
                 bookings.markParticipantNoShow(currentUser.requireRole(UserRole.GUIDE), id, body));
+    }
+
+    @Operation(
+            summary = "Cancel a confirmed booking",
+            description =
+                    "Cancels a CONFIRMED booking owned by the current guide before its scheduled"
+                            + " start. Idempotent if already CANCELLED_BY_GUIDE. Optional reason"
+                            + " body.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The cancelled booking.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_DETAIL)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "Booking not found for this guide.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @ApiResponse(
+            responseCode = "422",
+            description = "Booking cannot be cancelled (wrong status or already started).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @PostMapping("/{id}/cancel")
+    public ApiEnvelope<GuideBookingDetailResponse> cancel(
+            @PathVariable UUID id, @RequestBody(required = false) CancelBookingRequest body) {
+        return ApiEnvelope.of(
+                bookings.cancelConfirmedBooking(currentUser.requireRole(UserRole.GUIDE), id, body));
     }
 }

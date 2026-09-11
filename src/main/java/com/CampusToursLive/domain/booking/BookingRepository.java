@@ -67,6 +67,9 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
     List<BookingEntity> findByGuideIdAndStatusInOrderByScheduledStartAtAsc(
             UUID guideId, List<BookingStatus> statuses);
 
+    /** Count guide bookings in one status (e.g. pending acceptance for the dashboard badge). */
+    long countByGuideIdAndStatus(UUID guideId, BookingStatus status);
+
     /**
      * Guide upcoming confirmed tours: CONFIRMED (or other status) starting at/after {@code from}.
      */
