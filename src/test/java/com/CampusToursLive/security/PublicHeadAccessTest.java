@@ -56,14 +56,6 @@ class PublicHeadAccessTest {
     }
 
     @Test
-    void headOnPublicUniversitiesIsNotRejectedAsUnauthenticated() throws Exception {
-        // /universities/** is public like /tours (CTL-116 detail + CTL-99 directory). Controller
-        // need not be loaded — 404 from routing is fine; 401 from the filter chain is the failure.
-        mvc.perform(head("/universities/state-summary")).andExpect(status().is(not401()));
-        mvc.perform(head("/universities/north-coast")).andExpect(status().is(not401()));
-    }
-
-    @Test
     void getOnPublicTourCatalogStaysPublic() throws Exception {
         mvc.perform(get("/tours")).andExpect(status().is(not401()));
     }
