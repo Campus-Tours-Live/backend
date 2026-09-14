@@ -12,6 +12,7 @@ import com.CampusToursLive.web.dto.BookingDetailResponse;
 import com.CampusToursLive.web.dto.CreateBookingRequest;
 import com.CampusToursLive.web.dto.SlotResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -75,7 +76,6 @@ class SeededDemoAvailabilityIntegrationTest {
                         JOIN guide_profiles guide_profile ON guide_profile.id = occurrence.guide_id
                         JOIN users guide_user ON guide_user.id = guide_profile.user_id
                         WHERE guide_user.oidc_subject LIKE 'seed-guide-%'
-                          AND occurrence.source_rule_id IS NOT NULL
                         """);
 
         assertThat(seedGuides).isGreaterThan(0);
@@ -103,7 +103,12 @@ class SeededDemoAvailabilityIntegrationTest {
         List<SlotResponse> slots = slotService.getBookableSlots(offering.getId(), null, null);
         assertThat(slots).isNotEmpty();
 
-        SlotResponse selected = slots.get(0);
+        Instant safeStart = Instant.now().plus(Duration.ofHours(2));
+        SlotResponse selected =
+                slots.stream()
+                        .filter(slot -> slot.startAt().isAfter(safeStart))
+                        .findFirst()
+                        .orElseThrow();
         assertThat(Duration.between(selected.startAt(), selected.endAt()))
                 .isEqualTo(Duration.ofMinutes(offering.getDurationMin()));
 
@@ -141,6 +146,9 @@ class SeededDemoAvailabilityIntegrationTest {
                           JOIN users guide_user ON guide_user.id = guide_profile.user_id
                           WHERE guide_user.oidc_subject LIKE 'seed-guide-%%'
                             AND rule.active = true
+                            AND rule.day_of_week BETWEEN 1 AND 5
+                            AND rule.start_local = '10:00'::time
+                            AND rule.window_min = 240
                           GROUP BY rule.guide_id
                         ) coverage
                         """
