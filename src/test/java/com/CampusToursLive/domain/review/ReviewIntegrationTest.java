@@ -23,6 +23,7 @@ import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateReviewRequest;
+import com.CampusToursLive.web.dto.ModerateReviewRequest;
 import com.CampusToursLive.web.dto.ReviewResponse;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -200,6 +201,31 @@ class ReviewIntegrationTest {
         assertThat(resp.overallRating()).isEqualTo(4);
         assertThat(resp.comment()).isEqualTo("nice");
         assertThat(resp.privateFeedback()).isEqualTo("private note");
+    }
+
+    @Test
+    void moderateReview_removePublished_dropsAggregatesToZero() {
+        BookingEntity booking = bookings.saveAndFlush(completedBooking(3));
+        ReviewResponse created =
+                service.createReview(
+                        participant,
+                        booking.getId(),
+                        new CreateReviewRequest(5, null, null, null, null, null, null));
+        UUID reviewId = UUID.fromString(created.id());
+
+        ReviewResponse moderated =
+                service.moderateReview(reviewId, new ModerateReviewRequest("REMOVED"));
+        assertThat(moderated.status()).isEqualTo("REMOVED");
+
+        em.flush();
+        em.clear();
+
+        assertThat(reviews.findById(reviewId).orElseThrow().getStatus())
+                .isEqualTo(ReviewStatus.REMOVED);
+        // Only PUBLISHED reviews count — removal drops the aggregates back to zero.
+        assertThat(offerings.findById(offering.getId()).orElseThrow().getReviewCount())
+                .isEqualTo(0);
+        assertThat(guideCount()).isEqualTo(0);
     }
 
     private BigDecimal guideAvg() {

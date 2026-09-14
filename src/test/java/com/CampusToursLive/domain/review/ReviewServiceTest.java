@@ -1,6 +1,7 @@
 package com.CampusToursLive.domain.review;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -19,7 +20,9 @@ import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateReviewRequest;
+import com.CampusToursLive.web.dto.ModerateReviewRequest;
 import com.CampusToursLive.web.dto.ReviewResponse;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -306,5 +309,103 @@ class ReviewServiceTest {
         assertNull(resp.createdAt());
         assertNull(resp.publishedAt());
         assertSame(null, resp.guideResponse());
+    }
+
+    // ── moderation ──────────────────────────────────────────────────────────
+
+    private static ReviewEntity publishedReview() {
+        ReviewEntity r = new ReviewEntity();
+        r.setId(UUID.randomUUID());
+        r.setBookingId(UUID.randomUUID());
+        r.setParticipantUserId(UUID.randomUUID());
+        r.setGuideId(UUID.randomUUID());
+        r.setTourOfferingId(UUID.randomUUID());
+        r.setOverallRating((short) 5);
+        r.setStatus(ReviewStatus.PUBLISHED);
+        r.setPublishedAt(Instant.now());
+        return r;
+    }
+
+    @Test
+    void moderateReview_removePublished_setsRemoved_andRecomputesAggregates() {
+        ReviewEntity review = publishedReview();
+        when(reviews.findById(review.getId())).thenReturn(Optional.of(review));
+
+        ReviewResponse resp =
+                service().moderateReview(review.getId(), new ModerateReviewRequest("REMOVED"));
+
+        assertEquals(ReviewStatus.REMOVED, review.getStatus());
+        assertEquals("REMOVED", resp.status());
+        verify(reviews).save(review);
+        verify(guides).recomputeRatingAggregate(review.getGuideId());
+        verify(offerings).recomputeRatingAggregate(review.getTourOfferingId());
+    }
+
+    @Test
+    void moderateReview_publishPending_stampsPublishedAt() {
+        ReviewEntity review = publishedReview();
+        review.setStatus(ReviewStatus.PENDING_MODERATION);
+        review.setPublishedAt(null);
+        when(reviews.findById(review.getId())).thenReturn(Optional.of(review));
+
+        service()
+                .moderateReview(review.getId(), new ModerateReviewRequest("published")); // any case
+
+        assertEquals(ReviewStatus.PUBLISHED, review.getStatus());
+        assertNotNull(review.getPublishedAt());
+        verify(guides).recomputeRatingAggregate(review.getGuideId());
+    }
+
+    @Test
+    void moderateReview_reinstateRemoved_keepsExistingPublishedAt() {
+        ReviewEntity review = publishedReview();
+        Instant original = Instant.parse("2026-01-01T00:00:00Z");
+        review.setStatus(ReviewStatus.REMOVED);
+        review.setPublishedAt(original);
+        when(reviews.findById(review.getId())).thenReturn(Optional.of(review));
+
+        service().moderateReview(review.getId(), new ModerateReviewRequest("PUBLISHED"));
+
+        assertEquals(ReviewStatus.PUBLISHED, review.getStatus());
+        assertEquals(original, review.getPublishedAt()); // not re-stamped
+    }
+
+    @Test
+    void moderateReview_unknownReview_throwsNotFound() {
+        UUID reviewId = UUID.randomUUID();
+        when(reviews.findById(reviewId)).thenReturn(Optional.empty());
+
+        assertThrows(
+                NotFoundException.class,
+                () -> service().moderateReview(reviewId, new ModerateReviewRequest("REMOVED")));
+        verify(reviews, never()).save(any());
+    }
+
+    @Test
+    void moderateReview_pendingTarget_throwsValidation_beforeLookup() {
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .moderateReview(
+                                        UUID.randomUUID(),
+                                        new ModerateReviewRequest("PENDING_MODERATION")));
+        verify(reviews, never()).findById(any());
+    }
+
+    @Test
+    void moderateReview_unknownOrBlankTarget_throwsValidation() {
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .moderateReview(
+                                        UUID.randomUUID(), new ModerateReviewRequest("nope")));
+        assertThrows(
+                ValidationException.class,
+                () -> service().moderateReview(UUID.randomUUID(), new ModerateReviewRequest("  ")));
+        assertThrows(
+                ValidationException.class,
+                () -> service().moderateReview(UUID.randomUUID(), new ModerateReviewRequest(null)));
     }
 }
