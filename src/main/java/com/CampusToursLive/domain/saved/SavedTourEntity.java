@@ -10,7 +10,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/** Maps the {@code saved_tours} table (V3__saved_tours.sql) — a participant's wishlist row. */
+/** Maps the {@code saved_tours} table (V3__saved_tours.sql) — a participant wishlist row. */
 @Getter
 @Setter
 @NoArgsConstructor
