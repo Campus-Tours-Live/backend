@@ -1,10 +1,13 @@
 package com.CampusToursLive.domain.saved;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface SavedTourRepository extends JpaRepository<SavedTourEntity, UUID> {
 
@@ -15,4 +18,13 @@ public interface SavedTourRepository extends JpaRepository<SavedTourEntity, UUID
     void deleteByUserIdAndTourOfferingId(UUID userId, UUID tourOfferingId);
 
     Page<SavedTourEntity> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
+
+    /** Offering ids only — for lighting marketplace hearts without full summaries. */
+    @Query(
+            """
+            select s.tourOfferingId from SavedTourEntity s
+            where s.userId = :userId
+            order by s.createdAt desc
+            """)
+    List<UUID> findTourOfferingIdsByUserId(@Param("userId") UUID userId);
 }
