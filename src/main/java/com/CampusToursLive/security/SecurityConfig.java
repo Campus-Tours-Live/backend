@@ -64,7 +64,11 @@ public class SecurityConfig {
                                                 // reason the tour catalog is — it is what an
                                                 // anonymous visitor came to look at.
                                                 "/universities",
-                                                "/universities/**")
+                                                "/universities/**",
+                                                // A verified guide's public profile — marketplace
+                                                // content a visitor reads before booking. Single
+                                                // segment, so it does not cover /guides/{id}/*.
+                                                "/guides/*")
                                         .permitAll()
                                         .requestMatchers(
                                                 org.springframework.http.HttpMethod.HEAD,
@@ -76,7 +80,11 @@ public class SecurityConfig {
                                                 // reason the tour catalog is — it is what an
                                                 // anonymous visitor came to look at.
                                                 "/universities",
-                                                "/universities/**")
+                                                "/universities/**",
+                                                // A verified guide's public profile — see the GET
+                                                // block above; HEAD kept public too so a metadata
+                                                // request never forces a logout.
+                                                "/guides/*")
                                         .permitAll()
                                         .anyRequest()
                                         .authenticated())
