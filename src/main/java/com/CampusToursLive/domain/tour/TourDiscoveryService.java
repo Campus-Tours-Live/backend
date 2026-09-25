@@ -98,6 +98,17 @@ public class TourDiscoveryService {
         return rows.map(o -> toSummary(o, lookup));
     }
 
+    /**
+     * Maps offerings the caller already filtered to discoverable ones into marketplace cards, in
+     * the given order, with the same batched lookups as {@link #list}. Other read surfaces (saved
+     * tours) use this so they render the exact catalog card instead of a second mapping.
+     */
+    @Transactional(readOnly = true)
+    public List<TourSummaryResponse> toSummaries(List<TourOfferingEntity> rows) {
+        Lookup lookup = loadLookup(rows);
+        return rows.stream().map(o -> toSummary(o, lookup)).toList();
+    }
+
     @Transactional(readOnly = true)
     public TourDetailResponse getById(UUID tourId) {
         TourOfferingEntity offering =
