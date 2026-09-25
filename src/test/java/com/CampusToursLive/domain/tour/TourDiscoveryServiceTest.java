@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.CampusToursLive.domain.guide.GuideProfileEntity;
@@ -628,6 +629,31 @@ class TourDiscoveryServiceTest {
         stubGuideUserUniversity(gid, uid, univId, true);
 
         assertEquals(0.0, service().getById(oid).avgRating());
+    }
+
+    // ---- toSummaries (batch card mapping for other read surfaces) ----
+
+    @Test
+    void toSummaries_emptyInput_returnsEmptyWithoutLookups() {
+        assertEquals(List.of(), service().toSummaries(List.of()));
+        verifyNoInteractions(guides, universities, users, guideUniversities);
+    }
+
+    @Test
+    void toSummaries_preservesInputOrder() {
+        UUID gid = UUID.randomUUID();
+        UUID uid = UUID.randomUUID();
+        UUID univId = UUID.randomUUID();
+        TourOfferingEntity first = offering(UUID.randomUUID(), gid, univId);
+        first.setTitle("First");
+        TourOfferingEntity second = offering(UUID.randomUUID(), gid, univId);
+        second.setTitle("Second");
+        stubGuideUserUniversity(gid, uid, univId, true);
+
+        List<TourSummaryResponse> res = service().toSummaries(List.of(second, first));
+
+        assertThat(res).extracting(TourSummaryResponse::title).containsExactly("Second", "First");
+        assertEquals("Maya Chen", res.get(0).guideDisplayName());
     }
 
     // ---- readLanguages branches ----
