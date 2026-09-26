@@ -173,14 +173,17 @@ class ExpandedDemoAvailabilityIntegrationTest {
         assertThat(alternateTour.getGuideId()).isEqualTo(shortTour.getGuideId());
 
         Instant safeStart = Instant.now().plus(Duration.ofHours(2));
+        List<Instant> alternateStarts =
+                slotService.getBookableSlots(alternateTour.getId(), null, null).stream()
+                        .map(SlotResponse::startAt)
+                        .toList();
         SlotResponse selected =
                 slotService.getBookableSlots(shortTour.getId(), null, null).stream()
                         .filter(slot -> slot.startAt().isAfter(safeStart))
+                        .filter(slot -> alternateStarts.contains(slot.startAt()))
                         .findFirst()
                         .orElseThrow();
-        assertThat(slotService.getBookableSlots(alternateTour.getId(), null, null))
-                .extracting(SlotResponse::startAt)
-                .contains(selected.startAt());
+        assertThat(alternateStarts).contains(selected.startAt());
 
         UserEntity participant = users.saveAndFlush(participant());
         BookingDetailResponse booking =

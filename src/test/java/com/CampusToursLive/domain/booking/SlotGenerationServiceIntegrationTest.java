@@ -22,6 +22,7 @@ import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.web.dto.OfferingAvailabilityPreviewResponse;
 import com.CampusToursLive.web.dto.SlotResponse;
 import java.time.Clock;
 import java.time.Duration;
@@ -390,6 +391,83 @@ class SlotGenerationServiceIntegrationTest {
         assertThatThrownBy(() -> service.getBookableSlots(offering.getId(), from, to))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("to must be after from");
+    }
+
+    // ---------------------------------------------------------------------
+    // Public availability preview.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void getAvailabilityPreview_returnsNextCountAndSampleSlots() {
+        TourOfferingEntity offering = offering(60);
+        Instant start = FIXED_NOW.plus(3, java.time.temporal.ChronoUnit.DAYS);
+        occurrence(start, start.plus(4, java.time.temporal.ChronoUnit.HOURS));
+
+        OfferingAvailabilityPreviewResponse preview =
+                service.getAvailabilityPreview(offering.getId(), "2026-07-13", "2026-07-15", 2);
+
+        assertThat(preview.hasAvailability()).isTrue();
+        assertThat(preview.totalSlots()).isEqualTo(4);
+        assertThat(preview.nextStartAt()).isEqualTo(start);
+        assertThat(preview.nextEndAt())
+                .isEqualTo(start.plus(1, java.time.temporal.ChronoUnit.HOURS));
+        assertThat(preview.sampleSlots()).hasSize(2);
+        assertThat(preview.sampleSlots())
+                .extracting(SlotResponse::startAt)
+                .containsExactly(start, start.plus(1, java.time.temporal.ChronoUnit.HOURS));
+    }
+
+    @Test
+    void getAvailabilityPreview_clampsSampleLimitButKeepsTotalCount() {
+        TourOfferingEntity offering = offering(30);
+        Instant start = FIXED_NOW.plus(3, java.time.temporal.ChronoUnit.DAYS);
+        occurrence(start, start.plus(3, java.time.temporal.ChronoUnit.HOURS));
+
+        OfferingAvailabilityPreviewResponse capped =
+                service.getAvailabilityPreview(offering.getId(), "2026-07-13", "2026-07-15", 99);
+        OfferingAvailabilityPreviewResponse emptySample =
+                service.getAvailabilityPreview(offering.getId(), "2026-07-13", "2026-07-15", -1);
+
+        assertThat(capped.hasAvailability()).isTrue();
+        assertThat(capped.totalSlots()).isEqualTo(6);
+        assertThat(capped.sampleSlots()).hasSize(6);
+        assertThat(emptySample.hasAvailability()).isTrue();
+        assertThat(emptySample.totalSlots()).isEqualTo(6);
+        assertThat(emptySample.nextStartAt()).isEqualTo(start);
+        assertThat(emptySample.sampleSlots()).isEmpty();
+    }
+
+    @Test
+    void getAvailabilityPreview_defaultsToBoundedTwoWeekWindow() {
+        TourOfferingEntity offering = offering(60);
+        Instant withinPreview = FIXED_NOW.plus(3, java.time.temporal.ChronoUnit.DAYS);
+        Instant outsidePreview = FIXED_NOW.plus(20, java.time.temporal.ChronoUnit.DAYS);
+        occurrence(withinPreview, withinPreview.plus(1, java.time.temporal.ChronoUnit.HOURS));
+        occurrence(outsidePreview, outsidePreview.plus(1, java.time.temporal.ChronoUnit.HOURS));
+
+        OfferingAvailabilityPreviewResponse preview =
+                service.getAvailabilityPreview(offering.getId(), null, null, 3);
+
+        assertThat(preview.hasAvailability()).isTrue();
+        assertThat(preview.totalSlots()).isEqualTo(1);
+        assertThat(preview.nextStartAt()).isEqualTo(withinPreview);
+        assertThat(preview.sampleSlots())
+                .extracting(SlotResponse::startAt)
+                .containsExactly(withinPreview);
+    }
+
+    @Test
+    void getAvailabilityPreview_returnsEmptyShapeWhenOfferingHasNoSlots() {
+        TourOfferingEntity offering = offering(60);
+
+        OfferingAvailabilityPreviewResponse preview =
+                service.getAvailabilityPreview(offering.getId(), null, null, 3);
+
+        assertThat(preview.hasAvailability()).isFalse();
+        assertThat(preview.totalSlots()).isZero();
+        assertThat(preview.nextStartAt()).isNull();
+        assertThat(preview.nextEndAt()).isNull();
+        assertThat(preview.sampleSlots()).isEmpty();
     }
 
     // ---------------------------------------------------------------------

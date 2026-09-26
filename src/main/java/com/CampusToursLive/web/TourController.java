@@ -1,9 +1,11 @@
 package com.CampusToursLive.web;
 
+import com.CampusToursLive.domain.booking.SlotGenerationService;
 import com.CampusToursLive.domain.tour.TourDiscoveryService;
 import com.CampusToursLive.domain.tour.TourDiscoverySort;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
+import com.CampusToursLive.web.dto.OfferingAvailabilityPreviewResponse;
 import com.CampusToursLive.web.dto.PagedResponse;
 import com.CampusToursLive.web.dto.Problem;
 import com.CampusToursLive.web.dto.TourDetailResponse;
@@ -38,9 +40,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class TourController {
 
     private final TourDiscoveryService discovery;
+    private final SlotGenerationService slots;
 
-    public TourController(TourDiscoveryService discovery) {
+    public TourController(TourDiscoveryService discovery, SlotGenerationService slots) {
         this.discovery = discovery;
+        this.slots = slots;
     }
 
     @Operation(
@@ -132,5 +136,53 @@ public class TourController {
     public ApiEnvelope<TourDetailResponse> get(
             @Parameter(description = "Id (UUID) of the tour offering.") @PathVariable UUID tourId) {
         return ApiEnvelope.of(discovery.getById(tourId));
+    }
+
+    @Operation(
+            summary = "Preview tour availability",
+            description =
+                    "Returns a public, lightweight preview of currently bookable slots for one tour."
+                            + " Times are UTC instants; clients render them in the viewer's local"
+                            + " timezone.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "Availability preview for the tour.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = ApiEnvelope.class)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "No bookable tour with that id.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @ApiResponse(
+            responseCode = "422",
+            description = "tourId/from/to malformed, or to is not after from.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @GetMapping("/{tourId}/availability-preview")
+    public ApiEnvelope<OfferingAvailabilityPreviewResponse> availabilityPreview(
+            @Parameter(description = "Id (UUID) of the tour offering.") @PathVariable UUID tourId,
+            @Parameter(description = "ISO yyyy-MM-dd; inclusive lower bound of the preview window.")
+                    @RequestParam(required = false)
+                    String from,
+            @Parameter(description = "ISO yyyy-MM-dd; exclusive upper bound of the preview window.")
+                    @RequestParam(required = false)
+                    String to,
+            @Parameter(
+                            description =
+                                    "How many concrete slots to include in sampleSlots; max 10. If"
+                                            + " from/to are omitted, preview defaults to the next"
+                                            + " 14 UTC calendar days.")
+                    @RequestParam(required = false, defaultValue = "3")
+                    int limit) {
+        return ApiEnvelope.of(slots.getAvailabilityPreview(tourId, from, to, limit));
     }
 }
