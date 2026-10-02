@@ -7,6 +7,7 @@ import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
 import com.CampusToursLive.web.dto.PagedResponse;
 import com.CampusToursLive.web.dto.Problem;
+import com.CampusToursLive.web.dto.SavedTourResponse;
 import com.CampusToursLive.web.dto.TourSummaryResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -17,9 +18,14 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -118,5 +124,83 @@ public class SavedTourController {
     public ApiEnvelope<List<UUID>> ids() {
         var user = currentUser.requireRole(UserRole.PARTICIPANT);
         return ApiEnvelope.of(savedTourService.savedTourIds(user.getId()));
+    }
+
+    @Operation(
+            summary = "Save a tour",
+            description =
+                    "Saves a bookable tour offering for the caller. Idempotent: saving a tour that"
+                            + " is already saved succeeds with newlySaved=false. Only tours"
+                            + " currently bookable on the marketplace can be saved.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The tour is saved (newly, or it already was).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.SAVED_TOUR_SAVED)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the PARTICIPANT role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "Tour not found (unknown offering, or not currently bookable).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @PutMapping("/{tourOfferingId}")
+    public ApiEnvelope<SavedTourResponse> save(
+            @Parameter(description = "Id of the tour offering to save (UUID).") @PathVariable
+                    UUID tourOfferingId) {
+        var user = currentUser.requireRole(UserRole.PARTICIPANT);
+        boolean newlySaved = savedTourService.save(user.getId(), tourOfferingId);
+        return ApiEnvelope.of(new SavedTourResponse(tourOfferingId.toString(), newlySaved));
+    }
+
+    @Operation(
+            summary = "Unsave a tour",
+            description =
+                    "Removes a tour from the caller's saved tours. Idempotent: removing a tour that"
+                            + " was not saved also returns 204. Works even if the tour is no"
+                            + " longer bookable.")
+    @ApiResponse(responseCode = "204", description = "The tour is not saved (anymore).")
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the PARTICIPANT role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @DeleteMapping("/{tourOfferingId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unsave(
+            @Parameter(description = "Id of the tour offering to unsave (UUID).") @PathVariable
+                    UUID tourOfferingId) {
+        var user = currentUser.requireRole(UserRole.PARTICIPANT);
+        savedTourService.unsave(user.getId(), tourOfferingId);
     }
 }

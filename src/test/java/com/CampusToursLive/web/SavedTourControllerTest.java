@@ -1,9 +1,12 @@
 package com.CampusToursLive.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -11,8 +14,10 @@ import com.CampusToursLive.domain.saved.SavedTourService;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.error.ForbiddenException;
+import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.dto.PagedResponse;
+import com.CampusToursLive.web.dto.SavedTourResponse;
 import com.CampusToursLive.web.dto.TourSummaryResponse;
 import java.util.List;
 import java.util.UUID;
@@ -67,6 +72,58 @@ class SavedTourControllerTest {
         when(savedTourService.savedTourIds(u.getId())).thenReturn(ids);
 
         assertSame(ids, controller().ids().data());
+    }
+
+    @Test
+    void save_returnsOfferingIdAndNewlySavedFlag() {
+        UserEntity u = participant();
+        UUID offeringId = UUID.randomUUID();
+        when(savedTourService.save(u.getId(), offeringId)).thenReturn(true);
+
+        SavedTourResponse data = controller().save(offeringId).data();
+
+        assertEquals(offeringId.toString(), data.tourOfferingId());
+        assertTrue(data.newlySaved());
+    }
+
+    @Test
+    void save_reportsNotNewlySaved_whenAlreadySaved() {
+        UserEntity u = participant();
+        UUID offeringId = UUID.randomUUID();
+        when(savedTourService.save(u.getId(), offeringId)).thenReturn(false);
+
+        assertFalse(controller().save(offeringId).data().newlySaved());
+    }
+
+    @Test
+    void save_propagates404_whenTourNotBookable() {
+        UserEntity u = participant();
+        UUID offeringId = UUID.randomUUID();
+        when(savedTourService.save(u.getId(), offeringId))
+                .thenThrow(new NotFoundException("Tour not found"));
+
+        assertThrows(NotFoundException.class, () -> controller().save(offeringId));
+    }
+
+    @Test
+    void unsave_delegatesForTheCaller() {
+        UserEntity u = participant();
+        UUID offeringId = UUID.randomUUID();
+
+        controller().unsave(offeringId);
+
+        verify(savedTourService).unsave(u.getId(), offeringId);
+    }
+
+    @Test
+    void unsave_403_whenCallerIsNotParticipant_andServiceNeverCalled() {
+        when(currentUser.requireRole(UserRole.PARTICIPANT))
+                .thenThrow(
+                        new ForbiddenException(
+                                "Missing required role: PARTICIPANT", "ROLE_REQUIRED"));
+
+        assertThrows(ForbiddenException.class, () -> controller().unsave(UUID.randomUUID()));
+        verifyNoInteractions(savedTourService);
     }
 
     @Test
