@@ -28,10 +28,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 
-/**
- * SavedTourController — thin adapter: enforces PARTICIPANT role, delegates to SavedTourService,
- * wraps the result in the {@code {data, meta}} envelope.
- */
 @ExtendWith(MockitoExtension.class)
 class SavedTourControllerTest {
 

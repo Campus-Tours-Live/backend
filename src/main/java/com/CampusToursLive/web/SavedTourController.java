@@ -28,18 +28,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-/**
- * A participant's saved tours (BFF maps /v1/participant/saved-tours → here). Every operation
- * requires the PARTICIPANT role and acts only on the caller's own saves.
- */
+/** Participant saved tours (BFF maps /v1/participant/saved-tours → here). */
 @RestController
 @RequestMapping("/participant/saved-tours")
-@Tag(
-        name = "Saved tours",
-        description =
-                "A participant's saved tours (wishlist). Every operation requires a valid platform"
-                        + " JWT and the PARTICIPANT role, and only ever reads or changes the"
-                        + " caller's own saves.")
+@Tag(name = "Saved tours", description = "The caller's saved tours. Requires PARTICIPANT.")
 public class SavedTourController {
 
     private final CurrentUser currentUser;
@@ -52,10 +44,7 @@ public class SavedTourController {
 
     @Operation(
             summary = "List saved tours",
-            description =
-                    "Returns the caller's saved tours as marketplace cards, most recently saved"
-                            + " first. Tours that are no longer bookable on the marketplace are"
-                            + " left out of the page and its totals.")
+            description = "Newest first; tours no longer bookable are left out.")
     @ApiResponse(
             responseCode = "200",
             description = "A page of the caller's saved tours.",
@@ -93,10 +82,7 @@ public class SavedTourController {
 
     @Operation(
             summary = "List saved tour ids",
-            description =
-                    "Returns only the ids of every tour offering the caller has saved, most recent"
-                            + " first, so the catalog can mark saved cards without fetching them."
-                            + " Not filtered by marketplace visibility.")
+            description = "Ids only, newest first, for marking catalog cards.")
     @ApiResponse(
             responseCode = "200",
             description = "The caller's saved tour offering ids.",
@@ -128,10 +114,7 @@ public class SavedTourController {
 
     @Operation(
             summary = "Save a tour",
-            description =
-                    "Saves a bookable tour offering for the caller. Idempotent: saving a tour that"
-                            + " is already saved succeeds with newlySaved=false. Only tours"
-                            + " currently bookable on the marketplace can be saved.")
+            description = "Idempotent; re-saving returns newlySaved=false.")
     @ApiResponse(
             responseCode = "200",
             description = "The tour is saved (newly, or it already was).",
@@ -174,10 +157,7 @@ public class SavedTourController {
 
     @Operation(
             summary = "Unsave a tour",
-            description =
-                    "Removes a tour from the caller's saved tours. Idempotent: removing a tour that"
-                            + " was not saved also returns 204. Works even if the tour is no"
-                            + " longer bookable.")
+            description = "Idempotent; unsaving a tour that is not saved also returns 204.")
     @ApiResponse(responseCode = "204", description = "The tour is not saved (anymore).")
     @ApiResponse(
             responseCode = "401",
