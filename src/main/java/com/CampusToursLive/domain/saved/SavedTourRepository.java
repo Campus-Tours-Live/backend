@@ -12,11 +12,7 @@ import org.springframework.data.repository.query.Param;
 
 public interface SavedTourRepository extends JpaRepository<SavedTourEntity, UUID> {
 
-    /**
-     * FROM + WHERE shared by the visible-saves page and its count query. The offering predicate
-     * mirrors {@code TourOfferingRepository.findDiscoverableById}, so a save whose offering is no
-     * longer marketplace-visible stays in the table but drops out of both.
-     */
+    /** Offering predicate must stay in sync with TourOfferingRepository.findDiscoverableById. */
     String VISIBLE_SAVED_FROM_WHERE =
             """
             from SavedTourEntity s
@@ -29,11 +25,7 @@ public interface SavedTourRepository extends JpaRepository<SavedTourEntity, UUID
               and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
             """;
 
-    /**
-     * Inserts the save unless the (user, offering) pair already exists. Returns 1 when a row was
-     * written, 0 when it was already saved. {@code ON CONFLICT} rather than check-then-insert: two
-     * concurrent saves would otherwise trip the unique constraint and fail the loser.
-     */
+    /** Returns 1 if inserted, 0 if already saved; ON CONFLICT keeps concurrent saves safe. */
     @Modifying
     @Query(
             value =
@@ -57,14 +49,12 @@ public interface SavedTourRepository extends JpaRepository<SavedTourEntity, UUID
     int deleteByUserIdAndTourOfferingId(
             @Param("userId") UUID userId, @Param("tourOfferingId") UUID tourOfferingId);
 
-    /** The caller's still-visible saved offerings, most recently saved first. */
     @Query(
             value = "select o " + VISIBLE_SAVED_FROM_WHERE + " order by s.createdAt desc",
             countQuery = "select count(o) " + VISIBLE_SAVED_FROM_WHERE)
     Page<TourOfferingEntity> findVisibleSavedOfferings(
             @Param("userId") UUID userId, Pageable pageable);
 
-    /** Offering ids only — for lighting marketplace hearts without full summaries. */
     @Query(
             """
             select s.tourOfferingId from SavedTourEntity s

@@ -631,8 +631,6 @@ class TourDiscoveryServiceTest {
         assertEquals(0.0, service().getById(oid).avgRating());
     }
 
-    // ---- toSummaries (batch card mapping for other read surfaces) ----
-
     @Test
     void toSummaries_emptyInput_returnsEmptyWithoutLookups() {
         assertEquals(List.of(), service().toSummaries(List.of()));

@@ -28,7 +28,6 @@ public class SavedTourEntity {
     @Column(name = "tour_offering_id", nullable = false)
     private UUID tourOfferingId;
 
-    /** DB default now(); never written by the app. */
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private Instant createdAt;
 
