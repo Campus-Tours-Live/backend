@@ -319,6 +319,38 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    // --- Saved tours (CTL-125) ---
+
+    String SAVED_TOUR_PAGE =
+            "{\"data\":{\"items\":[{\"id\":\"o1a2c3d4-0000-4000-8000-000000000002\","
+                    + "\"title\":\"North Campus highlights\",\"slug\":\"north-campus-highlights\","
+                    + "\"topic\":\"GENERAL_CAMPUS\","
+                    + "\"universityId\":\"u1a2c3d4-0000-4000-8000-000000000003\","
+                    + "\"universityName\":\"North Coast University\","
+                    + "\"universityImageUrl\":\"https://pub-3225b84a9a0b4728b11f261ee52251ba.r2"
+                    + ".dev/Stanford%20University.png\","
+                    + "\"guideId\":\"11111111-0000-4000-8000-000000000001\","
+                    + "\"guideDisplayName\":\"Maya Chen\",\"guideMajor\":\"Computer Science\","
+                    + "\"guideDegree\":\"BS\",\"guideEntryYear\":2023,"
+                    + "\"durationMin\":60,\"priceCents\":4200,\"currency\":\"USD\","
+                    + "\"avgRating\":4.5,\"reviewCount\":12,\"languages\":[\"en-US\"],"
+                    + "\"features\":[\"Q_AND_A\"],\"isNew\":false}],"
+                    + "\"page\":0,\"size\":20,\"totalElements\":1,\"totalPages\":1},"
+                    + META
+                    + "}";
+
+    String SAVED_TOUR_IDS =
+            "{\"data\":[\"o1a2c3d4-0000-4000-8000-000000000002\","
+                    + "\"o1a2c3d4-0000-4000-8000-000000000005\"],"
+                    + META
+                    + "}";
+
+    String SAVED_TOUR_SAVED =
+            "{\"data\":{\"tourOfferingId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
+                    + "\"newlySaved\":true},"
+                    + META
+                    + "}";
+
     // --- Availability (CTL-54) ---
 
     String AVAILABILITY_RULE_JSON =
