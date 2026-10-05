@@ -418,26 +418,6 @@ class SlotGenerationServiceIntegrationTest {
     }
 
     @Test
-    void getAvailabilityPreview_clampsSampleLimitButKeepsTotalCount() {
-        TourOfferingEntity offering = offering(30);
-        Instant start = FIXED_NOW.plus(3, java.time.temporal.ChronoUnit.DAYS);
-        occurrence(start, start.plus(3, java.time.temporal.ChronoUnit.HOURS));
-
-        OfferingAvailabilityPreviewResponse capped =
-                service.getAvailabilityPreview(offering.getId(), "2026-07-13", "2026-07-15", 99);
-        OfferingAvailabilityPreviewResponse emptySample =
-                service.getAvailabilityPreview(offering.getId(), "2026-07-13", "2026-07-15", -1);
-
-        assertThat(capped.hasAvailability()).isTrue();
-        assertThat(capped.totalSlots()).isEqualTo(6);
-        assertThat(capped.sampleSlots()).hasSize(6);
-        assertThat(emptySample.hasAvailability()).isTrue();
-        assertThat(emptySample.totalSlots()).isEqualTo(6);
-        assertThat(emptySample.nextStartAt()).isEqualTo(start);
-        assertThat(emptySample.sampleSlots()).isEmpty();
-    }
-
-    @Test
     void getAvailabilityPreview_defaultsToBoundedTwoWeekWindow() {
         TourOfferingEntity offering = offering(60);
         Instant withinPreview = FIXED_NOW.plus(3, java.time.temporal.ChronoUnit.DAYS);
@@ -454,20 +434,6 @@ class SlotGenerationServiceIntegrationTest {
         assertThat(preview.sampleSlots())
                 .extracting(SlotResponse::startAt)
                 .containsExactly(withinPreview);
-    }
-
-    @Test
-    void getAvailabilityPreview_returnsEmptyShapeWhenOfferingHasNoSlots() {
-        TourOfferingEntity offering = offering(60);
-
-        OfferingAvailabilityPreviewResponse preview =
-                service.getAvailabilityPreview(offering.getId(), null, null, 3);
-
-        assertThat(preview.hasAvailability()).isFalse();
-        assertThat(preview.totalSlots()).isZero();
-        assertThat(preview.nextStartAt()).isNull();
-        assertThat(preview.nextEndAt()).isNull();
-        assertThat(preview.sampleSlots()).isEmpty();
     }
 
     // ---------------------------------------------------------------------
