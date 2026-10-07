@@ -229,13 +229,13 @@ class BookingServiceTest {
                         .findByParticipantUserIdAndStatusInAndScheduledStartAtAfterOrderByScheduledStartAtAsc(
                                 eq(uid), any(), any(Instant.class)))
                 .thenReturn(List.of(b));
-        when(offerings.findById(offeringId))
-                .thenReturn(Optional.of(offering(offeringId, "Lab Tour")));
-        when(guides.findById(guideProfileId))
-                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
-        when(users.findById(guideUserId)).thenReturn(Optional.of(user(guideUserId, "Alex Guide")));
-        when(universities.findById(universityId))
-                .thenReturn(Optional.of(university(universityId, "Tech U")));
+        // List path resolves names via the batched findAllById (CTL-35), not per-row findById.
+        when(offerings.findAllById(any())).thenReturn(List.of(offering(offeringId, "Lab Tour")));
+        when(guides.findAllById(any()))
+                .thenReturn(List.of(guideProfile(guideProfileId, guideUserId)));
+        when(users.findAllById(any())).thenReturn(List.of(user(guideUserId, "Alex Guide")));
+        when(universities.findAllById(any()))
+                .thenReturn(List.of(university(universityId, "Tech U")));
 
         List<BookingDetailResponse> result = service().getUpcomingBookings(uid);
         assertEquals(1, result.size());
@@ -243,6 +243,127 @@ class BookingServiceTest {
         assertEquals(45, result.get(0).durationMin());
         assertEquals("Lab Tour", result.get(0).offeringTitle());
         assertEquals("Alex Guide", result.get(0).guideName());
+    }
+
+    @Test
+    void getUpcomingBookings_batchesNameLookups_noPerRowFindById() {
+        UUID uid = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UUID guideUserId = UUID.randomUUID();
+        UUID offeringId = UUID.randomUUID();
+        UUID universityId = UUID.randomUUID();
+        Instant start = Instant.now().plus(1, ChronoUnit.DAYS);
+        // Two bookings sharing one guide/offering/university: the distinct-id prefetch fetches each
+        // related entity ONCE for the whole list rather than per row (CTL-35).
+        BookingEntity b1 =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        offeringId,
+                        universityId,
+                        BookingStatus.CONFIRMED,
+                        start,
+                        start.plus(60, ChronoUnit.MINUTES));
+        BookingEntity b2 =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        offeringId,
+                        universityId,
+                        BookingStatus.CONFIRMED,
+                        start.plus(2, ChronoUnit.HOURS),
+                        start.plus(3, ChronoUnit.HOURS));
+        b1.setParticipantUserId(uid);
+        b2.setParticipantUserId(uid);
+        when(bookings
+                        .findByParticipantUserIdAndStatusInAndScheduledStartAtAfterOrderByScheduledStartAtAsc(
+                                eq(uid), any(), any(Instant.class)))
+                .thenReturn(List.of(b1, b2));
+        when(offerings.findAllById(any())).thenReturn(List.of(offering(offeringId, "Campus Walk")));
+        when(guides.findAllById(any()))
+                .thenReturn(List.of(guideProfile(guideProfileId, guideUserId)));
+        when(users.findAllById(any())).thenReturn(List.of(user(guideUserId, "Jane Guide")));
+        when(universities.findAllById(any()))
+                .thenReturn(List.of(university(universityId, "Test University")));
+
+        List<BookingDetailResponse> result = service().getUpcomingBookings(uid);
+
+        assertEquals(2, result.size());
+        assertEquals("Jane Guide", result.get(0).guideName());
+        assertEquals("Campus Walk", result.get(1).offeringTitle());
+        assertEquals("Test University", result.get(0).universityName());
+        // Batched: one findAllById per related repo, and NO per-row findById fan-out.
+        verify(offerings).findAllById(any());
+        verify(guides).findAllById(any());
+        verify(users).findAllById(any());
+        verify(universities).findAllById(any());
+        verify(offerings, never()).findById(any());
+        verify(guides, never()).findById(any());
+        verify(users, never()).findById(any());
+        verify(universities, never()).findById(any());
+    }
+
+    @Test
+    void getUpcomingBookings_missingRelatedRows_fallBackToDefaults() {
+        // Batched lookups return nothing for this booking's offering/guide/university → the
+        // per-name fallbacks ("Tour" / "" / "") are used (CTL-35 offeringTitleOf/guideNameOf/
+        // universityNameOf null branches).
+        UUID uid = UUID.randomUUID();
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.CONFIRMED,
+                        Instant.now().plus(1, ChronoUnit.DAYS),
+                        Instant.now().plus(1, ChronoUnit.DAYS).plus(60, ChronoUnit.MINUTES));
+        b.setParticipantUserId(uid);
+        when(bookings
+                        .findByParticipantUserIdAndStatusInAndScheduledStartAtAfterOrderByScheduledStartAtAsc(
+                                eq(uid), any(), any(Instant.class)))
+                .thenReturn(List.of(b));
+        when(offerings.findAllById(any())).thenReturn(List.of());
+        when(guides.findAllById(any())).thenReturn(List.of());
+        when(users.findAllById(any())).thenReturn(List.of());
+        when(universities.findAllById(any())).thenReturn(List.of());
+
+        BookingDetailResponse resp = service().getUpcomingBookings(uid).get(0);
+        assertEquals("Tour", resp.offeringTitle());
+        assertEquals("", resp.guideName());
+        assertEquals("", resp.universityName());
+    }
+
+    @Test
+    void getUpcomingBookings_guidePresentButUserMissing_guideNameEmpty() {
+        // The guide profile resolves but its user row does not → guideNameOf's missing-user branch.
+        UUID uid = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UUID guideUserId = UUID.randomUUID();
+        UUID offeringId = UUID.randomUUID();
+        UUID universityId = UUID.randomUUID();
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        offeringId,
+                        universityId,
+                        BookingStatus.CONFIRMED,
+                        Instant.now().plus(1, ChronoUnit.DAYS),
+                        Instant.now().plus(1, ChronoUnit.DAYS).plus(60, ChronoUnit.MINUTES));
+        b.setParticipantUserId(uid);
+        when(bookings
+                        .findByParticipantUserIdAndStatusInAndScheduledStartAtAfterOrderByScheduledStartAtAsc(
+                                eq(uid), any(), any(Instant.class)))
+                .thenReturn(List.of(b));
+        when(offerings.findAllById(any())).thenReturn(List.of(offering(offeringId, "Campus Walk")));
+        when(guides.findAllById(any()))
+                .thenReturn(List.of(guideProfile(guideProfileId, guideUserId)));
+        when(users.findAllById(any())).thenReturn(List.of()); // user row gone
+        when(universities.findAllById(any()))
+                .thenReturn(List.of(university(universityId, "Tech U")));
+
+        assertEquals("", service().getUpcomingBookings(uid).get(0).guideName());
     }
 
     @Test
@@ -1183,7 +1304,6 @@ class BookingServiceTest {
     void getCart_returnsDraftItems_withDraftDisplayStatus() {
         UUID uid = UUID.randomUUID();
         BookingEntity item = upcomingBooking(uid, BookingStatus.DRAFT);
-        stubDetailLookups(item);
         when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(uid, BookingStatus.DRAFT))
                 .thenReturn(List.of(item));
 
@@ -1231,10 +1351,8 @@ class BookingServiceTest {
         when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
                         participant.getId(), BookingStatus.DRAFT))
                 .thenReturn(List.of(i1, i2));
-        UUID gu1 = stubCheckoutLookups(i1, TourStatus.ACTIVE);
-        UUID gu2 = stubCheckoutLookups(i2, TourStatus.ACTIVE);
-        when(users.findById(gu1)).thenReturn(Optional.of(user(gu1, "G1")));
-        when(users.findById(gu2)).thenReturn(Optional.of(user(gu2, "G2")));
+        stubCheckoutLookups(i1, TourStatus.ACTIVE);
+        stubCheckoutLookups(i2, TourStatus.ACTIVE);
         stubNoOverlaps();
         when(bookings.saveAllAndFlush(any())).thenReturn(List.of(i1, i2));
 
@@ -1338,8 +1456,7 @@ class BookingServiceTest {
         when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
                         participant.getId(), BookingStatus.DRAFT))
                 .thenReturn(List.of(item));
-        UUID gu = stubCheckoutLookups(item, TourStatus.ACTIVE, 30, 9000L);
-        when(users.findById(gu)).thenReturn(Optional.of(user(gu, "G")));
+        stubCheckoutLookups(item, TourStatus.ACTIVE, 30, 9000L);
         stubNoOverlaps();
         when(bookings.saveAllAndFlush(any())).thenReturn(List.of(item));
 
@@ -1410,8 +1527,7 @@ class BookingServiceTest {
         when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
                         participant.getId(), BookingStatus.DRAFT))
                 .thenReturn(List.of(item));
-        UUID gu = stubCheckoutLookups(item, TourStatus.ACTIVE);
-        when(users.findById(gu)).thenReturn(Optional.of(user(gu, "G")));
+        stubCheckoutLookups(item, TourStatus.ACTIVE);
         GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
         guideSettings.setMaxAdvanceDays(180);
         when(settings.findByGuideId(item.getGuideId())).thenReturn(Optional.of(guideSettings));
@@ -1432,8 +1548,7 @@ class BookingServiceTest {
         when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
                         participant.getId(), BookingStatus.DRAFT))
                 .thenReturn(List.of(item));
-        UUID gu = stubCheckoutLookups(item, TourStatus.ACTIVE);
-        when(users.findById(gu)).thenReturn(Optional.of(user(gu, "G")));
+        stubCheckoutLookups(item, TourStatus.ACTIVE);
         GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
         guideSettings.setBufferBeforeMin(30);
         guideSettings.setBufferAfterMin(45);
@@ -1527,8 +1642,7 @@ class BookingServiceTest {
         when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
                         participant.getId(), BookingStatus.DRAFT))
                 .thenReturn(List.of(i1, i2));
-        UUID gu = stubCheckoutLookups(i1, TourStatus.ACTIVE);
-        when(users.findById(gu)).thenReturn(Optional.of(user(gu, "G")));
+        stubCheckoutLookups(i1, TourStatus.ACTIVE);
         stubNoOverlaps();
         when(bookings.saveAllAndFlush(any())).thenReturn(List.of(i1, i2));
 
