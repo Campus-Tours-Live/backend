@@ -6,6 +6,7 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -16,6 +17,23 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
     boolean existsByGuideIdAndSlug(UUID guideId, String slug);
 
     Optional<TourOfferingEntity> findByIdAndGuideId(UUID id, UUID guideId);
+
+    /**
+     * Recompute {@code avg_rating} / {@code review_count} for one offering from the source of truth
+     * — its PUBLISHED reviews. Idempotent and concurrency-safe; call inside the review-write
+     * transaction. Keeps discovery ranking (which sorts by these columns) accurate.
+     */
+    @Modifying
+    @Query(
+            value =
+                    "UPDATE tour_offerings SET"
+                            + " avg_rating = COALESCE((SELECT AVG(overall_rating) FROM reviews WHERE"
+                            + " tour_offering_id = :offeringId AND status = 'PUBLISHED'), 0),"
+                            + " review_count = (SELECT COUNT(*) FROM reviews WHERE tour_offering_id ="
+                            + " :offeringId AND status = 'PUBLISHED')"
+                            + " WHERE id = :offeringId",
+            nativeQuery = true)
+    void recomputeRatingAggregate(@Param("offeringId") UUID offeringId);
 
     /**
      * The catalog's FROM + WHERE, shared verbatim by the list query and its count query.
