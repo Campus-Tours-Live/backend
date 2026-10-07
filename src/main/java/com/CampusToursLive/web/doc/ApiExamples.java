@@ -134,6 +134,15 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String PUBLIC_GUIDE_PROFILE =
+            "{\"data\":{\"guideId\":\"g1a2c3d4-0000-4000-8000-000000000003\","
+                    + "\"displayName\":\"Maya Chen\","
+                    + "\"bio\":\"Third-year marine biology major who loves the waterfront campus.\","
+                    + "\"spokenLanguages\":[\"en-US\",\"zh\"],"
+                    + "\"tourTopics\":[\"GENERAL_CAMPUS\",\"STEM\"]},"
+                    + META
+                    + "}";
+
     String GUIDE_PROFILE =
             "{\"data\":{\"guideStatus\":\"VERIFIED\","
                     + "\"universities\":[{\"universityId\":"
