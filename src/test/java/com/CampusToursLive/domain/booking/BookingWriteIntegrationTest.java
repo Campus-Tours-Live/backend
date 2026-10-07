@@ -209,14 +209,23 @@ class BookingWriteIntegrationTest {
 
         bookings.saveAndFlush(heldBooking(participant.getId(), start));
         // Same guide, second participant, starting mid-way through the reserved interval →
-        // excl_guide_no_overlap must reject it at flush.
+        // excl_guide_no_overlap must reject it at flush. CTL-36: assert the REAL Postgres violation
+        // message carries the constraint name, so BookingService.isSlotConflict's substring match
+        // actually recognises a genuine slot race (vs a hand-crafted message in the unit tests).
         assertThatThrownBy(
                         () ->
                                 bookings.saveAndFlush(
                                         heldBooking(
                                                 otherParticipant.getId(),
                                                 start.plus(30, ChronoUnit.MINUTES))))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .satisfies(
+                        ex ->
+                                assertThat(
+                                                ((DataIntegrityViolationException) ex)
+                                                        .getMostSpecificCause()
+                                                        .getMessage())
+                                        .contains("excl_guide_no_overlap"));
     }
 
     // ── CTL-54 design-gap fix: createBooking honors the guide's OWN settings, and agrees with
