@@ -33,7 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Participant booking domain: dashboard reads (CTL-13), the create/cancel writes (CTL-19), and the
  * booking cart (CTL-31 — DRAFT bookings assembled item by item, submitted atomically at checkout).
- * Guide accept/decline, reschedule proposals, and payment integration are still deferred.
+ * Guide accept/decline, payment, and reschedule resolve are still deferred (propose is CTL-50).
  *
  * <p>The {@code guideId} on both {@code BookingEntity} and {@code TourOfferingEntity} is the {@code
  * guide_profiles.id} primary key, not the user id — resolving to a display name requires a two-step
@@ -65,12 +65,8 @@ public class BookingService {
             List.of(BookingStatus.PENDING_PAYMENT_AUTH, BookingStatus.PAYMENT_ACTION_REQUIRED);
 
     /**
-     * Statuses that hold a slot — mirrors the WHERE clause of the DB exclusion constraints.
-     * Package-private (not {@code private}) so {@link SlotGenerationService} can subtract the SAME
-     * set of held bookings from candidate slots — a CONFIRMED-only view (like {@link
-     * BookingRepository
-     * #findByGuideIdAndStatusAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc}, used
-     * by Task 7) would under-count what actually occupies a guide's calendar.
+     * Statuses that hold a slot (DB exclusion mirrors). Package-private for {@link
+     * SlotGenerationService}; other packages use {@link #slotHoldingStatuses()}.
      */
     static final List<BookingStatus> SLOT_HOLDING_STATUSES =
             List.of(
@@ -79,6 +75,10 @@ public class BookingService {
                     BookingStatus.PAYMENT_ACTION_REQUIRED,
                     BookingStatus.CONFIRMED,
                     BookingStatus.IN_PROGRESS);
+
+    public static List<BookingStatus> slotHoldingStatuses() {
+        return SLOT_HOLDING_STATUSES;
+    }
 
     /** Statuses a participant may cancel from (before the tour starts). */
     private static final List<BookingStatus> PARTICIPANT_CANCELLABLE_STATUSES =
