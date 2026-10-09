@@ -460,7 +460,9 @@ envelope; errors are `application/problem+json`.
 | `POST`        | `/cart/items`                     | Validate + add a cart item                                |
 | `DELETE`      | `/cart/items/{id}`                | Remove a cart item                                        |
 | `POST`        | `/cart/checkout`                  | Submit the whole cart atomically (all-or-nothing)         |
-| `GET`         | `/universities`                   | University catalog search (`q`, `limit`)                  |
+| `GET`         | `/universities/state-summary`     | Browse-by-state counts (Scorecard directory)              |
+| `GET`         | `/universities?state=`            | One state's universities (Scorecard directory)            |
+| `GET`         | `/universities/{slug}`            | Platform university profile + live-tour stats            |
 | `GET`         | `/meta/tour-topics`               | Controlled vocabulary for tour topics                     |
 | `POST`        | `/admin/guides/{userId}/decision` | Admin approve/reject a guide application                  |
 
