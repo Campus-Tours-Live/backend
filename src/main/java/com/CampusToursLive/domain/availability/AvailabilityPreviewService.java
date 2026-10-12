@@ -14,6 +14,7 @@ import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -437,7 +438,7 @@ public class AvailabilityPreviewService {
             throw new ValidationException("kind is required");
         }
         try {
-            return AvailabilityExceptionKind.valueOf(raw.trim().toUpperCase());
+            return AvailabilityExceptionKind.valueOf(raw.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             throw new ValidationException(
                     "Invalid kind (expected UNAVAILABLE or ADDITIONAL): " + raw);
