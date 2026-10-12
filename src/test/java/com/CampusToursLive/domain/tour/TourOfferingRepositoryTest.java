@@ -44,6 +44,7 @@ class TourOfferingRepositoryTest {
     private UUID archivedId;
     private UUID pendingGuideOfferingId;
     private UUID inactiveUniversityOfferingId;
+    private UUID pendingGuideId;
 
     @BeforeEach
     void seedVisibilityFixtures() {
@@ -55,8 +56,7 @@ class TourOfferingRepositoryTest {
         approvedGuideId = insertGuide(activeUniversityId, "VERIFIED");
         UUID pendingGuideUserId = UUID.randomUUID();
         insertUser(pendingGuideUserId, "Pending Guide");
-        UUID pendingGuideId =
-                insertGuideWithUser(activeUniversityId, pendingGuideUserId, "PENDING");
+        pendingGuideId = insertGuideWithUser(activeUniversityId, pendingGuideUserId, "PENDING");
 
         discoverableId =
                 insertOffering(
@@ -197,6 +197,37 @@ class TourOfferingRepositoryTest {
         }
 
         assertThat(paged).doesNotHaveDuplicates().containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    void findDiscoverableByGuide_returnsOnlyThatGuidesVisibleOfferings() {
+        List<TourOfferingEntity> rows =
+                offerings
+                        .findDiscoverableByGuide(approvedGuideId, PageRequest.of(0, 20))
+                        .getContent();
+        // Only the ACTIVE offering at the ACTIVE university — this guide's draft/paused/archived
+        // and
+        // its inactive-university offering are all excluded.
+        assertThat(rows).extracting(TourOfferingEntity::getId).containsExactly(discoverableId);
+    }
+
+    @Test
+    void findDiscoverableByGuide_pendingGuide_returnsEmpty() {
+        // The pending guide has an ACTIVE offering, but a non-VERIFIED guide is never discoverable.
+        assertThat(
+                        offerings
+                                .findDiscoverableByGuide(pendingGuideId, PageRequest.of(0, 20))
+                                .getContent())
+                .isEmpty();
+    }
+
+    @Test
+    void findDiscoverableByGuide_unknownGuide_returnsEmpty() {
+        assertThat(
+                        offerings
+                                .findDiscoverableByGuide(UUID.randomUUID(), PageRequest.of(0, 20))
+                                .getContent())
+                .isEmpty();
     }
 
     @Test
