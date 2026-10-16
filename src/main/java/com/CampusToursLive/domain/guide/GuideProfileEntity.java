@@ -48,6 +48,9 @@ public class GuideProfileEntity {
     @Column(name = "guide_status", columnDefinition = "guide_application_status", nullable = false)
     private GuideStatus status = GuideStatus.PENDING;
 
+    @Column(name = "approved_at")
+    private Instant approvedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
 
