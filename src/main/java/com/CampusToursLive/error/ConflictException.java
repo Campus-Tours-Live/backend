@@ -71,4 +71,12 @@ public final class ConflictException extends RuntimeException implements CodedPr
                 "ROLE_PROFILE_STATE_INVALID",
                 Map.of("role", role));
     }
+
+    /** Only a PENDING guide application can be approved or rejected. */
+    public static ConflictException guideApplicationNotPending(String currentStatus) {
+        return new ConflictException(
+                "Guide application is not pending: " + currentStatus,
+                "GUIDE_APPLICATION_NOT_PENDING",
+                Map.of("currentStatus", currentStatus));
+    }
 }
