@@ -98,6 +98,23 @@ public class TourDiscoveryService {
         return rows.map(o -> toSummary(o, lookup));
     }
 
+    /**
+     * One guide's discoverable tours, newest/recommended first — backs the public GET
+     * /guides/{id}/tours. Same marketplace-visibility rules and summary shape as {@link #list}; an
+     * unknown or non-verified guide yields an empty page.
+     */
+    @Transactional(readOnly = true)
+    public Page<TourSummaryResponse> listByGuide(UUID guideId, int page, int limit) {
+        int capped = Math.min(Math.max(limit, 1), MAX_LIMIT);
+        int safePage = Math.max(page, 0);
+        Page<TourOfferingEntity> rows =
+                offerings.findDiscoverableByGuide(
+                        guideId,
+                        PageRequest.of(safePage, capped, toSort(TourDiscoverySort.RECOMMENDED)));
+        Lookup lookup = loadLookup(rows.getContent());
+        return rows.map(o -> toSummary(o, lookup));
+    }
+
     @Transactional(readOnly = true)
     public TourDetailResponse getById(UUID tourId) {
         TourOfferingEntity offering =
