@@ -211,17 +211,32 @@ public class BookingService {
     }
 
     /**
-     * Cancel the participant's own upcoming booking. Allowed from any pre-tour active status
-     * (pending payment/acceptance or CONFIRMED) until the scheduled start; idempotent if the
-     * booking is already participant-cancelled.
+     * Cancel a booking on behalf of whichever party the caller is (CTL-45): the booking's
+     * PARTICIPANT-owner or its GUIDE. The Core resolves the caller's relationship to the booking
+     * (the endpoint is role-gated by authz, not by path), then applies that party's cancel rules; a
+     * caller who is neither party gets a 404, so a booking's existence never leaks.
      */
     @Transactional
     public BookingDetailResponse cancelBooking(
-            UserEntity participant, UUID bookingId, CancelBookingRequest req) {
+            UserEntity caller, UUID bookingId, CancelBookingRequest req) {
         BookingEntity b =
-                bookings.findByIdAndParticipantUserId(bookingId, participant.getId())
+                bookings.findById(bookingId)
                         .orElseThrow(() -> new NotFoundException("Booking not found"));
+        if (b.getParticipantUserId().equals(caller.getId())) {
+            return cancelAsParticipant(b, caller, req);
+        }
+        if (isBookingGuide(b, caller.getId())) {
+            return cancelAsGuide(b, caller, req);
+        }
+        throw new NotFoundException("Booking not found");
+    }
 
+    /**
+     * Participant cancel: allowed from any pre-tour active status (pending payment/acceptance or
+     * CONFIRMED) until the scheduled start; idempotent if already participant-cancelled.
+     */
+    private BookingDetailResponse cancelAsParticipant(
+            BookingEntity b, UserEntity participant, CancelBookingRequest req) {
         if (b.getStatus() == BookingStatus.CANCELLED_BY_PARTICIPANT) {
             return toDetailResponse(b); // idempotent
         }
@@ -243,6 +258,119 @@ public class BookingService {
         bookings.save(b);
         recordTransition(b, previous, participant.getId(), "PARTICIPANT_CANCELLED");
         return toDetailResponse(b);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Guide booking response (CTL-45)
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Guide accepts a pending request: {@code PENDING_GUIDE_ACCEPTANCE → CONFIRMED} (idempotent if
+     * already confirmed). The slot stays held throughout (both statuses are in {@link
+     * #SLOT_HOLDING_STATUSES}), so accepting never re-opens a race. Payment capture on accept is
+     * deferred — payments aren't built, so accept goes straight to CONFIRMED for the MVP; when they
+     * land, this is where the Stripe capture fires (design §7.1).
+     */
+    @Transactional
+    public BookingDetailResponse acceptBooking(UserEntity guide, UUID bookingId) {
+        BookingEntity b = requireGuidesBooking(guide, bookingId);
+        if (b.getStatus() == BookingStatus.CONFIRMED) {
+            return toDetailResponse(b); // idempotent
+        }
+        if (b.getStatus() != BookingStatus.PENDING_GUIDE_ACCEPTANCE) {
+            throw new ValidationException("This booking is no longer awaiting your response");
+        }
+
+        BookingStatus previous = b.getStatus();
+        b.setStatus(BookingStatus.CONFIRMED);
+        b.setConfirmedAt(Instant.now());
+        b.setGuideResponseDeadlineAt(null);
+        bookings.save(b);
+        recordTransition(b, previous, BookingActor.GUIDE, guide.getId(), "GUIDE_ACCEPTED");
+        return toDetailResponse(b);
+    }
+
+    /**
+     * Guide declines a pending request: {@code PENDING_GUIDE_ACCEPTANCE → DECLINED_BY_GUIDE}
+     * (idempotent if already declined). DECLINED_BY_GUIDE is outside {@link
+     * #SLOT_HOLDING_STATUSES}, so the slot is released for others. The optional reason is recorded.
+     */
+    @Transactional
+    public BookingDetailResponse declineBooking(
+            UserEntity guide, UUID bookingId, CancelBookingRequest req) {
+        BookingEntity b = requireGuidesBooking(guide, bookingId);
+        if (b.getStatus() == BookingStatus.DECLINED_BY_GUIDE) {
+            return toDetailResponse(b); // idempotent
+        }
+        if (b.getStatus() != BookingStatus.PENDING_GUIDE_ACCEPTANCE) {
+            throw new ValidationException("This booking is no longer awaiting your response");
+        }
+
+        BookingStatus previous = b.getStatus();
+        b.setStatus(BookingStatus.DECLINED_BY_GUIDE);
+        b.setCancellationActor(BookingActor.GUIDE);
+        b.setCancelledAt(Instant.now());
+        if (req != null) {
+            b.setCancellationReason(cleanFreeText(req.reason(), "reason"));
+        }
+        bookings.save(b);
+        recordTransition(b, previous, BookingActor.GUIDE, guide.getId(), "GUIDE_DECLINED");
+        return toDetailResponse(b);
+    }
+
+    /**
+     * Guide cancels a confirmed booking before it starts: {@code CONFIRMED → CANCELLED_BY_GUIDE}
+     * (idempotent if already guide-cancelled). A full participant refund is owed once payments land
+     * (design §7.3). Rejected once the tour has started or from any non-CONFIRMED status.
+     */
+    private BookingDetailResponse cancelAsGuide(
+            BookingEntity b, UserEntity guide, CancelBookingRequest req) {
+        if (b.getStatus() == BookingStatus.CANCELLED_BY_GUIDE) {
+            return toDetailResponse(b); // idempotent
+        }
+        if (b.getStatus() != BookingStatus.CONFIRMED) {
+            throw new ValidationException("Only a confirmed booking can be cancelled");
+        }
+        if (!b.getScheduledStartAt().isAfter(Instant.now())) {
+            throw new ValidationException(
+                    "This booking has already started and can no longer be cancelled");
+        }
+
+        BookingStatus previous = b.getStatus();
+        b.setStatus(BookingStatus.CANCELLED_BY_GUIDE);
+        b.setCancellationActor(BookingActor.GUIDE);
+        b.setCancelledAt(Instant.now());
+        if (req != null) {
+            b.setCancellationReason(cleanFreeText(req.reason(), "reason"));
+        }
+        bookings.save(b);
+        recordTransition(b, previous, BookingActor.GUIDE, guide.getId(), "GUIDE_CANCELLED");
+        return toDetailResponse(b);
+    }
+
+    /**
+     * True when {@code userId} owns the booking's guide profile ({@code guide_profiles.user_id}).
+     */
+    private boolean isBookingGuide(BookingEntity b, UUID userId) {
+        return guides.findByUserId(userId)
+                .map(GuideProfileEntity::getId)
+                .filter(guideProfileId -> guideProfileId.equals(b.getGuideId()))
+                .isPresent();
+    }
+
+    /**
+     * Load a booking that belongs to the calling guide, or 404. Scopes every guide action to the
+     * guide's own bookings ({@code guide_profiles.user_id → booking.guide_id}); a guide with no
+     * profile, or a booking that is not theirs, is indistinguishable from "not found".
+     */
+    private BookingEntity requireGuidesBooking(UserEntity guide, UUID bookingId) {
+        UUID guideProfileId =
+                guides.findByUserId(guide.getId())
+                        .map(GuideProfileEntity::getId)
+                        .orElseThrow(() -> new NotFoundException("Booking not found"));
+        return bookings.findById(bookingId)
+                .filter(b -> b.getGuideId().equals(guideProfileId))
+                .orElseThrow(() -> new NotFoundException("Booking not found"));
     }
 
     // ---------------------------------------------------------------------------
@@ -648,14 +776,24 @@ public class BookingService {
         return trimmed;
     }
 
-    /** Append one row to the booking_status_history audit trail. */
+    /** Append a participant-actor row to the booking_status_history audit trail. */
     private void recordTransition(
             BookingEntity b, BookingStatus previous, UUID actorUserId, String reasonCode) {
+        recordTransition(b, previous, BookingActor.PARTICIPANT, actorUserId, reasonCode);
+    }
+
+    /** Append one row to the booking_status_history audit trail with an explicit actor. */
+    private void recordTransition(
+            BookingEntity b,
+            BookingStatus previous,
+            BookingActor actor,
+            UUID actorUserId,
+            String reasonCode) {
         BookingStatusHistoryEntity h = new BookingStatusHistoryEntity();
         h.setBookingId(b.getId());
         h.setPreviousStatus(previous);
         h.setNewStatus(b.getStatus());
-        h.setActorType(BookingActor.PARTICIPANT);
+        h.setActorType(actor);
         h.setActorUserId(actorUserId);
         h.setReasonCode(reasonCode);
         statusHistory.save(h);

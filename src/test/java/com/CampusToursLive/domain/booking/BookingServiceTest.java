@@ -99,6 +99,30 @@ class BookingServiceTest {
         return g;
     }
 
+    private static Instant futureStart() {
+        return Instant.now().plus(3, ChronoUnit.DAYS);
+    }
+
+    /** A booking owned by some guide (random guide_profiles.id), in the given status and start. */
+    private static BookingEntity guideOwnedBooking(BookingStatus status, Instant start) {
+        return booking(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                status,
+                start,
+                start.plus(60, ChronoUnit.MINUTES));
+    }
+
+    /** Stubs the guide-profile ownership lookup so {@code b} belongs to the returned guide user. */
+    private UserEntity guideOwnerOf(BookingEntity b) {
+        UUID guideUserId = UUID.randomUUID();
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(b.getGuideId(), guideUserId)));
+        return user(guideUserId, "Guide");
+    }
+
     private static UserEntity user(UUID id, String displayName) {
         UserEntity u = new UserEntity();
         u.setId(id);
@@ -949,8 +973,7 @@ class BookingServiceTest {
     void cancelBooking_reasonOverLengthCap_isRejected() {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
         BookingEntity b = upcomingBooking(participant.getId(), BookingStatus.CONFIRMED);
-        when(bookings.findByIdAndParticipantUserId(b.getId(), participant.getId()))
-                .thenReturn(Optional.of(b));
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
 
         assertThrows(
                 ValidationException.class,
@@ -970,8 +993,7 @@ class BookingServiceTest {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
         BookingEntity b = upcomingBooking(participant.getId(), BookingStatus.CONFIRMED);
         stubDetailLookups(b);
-        when(bookings.findByIdAndParticipantUserId(b.getId(), participant.getId()))
-                .thenReturn(Optional.of(b));
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
 
         BookingDetailResponse resp =
                 service()
@@ -1002,8 +1024,7 @@ class BookingServiceTest {
         BookingEntity b =
                 upcomingBooking(participant.getId(), BookingStatus.PENDING_GUIDE_ACCEPTANCE);
         stubDetailLookups(b);
-        when(bookings.findByIdAndParticipantUserId(b.getId(), participant.getId()))
-                .thenReturn(Optional.of(b));
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
 
         service().cancelBooking(participant, b.getId(), null);
 
@@ -1016,8 +1037,7 @@ class BookingServiceTest {
     void cancelBooking_unknownOrForeignBooking_isNotFound() {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
         UUID bookingId = UUID.randomUUID();
-        when(bookings.findByIdAndParticipantUserId(bookingId, participant.getId()))
-                .thenReturn(Optional.empty());
+        when(bookings.findById(bookingId)).thenReturn(Optional.empty());
 
         assertThrows(
                 NotFoundException.class,
@@ -1030,8 +1050,7 @@ class BookingServiceTest {
         BookingEntity b =
                 upcomingBooking(participant.getId(), BookingStatus.CANCELLED_BY_PARTICIPANT);
         stubDetailLookups(b);
-        when(bookings.findByIdAndParticipantUserId(b.getId(), participant.getId()))
-                .thenReturn(Optional.of(b));
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
 
         BookingDetailResponse resp = service().cancelBooking(participant, b.getId(), null);
 
@@ -1044,8 +1063,7 @@ class BookingServiceTest {
     void cancelBooking_terminalStatus_isRejected() {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
         BookingEntity b = upcomingBooking(participant.getId(), BookingStatus.COMPLETED);
-        when(bookings.findByIdAndParticipantUserId(b.getId(), participant.getId()))
-                .thenReturn(Optional.of(b));
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
 
         assertThrows(
                 ValidationException.class,
@@ -1058,12 +1076,200 @@ class BookingServiceTest {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
         BookingEntity b = upcomingBooking(participant.getId(), BookingStatus.CONFIRMED);
         b.setScheduledStartAt(Instant.now().minus(10, ChronoUnit.MINUTES));
-        when(bookings.findByIdAndParticipantUserId(b.getId(), participant.getId()))
-                .thenReturn(Optional.of(b));
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
 
         assertThrows(
                 ValidationException.class,
                 () -> service().cancelBooking(participant, b.getId(), null));
+        verify(bookings, never()).save(any());
+    }
+
+    // ── guide accept / decline / guide-cancel (CTL-45) ─────────────────────────
+
+    @Test
+    void acceptBooking_pending_confirmsWithGuideAuditRow() {
+        BookingEntity b = guideOwnedBooking(BookingStatus.PENDING_GUIDE_ACCEPTANCE, futureStart());
+        b.setGuideResponseDeadlineAt(Instant.now().plus(90, ChronoUnit.MINUTES));
+        UserEntity guide = guideOwnerOf(b);
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
+
+        BookingDetailResponse resp = service().acceptBooking(guide, b.getId());
+
+        assertEquals(BookingStatus.CONFIRMED, b.getStatus());
+        assertNotNull(b.getConfirmedAt());
+        assertNull(b.getGuideResponseDeadlineAt());
+        verify(bookings).save(b);
+
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory).save(audit.capture());
+        assertEquals(BookingStatus.PENDING_GUIDE_ACCEPTANCE, audit.getValue().getPreviousStatus());
+        assertEquals(BookingStatus.CONFIRMED, audit.getValue().getNewStatus());
+        assertEquals(BookingActor.GUIDE, audit.getValue().getActorType());
+        assertEquals(guide.getId(), audit.getValue().getActorUserId());
+        assertEquals("GUIDE_ACCEPTED", audit.getValue().getReasonCode());
+        assertEquals("CONFIRMED", resp.status());
+    }
+
+    @Test
+    void acceptBooking_alreadyConfirmed_isIdempotent() {
+        BookingEntity b = guideOwnedBooking(BookingStatus.CONFIRMED, futureStart());
+        UserEntity guide = guideOwnerOf(b);
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
+
+        assertEquals("CONFIRMED", service().acceptBooking(guide, b.getId()).status());
+        verify(bookings, never()).save(any());
+        verifyNoInteractions(statusHistory);
+    }
+
+    @Test
+    void acceptBooking_nonPendingStatus_isRejected() {
+        BookingEntity b = guideOwnedBooking(BookingStatus.CANCELLED_BY_PARTICIPANT, futureStart());
+        UserEntity guide = guideOwnerOf(b);
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
+
+        assertThrows(ValidationException.class, () -> service().acceptBooking(guide, b.getId()));
+        verify(bookings, never()).save(any());
+    }
+
+    @Test
+    void acceptBooking_notThisGuidesBooking_isNotFound() {
+        BookingEntity b = guideOwnedBooking(BookingStatus.PENDING_GUIDE_ACCEPTANCE, futureStart());
+        // A different guide whose profile id does NOT match the booking's guide_id.
+        UUID otherGuideUserId = UUID.randomUUID();
+        when(guides.findByUserId(otherGuideUserId))
+                .thenReturn(Optional.of(guideProfile(UUID.randomUUID(), otherGuideUserId)));
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
+
+        assertThrows(
+                NotFoundException.class,
+                () -> service().acceptBooking(user(otherGuideUserId, "Other"), b.getId()));
+    }
+
+    @Test
+    void acceptBooking_callerHasNoGuideProfile_isNotFound() {
+        UUID guideUserId = UUID.randomUUID();
+        when(guides.findByUserId(guideUserId)).thenReturn(Optional.empty());
+
+        assertThrows(
+                NotFoundException.class,
+                () -> service().acceptBooking(user(guideUserId, "NoProfile"), UUID.randomUUID()));
+        verify(bookings, never()).findById(any());
+    }
+
+    @Test
+    void declineBooking_pending_declinesWithReasonAndGuideAuditRow() {
+        BookingEntity b = guideOwnedBooking(BookingStatus.PENDING_GUIDE_ACCEPTANCE, futureStart());
+        UserEntity guide = guideOwnerOf(b);
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
+
+        BookingDetailResponse resp =
+                service()
+                        .declineBooking(
+                                guide, b.getId(), new CancelBookingRequest("  booked up  "));
+
+        assertEquals(BookingStatus.DECLINED_BY_GUIDE, b.getStatus());
+        assertEquals(BookingActor.GUIDE, b.getCancellationActor());
+        assertEquals("booked up", b.getCancellationReason());
+        assertNotNull(b.getCancelledAt());
+        verify(bookings).save(b);
+
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory).save(audit.capture());
+        assertEquals(BookingStatus.DECLINED_BY_GUIDE, audit.getValue().getNewStatus());
+        assertEquals(BookingActor.GUIDE, audit.getValue().getActorType());
+        assertEquals("GUIDE_DECLINED", audit.getValue().getReasonCode());
+        assertEquals("CANCELLED", resp.status());
+    }
+
+    @Test
+    void declineBooking_alreadyDeclined_isIdempotent() {
+        BookingEntity b = guideOwnedBooking(BookingStatus.DECLINED_BY_GUIDE, futureStart());
+        UserEntity guide = guideOwnerOf(b);
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
+
+        assertEquals("CANCELLED", service().declineBooking(guide, b.getId(), null).status());
+        verify(bookings, never()).save(any());
+        verifyNoInteractions(statusHistory);
+    }
+
+    @Test
+    void declineBooking_nonPendingStatus_isRejected() {
+        BookingEntity b = guideOwnedBooking(BookingStatus.CONFIRMED, futureStart());
+        UserEntity guide = guideOwnerOf(b);
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
+
+        assertThrows(
+                ValidationException.class, () -> service().declineBooking(guide, b.getId(), null));
+        verify(bookings, never()).save(any());
+    }
+
+    @Test
+    void cancelBooking_byGuide_confirmedBeforeStart_cancelsByGuide() {
+        BookingEntity b = guideOwnedBooking(BookingStatus.CONFIRMED, futureStart());
+        UserEntity guide = guideOwnerOf(b);
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
+
+        BookingDetailResponse resp = service().cancelBooking(guide, b.getId(), null);
+
+        assertEquals(BookingStatus.CANCELLED_BY_GUIDE, b.getStatus());
+        assertEquals(BookingActor.GUIDE, b.getCancellationActor());
+        assertNotNull(b.getCancelledAt());
+        verify(bookings).save(b);
+        ArgumentCaptor<BookingStatusHistoryEntity> audit =
+                ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
+        verify(statusHistory).save(audit.capture());
+        assertEquals("GUIDE_CANCELLED", audit.getValue().getReasonCode());
+        assertEquals("CANCELLED", resp.status());
+    }
+
+    @Test
+    void cancelBooking_byGuide_nonConfirmed_isRejected() {
+        BookingEntity b = guideOwnedBooking(BookingStatus.PENDING_GUIDE_ACCEPTANCE, futureStart());
+        UserEntity guide = guideOwnerOf(b);
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
+
+        assertThrows(
+                ValidationException.class, () -> service().cancelBooking(guide, b.getId(), null));
+        verify(bookings, never()).save(any());
+    }
+
+    @Test
+    void cancelBooking_byGuide_afterStart_isRejected() {
+        BookingEntity b =
+                guideOwnedBooking(
+                        BookingStatus.CONFIRMED, Instant.now().minus(5, ChronoUnit.MINUTES));
+        UserEntity guide = guideOwnerOf(b);
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
+
+        assertThrows(
+                ValidationException.class, () -> service().cancelBooking(guide, b.getId(), null));
+        verify(bookings, never()).save(any());
+    }
+
+    @Test
+    void cancelBooking_byGuide_alreadyGuideCancelled_isIdempotent() {
+        BookingEntity b = guideOwnedBooking(BookingStatus.CANCELLED_BY_GUIDE, futureStart());
+        UserEntity guide = guideOwnerOf(b);
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
+
+        assertEquals("CANCELLED", service().cancelBooking(guide, b.getId(), null).status());
+        verify(bookings, never()).save(any());
+        verifyNoInteractions(statusHistory);
+    }
+
+    @Test
+    void cancelBooking_callerIsNeitherParticipantNorGuide_isNotFound() {
+        BookingEntity b = guideOwnedBooking(BookingStatus.CONFIRMED, futureStart());
+        UUID strangerId = UUID.randomUUID();
+        when(bookings.findById(b.getId())).thenReturn(Optional.of(b));
+        // Stranger is not the participant and holds no guide profile matching the booking.
+        when(guides.findByUserId(strangerId)).thenReturn(Optional.empty());
+
+        assertThrows(
+                NotFoundException.class,
+                () -> service().cancelBooking(user(strangerId, "Stranger"), b.getId(), null));
         verify(bookings, never()).save(any());
     }
 
