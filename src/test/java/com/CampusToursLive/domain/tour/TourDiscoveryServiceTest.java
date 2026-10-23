@@ -83,6 +83,58 @@ class TourDiscoveryServiceTest {
     }
 
     @Test
+    void listByGuide_queriesThatGuide_andMapsRowsLikeTheCatalog() {
+        UUID oid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uid = UUID.randomUUID();
+        UUID univId = UUID.randomUUID();
+        when(offerings.findDiscoverableByGuide(eq(gid), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(offering(oid, gid, univId))));
+
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(gid);
+        guide.setUserId(uid);
+        when(guides.findAllById(List.of(gid))).thenReturn(List.of(guide));
+        GuideUniversityEntity guideUniversity = new GuideUniversityEntity();
+        guideUniversity.setId(UUID.randomUUID());
+        guideUniversity.setGuideProfileId(gid);
+        guideUniversity.setUniversityId(univId);
+        when(guideUniversities.findByGuideProfileIdIn(List.of(gid)))
+                .thenReturn(List.of(guideUniversity));
+        UserEntity user = new UserEntity();
+        user.setId(uid);
+        user.setDisplayName("Maya Chen");
+        when(users.findAllById(List.of(uid))).thenReturn(List.of(user));
+        UniversityEntity university = new UniversityEntity();
+        university.setId(univId);
+        university.setName("North Coast University");
+        university.setSlug("north-coast");
+        university.setCity("Arcata");
+        university.setRegion("CA");
+        university.setStatus(UniversityStatus.ACTIVE);
+        when(universities.findAllById(List.of(univId))).thenReturn(List.of(university));
+
+        Page<TourSummaryResponse> res = service().listByGuide(gid, 0, 20);
+
+        assertEquals(1, res.getTotalElements());
+        assertEquals(oid.toString(), res.getContent().get(0).id());
+    }
+
+    @Test
+    void listByGuide_clampsPageAndLimit() {
+        UUID gid = UUID.randomUUID();
+        when(offerings.findDiscoverableByGuide(eq(gid), any(Pageable.class)))
+                .thenReturn(Page.empty());
+
+        service().listByGuide(gid, -3, 1000);
+
+        ArgumentCaptor<Pageable> page = ArgumentCaptor.forClass(Pageable.class);
+        verify(offerings).findDiscoverableByGuide(eq(gid), page.capture());
+        assertEquals(0, page.getValue().getPageNumber()); // negative page floored to 0
+        assertEquals(50, page.getValue().getPageSize()); // capped at MAX_LIMIT
+    }
+
+    @Test
     void list_mapsDiscoverableOfferings() {
         UUID oid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
