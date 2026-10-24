@@ -70,6 +70,20 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String REVIEW_DETAIL =
+            "{\"data\":{\"id\":\"r1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"bookingId\":\"b1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
+                    + "\"overallRating\":5,\"knowledgeRating\":5,\"communicationRating\":4,"
+                    + "\"friendlinessRating\":5,\"helpfulnessRating\":5,"
+                    + "\"comment\":\"Fantastic tour, learned a ton about the campus.\","
+                    + "\"privateFeedback\":\"The meeting-point instructions were a little unclear.\","
+                    + "\"status\":\"PUBLISHED\",\"guideResponse\":null,"
+                    + "\"createdAt\":\"2026-08-15T18:30:00Z\","
+                    + "\"publishedAt\":\"2026-08-15T18:30:00Z\"},"
+                    + META
+                    + "}";
+
     String BOOKING_LIST =
             "{\"data\":[{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
                     + "\"status\":\"CONFIRMED\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
