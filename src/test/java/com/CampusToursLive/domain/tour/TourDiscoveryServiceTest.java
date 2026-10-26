@@ -38,6 +38,8 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -325,6 +327,26 @@ class TourDiscoveryServiceTest {
     @Test
     void list_sortsByRating() {
         assertFirstSortOrder(TourDiscoverySort.RATING, "avgRating", Sort.Direction.DESC);
+    }
+
+    /**
+     * Every sort must end on a unique key, or tied rows (same price/title, same createdAt) have no
+     * stable order under LIMIT/OFFSET and a tour can repeat across pages or never appear.
+     */
+    @ParameterizedTest
+    @EnumSource(TourDiscoverySort.class)
+    void list_everySortEndsWithUniqueIdTiebreaker(TourDiscoverySort sort) {
+        when(offerings.findDiscoverable(any(), anyBoolean(), anyList(), any(), any(Pageable.class)))
+                .thenReturn(Page.empty());
+
+        service().list(null, null, "", sort, 0, 20);
+
+        ArgumentCaptor<Pageable> page = ArgumentCaptor.forClass(Pageable.class);
+        verify(offerings).findDiscoverable(eq(null), eq(false), anyList(), eq(""), page.capture());
+        List<Sort.Order> orders = page.getValue().getSort().toList();
+        Sort.Order last = orders.get(orders.size() - 1);
+        assertEquals("id", last.getProperty());
+        assertEquals(Sort.Direction.ASC, last.getDirection());
     }
 
     private void assertFirstSortOrder(
