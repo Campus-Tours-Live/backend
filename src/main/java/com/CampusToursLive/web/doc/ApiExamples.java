@@ -319,6 +319,16 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String TOUR_AVAILABILITY_PREVIEW =
+            "{\"data\":{\"hasAvailability\":true,\"totalSlots\":6,"
+                    + "\"nextStartAt\":\"2026-07-14T16:00:00Z\","
+                    + "\"nextEndAt\":\"2026-07-14T16:30:00Z\","
+                    + "\"sampleSlots\":[{\"startAt\":\"2026-07-14T16:00:00Z\","
+                    + "\"endAt\":\"2026-07-14T16:30:00Z\"},{\"startAt\":"
+                    + "\"2026-07-14T16:30:00Z\",\"endAt\":\"2026-07-14T17:00:00Z\"}]},"
+                    + META
+                    + "}";
+
     // --- Availability (CTL-54) ---
 
     String AVAILABILITY_RULE_JSON =

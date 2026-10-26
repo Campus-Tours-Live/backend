@@ -150,7 +150,9 @@ public class TourController {
             content =
                     @Content(
                             mediaType = "application/json",
-                            schema = @Schema(implementation = ApiEnvelope.class)))
+                            schema = @Schema(implementation = ApiEnvelope.class),
+                            examples =
+                                    @ExampleObject(value = ApiExamples.TOUR_AVAILABILITY_PREVIEW)))
     @ApiResponse(
             responseCode = "404",
             description = "No bookable tour with that id.",
