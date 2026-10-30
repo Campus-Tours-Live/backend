@@ -131,6 +131,25 @@ class SavedTourServiceIntegrationTest {
     }
 
     @Test
+    void list_sameCreatedAt_pagesByIdWithoutSkipping() {
+        TourOfferingEntity low = offering("Low", TourStatus.ACTIVE);
+        TourOfferingEntity high = offering("High", TourStatus.ACTIVE);
+        insertAt(UUID.fromString("00000000-0000-4000-8000-000000000001"), low);
+        insertAt(UUID.fromString("00000000-0000-4000-8000-000000000002"), high);
+
+        Page<TourSummaryResponse> page0 = service.list(participantId, 0, 1);
+        Page<TourSummaryResponse> page1 = service.list(participantId, 1, 1);
+
+        assertThat(page0.getContent())
+                .extracting(TourSummaryResponse::id)
+                .containsExactly(high.getId().toString());
+        assertThat(page1.getContent())
+                .extracting(TourSummaryResponse::id)
+                .containsExactly(low.getId().toString());
+        assertThat(page0.getTotalElements()).isEqualTo(2);
+    }
+
+    @Test
     void list_isScopedToTheCaller() {
         TourOfferingEntity tour = offering("Mine", TourStatus.ACTIVE);
         UUID otherId = users.saveAndFlush(user("Other Participant")).getId();
@@ -138,6 +157,16 @@ class SavedTourServiceIntegrationTest {
 
         assertThat(service.list(participantId, 0, 20).getTotalElements()).isZero();
         assertThat(service.list(otherId, 0, 20).getTotalElements()).isEqualTo(1);
+    }
+
+    private void insertAt(UUID savedId, TourOfferingEntity tour) {
+        jdbc.update(
+                "insert into saved_tours (id, user_id, tour_offering_id, created_at)"
+                        + " values (?, ?, ?, ?::timestamptz)",
+                savedId,
+                participantId,
+                tour.getId(),
+                "2026-05-01T00:00:00Z");
     }
 
     /** now() is fixed for the whole test transaction, so created_at must be set explicitly. */
