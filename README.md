@@ -446,6 +446,9 @@ envelope; errors are `application/problem+json`.
 | `GET`         | `/users/me/role-eligibility`      | Can the caller acquire the given role (`?role=`)           |
 | `POST`        | `/session`                        | Resolve/provision the account by intent (signin / signup) |
 | `GET` `PATCH` | `/participant/profile`            | Read / upsert the participant profile                     |
+| `GET`         | `/participant/saved-tours`        | Saved tours, newest first (hidden tours left out)         |
+| `GET`         | `/participant/saved-tours/ids`    | All saved tour ids (for heart icons on catalog cards)     |
+| `PUT` `DELETE`| `/participant/saved-tours/{id}`   | Save (idempotent) / unsave a tour                         |
 | `GET` `PATCH` | `/guide/profile`                  | Read / upsert the guide profile (+ submit application)    |
 | `GET` `POST`  | `/guide/offerings`                | List / create a guide's tour offerings                    |
 | `POST`        | `/guide/offerings/{id}/activate`  | Publish a draft offering (requires an APPROVED guide)     |
