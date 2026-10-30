@@ -12,7 +12,6 @@ import org.springframework.data.repository.query.Param;
 
 public interface SavedTourRepository extends JpaRepository<SavedTourEntity, UUID> {
 
-    /** Offering predicate must stay in sync with TourOfferingRepository.findDiscoverableById. */
     String VISIBLE_SAVED_FROM_WHERE =
             """
             from SavedTourEntity s
@@ -25,7 +24,6 @@ public interface SavedTourRepository extends JpaRepository<SavedTourEntity, UUID
               and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
             """;
 
-    /** Returns 1 if inserted, 0 if already saved; ON CONFLICT keeps concurrent saves safe. */
     @Modifying
     @Query(
             value =
