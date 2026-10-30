@@ -12,7 +12,6 @@ import org.springframework.data.repository.query.Param;
 
 public interface SavedTourRepository extends JpaRepository<SavedTourEntity, UUID> {
 
-    /** Offering predicate must stay in sync with TourOfferingRepository.findDiscoverableById. */
     String VISIBLE_SAVED_FROM_WHERE =
             """
             from SavedTourEntity s
@@ -25,7 +24,6 @@ public interface SavedTourRepository extends JpaRepository<SavedTourEntity, UUID
               and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
             """;
 
-    /** Returns 1 if inserted, 0 if already saved; ON CONFLICT keeps concurrent saves safe. */
     @Modifying
     @Query(
             value =
@@ -50,7 +48,10 @@ public interface SavedTourRepository extends JpaRepository<SavedTourEntity, UUID
             @Param("userId") UUID userId, @Param("tourOfferingId") UUID tourOfferingId);
 
     @Query(
-            value = "select o " + VISIBLE_SAVED_FROM_WHERE + " order by s.createdAt desc",
+            value =
+                    "select o "
+                            + VISIBLE_SAVED_FROM_WHERE
+                            + " order by s.createdAt desc, s.id desc",
             countQuery = "select count(o) " + VISIBLE_SAVED_FROM_WHERE)
     Page<TourOfferingEntity> findVisibleSavedOfferings(
             @Param("userId") UUID userId, Pageable pageable);
