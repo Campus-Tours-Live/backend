@@ -40,6 +40,17 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
     Optional<BookingEntity> findByIdAndParticipantUserIdAndStatus(
             UUID id, UUID participantUserId, BookingStatus status);
 
+    /**
+     * An existing cart item for the same tour and start time — the idempotency key for add-to-cart
+     * (participant + offering + scheduledStartAt + status DRAFT). Re-adding returns this row rather
+     * than inserting a duplicate (CTL-83).
+     */
+    Optional<BookingEntity> findByParticipantUserIdAndTourOfferingIdAndScheduledStartAtAndStatus(
+            UUID participantUserId,
+            UUID tourOfferingId,
+            Instant scheduledStartAt,
+            BookingStatus status);
+
     /** All of a participant's bookings in one status, oldest first (cart listing / checkout). */
     List<BookingEntity> findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
             UUID participantUserId, BookingStatus status);

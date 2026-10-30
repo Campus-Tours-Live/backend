@@ -6,6 +6,7 @@ import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.doc.ApiExamples;
 import com.CampusToursLive.web.dto.ApiEnvelope;
 import com.CampusToursLive.web.dto.BookingDetailResponse;
+import com.CampusToursLive.web.dto.CartItemResponse;
 import com.CampusToursLive.web.dto.CreateBookingRequest;
 import com.CampusToursLive.web.dto.Problem;
 import io.swagger.v3.oas.annotations.Operation;
@@ -81,7 +82,7 @@ public class CartController {
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
     @GetMapping
-    public ApiEnvelope<List<BookingDetailResponse>> getCart() {
+    public ApiEnvelope<List<CartItemResponse>> getCart() {
         var user = currentUser.requireRole(UserRole.PARTICIPANT);
         return ApiEnvelope.of(bookingService.getCart(user.getId()));
     }
@@ -136,7 +137,7 @@ public class CartController {
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
     @PostMapping("/items")
-    public ApiEnvelope<BookingDetailResponse> addItem(@RequestBody CreateBookingRequest req) {
+    public ApiEnvelope<CartItemResponse> addItem(@RequestBody CreateBookingRequest req) {
         var user = currentUser.requireRole(UserRole.PARTICIPANT);
         return ApiEnvelope.of(bookingService.addCartItem(user, req));
     }
@@ -180,7 +181,7 @@ public class CartController {
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
     @DeleteMapping("/items/{id}")
-    public ApiEnvelope<List<BookingDetailResponse>> removeItem(@PathVariable UUID id) {
+    public ApiEnvelope<List<CartItemResponse>> removeItem(@PathVariable UUID id) {
         var user = currentUser.requireRole(UserRole.PARTICIPANT);
         return ApiEnvelope.of(bookingService.removeCartItem(user, id));
     }
