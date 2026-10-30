@@ -50,7 +50,10 @@ public interface SavedTourRepository extends JpaRepository<SavedTourEntity, UUID
             @Param("userId") UUID userId, @Param("tourOfferingId") UUID tourOfferingId);
 
     @Query(
-            value = "select o " + VISIBLE_SAVED_FROM_WHERE + " order by s.createdAt desc",
+            value =
+                    "select o "
+                            + VISIBLE_SAVED_FROM_WHERE
+                            + " order by s.createdAt desc, s.id desc",
             countQuery = "select count(o) " + VISIBLE_SAVED_FROM_WHERE)
     Page<TourOfferingEntity> findVisibleSavedOfferings(
             @Param("userId") UUID userId, Pageable pageable);
