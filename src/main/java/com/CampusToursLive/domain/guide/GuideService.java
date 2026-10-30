@@ -13,12 +13,14 @@ import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.error.ConflictException;
+import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.security.GuideProfileSnapshot;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.CampusToursLive.web.dto.GuideUniversityView;
+import com.CampusToursLive.web.dto.PublicGuideProfileResponse;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
@@ -95,6 +97,30 @@ public class GuideService {
                 profile.bio(),
                 readArray(profile.spokenLanguages()),
                 readArray(profile.tourTopics()));
+    }
+
+    /**
+     * A VERIFIED guide's public marketplace profile (GET /guides/{guideId}) — the anonymous
+     * counterpart to {@code /guide/profile}. Only VERIFIED guides are exposed; a pending, rejected,
+     * or unknown guide is a 404, so a non-VERIFIED guide's existence is never leaked. Only public
+     * fields are returned (no school email, verification status, or user id).
+     *
+     * @throws NotFoundException the guide does not exist or is not VERIFIED.
+     */
+    @Transactional(readOnly = true)
+    public PublicGuideProfileResponse getPublicProfile(UUID guideId) {
+        GuideProfileEntity guide =
+                guides.findById(guideId)
+                        .filter(g -> g.getStatus() == GuideStatus.VERIFIED)
+                        .orElseThrow(() -> new NotFoundException("Guide not found"));
+        String displayName =
+                users.findById(guide.getUserId()).map(UserEntity::getDisplayName).orElse(null);
+        return new PublicGuideProfileResponse(
+                guide.getId().toString(),
+                displayName,
+                guide.getBio(),
+                readArray(guide.getSpokenLanguages()),
+                readArray(guide.getTourTopics()));
     }
 
     @Transactional
