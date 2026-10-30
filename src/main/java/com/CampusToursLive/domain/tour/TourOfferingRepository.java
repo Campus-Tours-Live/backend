@@ -72,4 +72,34 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
               and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
             """)
     Optional<TourOfferingEntity> findDiscoverableById(@Param("id") UUID id);
+
+    /**
+     * A single guide's discoverable offerings — ACTIVE offerings by this VERIFIED guide at ACTIVE
+     * universities. Same marketplace-visibility rules as {@link #findDiscoverable}, scoped to one
+     * guide; backs the public GET /guides/{id}/tours. An unknown or non-verified guide matches
+     * nothing (empty page).
+     */
+    @Query(
+            value =
+                    """
+                    select o from TourOfferingEntity o
+                    inner join GuideProfileEntity g on g.id = o.guideId
+                    inner join UniversityEntity u on u.id = o.universityId
+                    where o.guideId = :guideId
+                      and o.status = com.CampusToursLive.domain.tour.TourStatus.ACTIVE
+                      and g.status = com.CampusToursLive.domain.guide.GuideStatus.VERIFIED
+                      and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
+                    """,
+            countQuery =
+                    """
+                    select count(o) from TourOfferingEntity o
+                    inner join GuideProfileEntity g on g.id = o.guideId
+                    inner join UniversityEntity u on u.id = o.universityId
+                    where o.guideId = :guideId
+                      and o.status = com.CampusToursLive.domain.tour.TourStatus.ACTIVE
+                      and g.status = com.CampusToursLive.domain.guide.GuideStatus.VERIFIED
+                      and u.status = com.CampusToursLive.domain.university.UniversityStatus.ACTIVE
+                    """)
+    Page<TourOfferingEntity> findDiscoverableByGuide(
+            @Param("guideId") UUID guideId, Pageable pageable);
 }
