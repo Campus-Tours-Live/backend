@@ -98,6 +98,13 @@ public class TourDiscoveryService {
         return rows.map(o -> toSummary(o, lookup));
     }
 
+    /** Maps already-discoverable offerings to catalog cards, preserving order. */
+    @Transactional(readOnly = true)
+    public List<TourSummaryResponse> toSummaries(List<TourOfferingEntity> rows) {
+        Lookup lookup = loadLookup(rows);
+        return rows.stream().map(o -> toSummary(o, lookup)).toList();
+    }
+
     @Transactional(readOnly = true)
     public TourDetailResponse getById(UUID tourId) {
         TourOfferingEntity offering =
