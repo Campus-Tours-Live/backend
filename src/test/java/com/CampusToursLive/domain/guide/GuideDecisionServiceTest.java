@@ -56,6 +56,7 @@ class GuideDecisionServiceTest {
     void approve_verifiesGuideAndUniversity_andAudits() {
         stubProfile(GuideStatus.PENDING);
         when(guides.approveIfPending(profileId, NOW)).thenReturn(1);
+        when(guideUniversities.verifyPending(profileId, NOW)).thenReturn(1);
 
         GuideStatus result = service().decide(adminId, guideUserId, GuideDecision.APPROVE, null);
 
@@ -75,6 +76,7 @@ class GuideDecisionServiceTest {
     void approve_withReason_keepsTrimmedReasonInAudit() {
         stubProfile(GuideStatus.PENDING);
         when(guides.approveIfPending(profileId, NOW)).thenReturn(1);
+        when(guideUniversities.verifyPending(profileId, NOW)).thenReturn(1);
 
         service().decide(adminId, guideUserId, GuideDecision.APPROVE, "  docs checked  ");
 
@@ -91,6 +93,7 @@ class GuideDecisionServiceTest {
     void reject_marksGuideAndUniversityRejected_andAuditsReason() {
         stubProfile(GuideStatus.PENDING);
         when(guides.rejectIfPending(profileId)).thenReturn(1);
+        when(guideUniversities.rejectPending(profileId)).thenReturn(1);
 
         GuideStatus result =
                 service().decide(adminId, guideUserId, GuideDecision.REJECT, " fake email ");
@@ -157,5 +160,29 @@ class GuideDecisionServiceTest {
                 .isInstanceOfSatisfying(
                         ConflictException.class,
                         e -> assertThat(e.properties()).containsEntry("currentStatus", "VERIFIED"));
+        verifyNoInteractions(guideUniversities);
+    }
+
+    @Test
+    void selfDecision_isConflict() {
+        assertThatThrownBy(() -> service().decide(adminId, adminId, GuideDecision.APPROVE, null))
+                .isInstanceOfSatisfying(
+                        ConflictException.class,
+                        e -> assertThat(e.code()).isEqualTo("GUIDE_SELF_DECISION"));
+        verifyNoInteractions(guides, guideUniversities, auditWriter);
+    }
+
+    @Test
+    void approve_withNoPendingUniversity_isConflict() {
+        stubProfile(GuideStatus.PENDING);
+        when(guides.approveIfPending(profileId, NOW)).thenReturn(1);
+        when(guideUniversities.verifyPending(profileId, NOW)).thenReturn(0);
+
+        assertThatThrownBy(
+                        () -> service().decide(adminId, guideUserId, GuideDecision.APPROVE, null))
+                .isInstanceOfSatisfying(
+                        ConflictException.class,
+                        e -> assertThat(e.code()).isEqualTo("GUIDE_UNIVERSITY_NOT_PENDING"));
+        verify(auditWriter, never()).record(any(), any(), any(), any(), anyMap());
     }
 }

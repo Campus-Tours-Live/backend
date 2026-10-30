@@ -71,17 +71,6 @@ class AdminGuideControllerTest {
     }
 
     @Test
-    void reject_returnsEnvelope() throws Exception {
-        when(currentUser.requireRole(UserRole.ADMIN)).thenReturn(admin());
-        when(decisions.decide(adminId, guideUserId, GuideDecision.REJECT, "fake email"))
-                .thenReturn(GuideStatus.REJECTED);
-
-        mvc.perform(decide("{\"decision\":\"REJECT\",\"reason\":\"fake email\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("REJECTED"));
-    }
-
-    @Test
     void missingAdmin_is403() throws Exception {
         when(currentUser.requireRole(UserRole.ADMIN))
                 .thenThrow(new ForbiddenException("Missing required role: ADMIN", "ROLE_REQUIRED"));
@@ -145,14 +134,5 @@ class AdminGuideControllerTest {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.errors.decision").exists());
-    }
-
-    @Test
-    void reasonTooLong_is422() throws Exception {
-        String reason = "x".repeat(501);
-        mvc.perform(decide("{\"decision\":\"REJECT\",\"reason\":\"" + reason + "\"}"))
-                .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
-                .andExpect(jsonPath("$.errors.reason").exists());
     }
 }

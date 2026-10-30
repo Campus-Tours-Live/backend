@@ -24,7 +24,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Admin approve / reject of a pending guide (BFF maps /v1/admin/guides → here). */
 @RestController
 @RequestMapping("/admin/guides")
 @Tag(name = "Admin guides", description = "Admin review of guide applications. Requires ADMIN.")

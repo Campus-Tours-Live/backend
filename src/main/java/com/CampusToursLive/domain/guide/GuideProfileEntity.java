@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -21,6 +22,7 @@ import org.hibernate.type.SqlTypes;
 @Getter
 @Setter
 @Entity
+@DynamicUpdate
 @Table(name = "guide_profiles")
 public class GuideProfileEntity {
 

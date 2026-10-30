@@ -14,9 +14,6 @@ public interface GuideUniversityRepository extends JpaRepository<GuideUniversity
 
     List<GuideUniversityEntity> findByGuideProfileIdIn(Collection<UUID> guideProfileIds);
 
-    /**
-     * Bumps version so a concurrent profile edit fails its optimistic lock instead of undoing this.
-     */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
             """
@@ -32,9 +29,6 @@ public interface GuideUniversityRepository extends JpaRepository<GuideUniversity
     int verifyPending(
             @Param("guideProfileId") UUID guideProfileId, @Param("verifiedAt") Instant verifiedAt);
 
-    /**
-     * Bumps version so a concurrent profile edit fails its optimistic lock instead of undoing this.
-     */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
             """

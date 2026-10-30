@@ -11,7 +11,6 @@ import org.springframework.data.repository.query.Param;
 public interface GuideProfileRepository extends JpaRepository<GuideProfileEntity, UUID> {
     Optional<GuideProfileEntity> findByUserId(UUID userId);
 
-    /** Returns 0 when the guide is no longer PENDING (e.g. another admin decided first). */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
             """
@@ -23,7 +22,6 @@ public interface GuideProfileRepository extends JpaRepository<GuideProfileEntity
             """)
     int approveIfPending(@Param("id") UUID id, @Param("approvedAt") Instant approvedAt);
 
-    /** Returns 0 when the guide is no longer PENDING (e.g. another admin decided first). */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(
             """

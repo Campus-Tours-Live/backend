@@ -38,6 +38,9 @@ public class GuideDecisionService {
     @Transactional
     public GuideStatus decide(
             UUID adminUserId, UUID guideUserId, GuideDecision decision, String reason) {
+        if (adminUserId.equals(guideUserId)) {
+            throw ConflictException.guideSelfDecision();
+        }
         String trimmedReason = reason == null ? "" : reason.strip();
         if (decision == GuideDecision.REJECT && trimmedReason.isEmpty()) {
             throw new ValidationException("A reason is required to reject a guide application");
@@ -61,10 +64,12 @@ public class GuideDecisionService {
                             .orElse(profile.getStatus());
             throw ConflictException.guideApplicationNotPending(current.name());
         }
-        if (approve) {
-            guideUniversities.verifyPending(profileId, now);
-        } else {
-            guideUniversities.rejectPending(profileId);
+        int schools =
+                approve
+                        ? guideUniversities.verifyPending(profileId, now)
+                        : guideUniversities.rejectPending(profileId);
+        if (schools == 0) {
+            throw ConflictException.guideUniversityNotPending();
         }
 
         Map<String, Object> metadata = new LinkedHashMap<>();
