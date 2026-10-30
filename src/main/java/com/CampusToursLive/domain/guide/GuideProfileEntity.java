@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -21,6 +22,7 @@ import org.hibernate.type.SqlTypes;
 @Getter
 @Setter
 @Entity
+@DynamicUpdate
 @Table(name = "guide_profiles")
 public class GuideProfileEntity {
 
@@ -47,6 +49,9 @@ public class GuideProfileEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "guide_status", columnDefinition = "guide_application_status", nullable = false)
     private GuideStatus status = GuideStatus.PENDING;
+
+    @Column(name = "approved_at")
+    private Instant approvedAt;
 
     @Column(name = "created_at", nullable = false, updatable = false, insertable = false)
     private Instant createdAt;
