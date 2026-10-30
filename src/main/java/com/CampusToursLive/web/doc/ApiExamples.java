@@ -238,6 +238,43 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String STATE_UNIVERSITY_COUNTS =
+            "{\"data\":{\"byState\":{\"AL\":31,\"AK\":3,\"CA\":148,\"NY\":167,"
+                    + "\"TX\":101,\"WY\":1},\"total\":1903},"
+                    + META
+                    + "}";
+
+    String STATE_UNIVERSITIES =
+            "{\"data\":{\"state\":\"CA\",\"universities\":["
+                    + "{\"id\":\"110635\",\"name\":\"University of California-Berkeley\","
+                    + "\"city\":\"Berkeley\"},"
+                    + "{\"id\":\"243744\",\"name\":\"Stanford University\","
+                    + "\"city\":\"Stanford\"}],\"total\":148},"
+                    + META
+                    + "}";
+
+    String UNIVERSITY_DETAIL =
+            "{\"data\":{\"id\":\"u1a2c3d4-0000-4000-8000-000000000003\","
+                    + "\"slug\":\"north-coast\",\"name\":\"North Coast University\","
+                    + "\"shortName\":\"NCU\",\"city\":\"Arcata\",\"region\":\"CA\","
+                    + "\"timezone\":\"America/Los_Angeles\","
+                    + "\"imageUrl\":\"https://pub-3225b84a9a0b4728b11f261ee52251ba.r2"
+                    + ".dev/North%20Coast%20University.png\","
+                    + "\"status\":\"ACTIVE\",\"tourCount\":4,\"fromPriceCents\":3800,"
+                    + "\"currency\":\"USD\"},"
+                    + META
+                    + "}";
+
+    String UNIVERSITY_DETAIL_NO_TOURS =
+            "{\"data\":{\"id\":\"u1a2c3d4-0000-4000-8000-000000000004\","
+                    + "\"slug\":\"redwood-state\",\"name\":\"Redwood State University\","
+                    + "\"shortName\":null,\"city\":\"Eureka\",\"region\":\"CA\","
+                    + "\"timezone\":\"America/Los_Angeles\",\"imageUrl\":null,"
+                    + "\"status\":\"ACTIVE\",\"tourCount\":0,\"fromPriceCents\":null,"
+                    + "\"currency\":null},"
+                    + META
+                    + "}";
+
     String MAJORS_LIVE =
             "{\"data\":[{\"value\":\"Computer Science\",\"label\":\"Computer Science\"}],"
                     + META
