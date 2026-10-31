@@ -8,6 +8,7 @@ import com.CampusToursLive.domain.tour.TourOfferingEntity;
 import com.CampusToursLive.domain.tour.TourOfferingRepository;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.web.dto.OfferingAvailabilityPreviewResponse;
 import com.CampusToursLive.web.dto.SlotResponse;
 import java.time.Clock;
 import java.time.Duration;
@@ -42,6 +43,9 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class SlotGenerationService {
+
+    private static final int DEFAULT_PREVIEW_WINDOW_DAYS = 14;
+    private static final int MAX_PREVIEW_SAMPLE_LIMIT = 10;
 
     private final TourOfferingRepository offerings;
     private final GuideAvailabilityOccurrenceRepository occurrences;
@@ -135,6 +139,38 @@ public class SlotGenerationService {
         candidates = applyNoticeAndAdvanceWindow(candidates, guideSettings);
 
         return candidates.stream().map(s -> new SlotResponse(s.start(), s.end())).toList();
+    }
+
+    /**
+     * Lightweight public preview for marketplace/detail UI.
+     *
+     * <p>This intentionally reuses {@link #getBookableSlots(UUID, String, String)} rather than
+     * carrying a second partial slot engine. The preview is a read model over exactly the same
+     * slots a participant can later book after sign-in, so the UI cannot advertise a time that
+     * would be rejected by booking creation because of buffers, held bookings, notice, or
+     * max-advance rules.
+     */
+    @Transactional(readOnly = true)
+    public OfferingAvailabilityPreviewResponse getAvailabilityPreview(
+            UUID offeringId, String from, String to, int sampleLimit) {
+        int normalizedLimit = Math.max(0, Math.min(sampleLimit, MAX_PREVIEW_SAMPLE_LIMIT));
+        String effectiveFrom = from;
+        String effectiveTo = to;
+        if (effectiveFrom == null && effectiveTo == null) {
+            LocalDate today = LocalDate.now(clock);
+            effectiveFrom = today.toString();
+            effectiveTo = today.plusDays(DEFAULT_PREVIEW_WINDOW_DAYS).toString();
+        }
+
+        List<SlotResponse> slots = getBookableSlots(offeringId, effectiveFrom, effectiveTo);
+        List<SlotResponse> sample = slots.stream().limit(normalizedLimit).toList();
+        SlotResponse next = slots.isEmpty() ? null : slots.get(0);
+        return new OfferingAvailabilityPreviewResponse(
+                !slots.isEmpty(),
+                slots.size(),
+                next == null ? null : next.startAt(),
+                next == null ? null : next.endAt(),
+                sample);
     }
 
     // ---------------------------------------------------------------------------
