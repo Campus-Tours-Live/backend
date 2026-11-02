@@ -127,6 +127,55 @@ class BookingWriteIntegrationTest {
     }
 
     @Test
+    void guideActiveQueryIncludesOngoingToursAndMatchesPastBoundary() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        BookingEntity booking = pendingAt(now.plus(3, ChronoUnit.DAYS));
+        List<BookingStatus> active = List.of(BookingStatus.CONFIRMED, BookingStatus.IN_PROGRESS);
+        booking.setStatus(BookingStatus.CONFIRMED);
+        assertThat(
+                        bookings
+                                .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        guide.getId(), active, now))
+                .containsExactly(booking);
+
+        booking.setScheduledStartAt(now.minusSeconds(1800));
+        booking.setScheduledEndAt(now.plusSeconds(1800));
+        booking.setReservedStartAt(booking.getScheduledStartAt());
+        booking.setReservedEndAt(booking.getScheduledEndAt());
+        assertThat(
+                        bookings
+                                .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        guide.getId(), active, now))
+                .containsExactly(booking);
+        booking.setStatus(BookingStatus.IN_PROGRESS);
+        assertThat(
+                        bookings
+                                .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        guide.getId(), active, now))
+                .containsExactly(booking);
+        booking.setScheduledEndAt(now);
+        booking.setReservedEndAt(now);
+        assertThat(
+                        bookings
+                                .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        guide.getId(), active, now))
+                .containsExactly(booking);
+        booking.setScheduledEndAt(now.minusMillis(1));
+        assertThat(
+                        bookings
+                                .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        guide.getId(), active, now))
+                .isEmpty();
+        booking.setScheduledEndAt(now);
+        booking.setStatus(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
+        assertThat(
+                        bookings
+                                .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        guide.getId(), active, now))
+                .isEmpty();
+    }
+
+    @Test
     void expiryOnlyClaimsDuePendingRowsAndReleasesTheirSlot() {
         Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
         BookingEntity due = pendingAt(now.plus(3, ChronoUnit.DAYS));

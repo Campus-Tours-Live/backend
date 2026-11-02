@@ -181,7 +181,7 @@ public class TourOfferingService {
         if (req.title() != null) {
             String title = requireTitle(req.title());
             if (!title.equals(offering.getTitle())) {
-                offering.setSlug(uniqueSlug(guide.getId(), slugify(title)));
+                offering.setSlug(uniqueSlug(guide.getId(), slugify(title), offering.getSlug()));
             }
             offering.setTitle(title);
         }
@@ -237,7 +237,7 @@ public class TourOfferingService {
         copy.setGuideId(guide.getId());
         copy.setUniversityId(source.getUniversityId());
         copy.setTitle(uniqueCopyTitle(guide.getId(), source.getTitle()));
-        copy.setSlug(uniqueSlug(guide.getId(), slugify(copy.getTitle())));
+        copy.setSlug(slugify(copy.getTitle()));
         copy.setDescription(source.getDescription());
         copy.setTopic(source.getTopic());
         copy.setDurationMin(source.getDurationMin());
@@ -329,11 +329,11 @@ public class TourOfferingService {
         return price;
     }
 
-    private String uniqueSlug(UUID guideId, String candidate) {
+    private String uniqueSlug(UUID guideId, String candidate, String currentSlug) {
         String base = candidate.isBlank() ? "tour" : candidate;
         String slug = base;
         int suffix = 2;
-        while (offerings.existsByGuideIdAndSlug(guideId, slug)) {
+        while (!slug.equals(currentSlug) && offerings.existsByGuideIdAndSlug(guideId, slug)) {
             slug = base + "-" + suffix++;
         }
         return slug;
