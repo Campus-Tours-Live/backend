@@ -1,27 +1,30 @@
 package com.CampusToursLive.domain.tour;
 
 import com.CampusToursLive.error.ValidationException;
+import java.util.IllformedLocaleException;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 /**
- * Curated BCP-47 language tags a guide may attach to a profile or tour offering. Kept in one place
- * so {@code GET /meta/languages}, guide-profile update, and offering create validation cannot
- * drift.
+ * Curated language picker options, with well-formed BCP-47 variants accepted on writes so existing
+ * regional/script tags remain editable. The picker is not an exhaustive list of accepted tags.
  */
 public final class SupportedLanguages {
 
     public static final List<String> TAGS =
             List.of("en-US", "es", "zh", "fr", "de", "ja", "ko", "ar", "hi", "pt");
 
-    private static final Set<String> ALLOWED = Set.copyOf(TAGS);
-
     private SupportedLanguages() {}
 
     public static boolean isSupported(String tag) {
-        return tag != null && ALLOWED.contains(tag);
+        if (tag == null || tag.isBlank()) return false;
+        try {
+            new Locale.Builder().setLanguageTag(tag).build();
+            return true;
+        } catch (IllformedLocaleException ex) {
+            return false;
+        }
     }
 
     public static String displayName(String tag) {
@@ -30,8 +33,8 @@ public final class SupportedLanguages {
     }
 
     /**
-     * Validate client-supplied language tags. Duplicates and blanks are dropped; unknown tags fail
-     * the request.
+     * Validate BCP-47 syntax, not membership in the curated picker or a language registry.
+     * Duplicates and blanks are dropped; malformed tags fail the request.
      */
     public static List<String> requireSupported(List<String> raw) {
         LinkedHashSet<String> out = new LinkedHashSet<>();
