@@ -120,6 +120,27 @@ class TourDiscoveryServiceTest {
         assertEquals(oid.toString(), res.getContent().get(0).id());
     }
 
+    /**
+     * A guide's tour list is paginated too, so it must end on the unique {@code id} tiebreaker.
+     * Otherwise tied offerings (same rating / review count / createdAt) can repeat or vanish across
+     * pages.
+     */
+    @Test
+    void listByGuide_sortEndsWithUniqueIdTiebreaker() {
+        UUID gid = UUID.randomUUID();
+        when(offerings.findDiscoverableByGuide(eq(gid), any(Pageable.class)))
+                .thenReturn(Page.empty());
+
+        service().listByGuide(gid, 0, 20);
+
+        ArgumentCaptor<Pageable> page = ArgumentCaptor.forClass(Pageable.class);
+        verify(offerings).findDiscoverableByGuide(eq(gid), page.capture());
+        List<Sort.Order> orders = page.getValue().getSort().toList();
+        Sort.Order last = orders.get(orders.size() - 1);
+        assertEquals("id", last.getProperty());
+        assertEquals(Sort.Direction.ASC, last.getDirection());
+    }
+
     @Test
     void listByGuide_clampsPageAndLimit() {
         UUID gid = UUID.randomUUID();
