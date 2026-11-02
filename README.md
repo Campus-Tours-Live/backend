@@ -449,6 +449,12 @@ envelope; errors are `application/problem+json`.
 | `GET` `PATCH` | `/guide/profile`                  | Read / upsert the guide profile (+ submit application)    |
 | `GET` `POST`  | `/guide/offerings`                | List / create a guide's tour offerings                    |
 | `POST`        | `/guide/offerings/{id}/activate`  | Publish a draft offering (requires an APPROVED guide)     |
+| `GET`         | `/guide/bookings`                 | Guide inbox (`?filter=pending\|upcoming\|past\|all`)      |
+| `GET`         | `/guide/bookings/{id}`            | One booking with status history                           |
+| `POST`        | `/guide/bookings/{id}/accept`     | Accept a pending booking request                          |
+| `POST`        | `/guide/bookings/{id}/decline`    | Decline a pending booking request (optional reason)       |
+| `POST`        | `/guide/bookings/{id}/complete`   | Mark a started confirmed tour completed                   |
+| `POST`        | `/guide/bookings/{id}/no-show`    | Mark participant no-show (optional reason)                |
 | `GET`         | `/tours`                          | Public marketplace catalog (ACTIVE offerings only)        |
 | `GET`         | `/tours/{tourId}`                 | Single discoverable tour detail                           |
 | `GET`         | `/bookings/next-tour`             | Soonest upcoming CONFIRMED booking (dashboard card)       |
@@ -465,6 +471,15 @@ envelope; errors are `application/problem+json`.
 | `GET`         | `/universities/{slug}`            | Platform university profile + live-tour stats            |
 | `GET`         | `/meta/tour-topics`               | Controlled vocabulary for tour topics                     |
 | `POST`        | `/admin/guides/{userId}/decision` | Admin approve/reject a guide application                  |
+
+### Expired guide booking requests
+
+Pending guide-acceptance requests are expired using their stored response deadline. A scheduled
+transaction claims at most 100 due requests with `FOR UPDATE SKIP LOCKED`, changes their status
+to `EXPIRED`, clears the response deadline, and writes a `SYSTEM` audit event. This releases the
+guide and participant overlap holds without changing payment fields. Optimistic versions prevent
+stale guide actions from overwriting expiry. The job runs every 60 seconds after an initial
+60-second delay; override `booking.expiry.delay-ms` and `booking.expiry.initial-delay-ms` as needed.
 
 > **Role scoping is by authorization, not by path.** Booking and cart live at generic resource
 > paths (`/bookings*`, `/cart*`), _not_ under a `/participant/` prefix. The **PARTICIPANT** role is

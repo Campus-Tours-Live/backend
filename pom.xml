@@ -224,6 +224,10 @@
 				<configuration>
 					<systemPropertyVariables>
 						<api.version>${docker.api.version}</api.version>
+						<!-- Expiry is exercised directly with a fixed clock. Cached Spring test
+						     contexts outlive their Testcontainers databases, so do not run the
+						     background tick during the suite. Production keeps its 60s delay. -->
+						<booking.expiry.initial-delay-ms>3600000</booking.expiry.initial-delay-ms>
 					</systemPropertyVariables>
 				</configuration>
 			</plugin>
