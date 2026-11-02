@@ -20,6 +20,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -111,7 +112,7 @@ public class TourDiscoveryService {
     public static TourDiscoverySort parseSort(String raw) {
         if (raw == null || raw.isBlank()) return TourDiscoverySort.RECOMMENDED;
         try {
-            return TourDiscoverySort.valueOf(raw.trim().toUpperCase());
+            return TourDiscoverySort.valueOf(raw.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             throw new ValidationException("Invalid sort: " + raw);
         }
@@ -160,20 +161,28 @@ public class TourDiscoveryService {
     }
 
     private static Sort toSort(TourDiscoverySort sort) {
-        return switch (sort) {
-            case PRICE_ASC -> Sort.by(Sort.Order.asc("priceCents"), Sort.Order.asc("title"));
-            case PRICE_DESC -> Sort.by(Sort.Order.desc("priceCents"), Sort.Order.asc("title"));
-            case RATING ->
-                    Sort.by(
-                            Sort.Order.desc("avgRating"),
-                            Sort.Order.desc("reviewCount"),
-                            Sort.Order.asc("title"));
-            case RECOMMENDED ->
-                    Sort.by(
-                            Sort.Order.desc("avgRating"),
-                            Sort.Order.desc("reviewCount"),
-                            Sort.Order.desc("createdAt"));
-        };
+        Sort primary =
+                switch (sort) {
+                    case PRICE_ASC ->
+                            Sort.by(Sort.Order.asc("priceCents"), Sort.Order.asc("title"));
+                    case PRICE_DESC ->
+                            Sort.by(Sort.Order.desc("priceCents"), Sort.Order.asc("title"));
+                    case RATING ->
+                            Sort.by(
+                                    Sort.Order.desc("avgRating"),
+                                    Sort.Order.desc("reviewCount"),
+                                    Sort.Order.asc("title"));
+                    case RECOMMENDED ->
+                            Sort.by(
+                                    Sort.Order.desc("avgRating"),
+                                    Sort.Order.desc("reviewCount"),
+                                    Sort.Order.desc("createdAt"));
+                };
+        // A unique final key. None of the keys above is unique (titles repeat across guides, and
+        // createdAt ties for rows inserted in one transaction), and Postgres gives tied rows no
+        // stable order under LIMIT/OFFSET — so without this a tour can repeat across pages or
+        // never appear. Applied here, once, so a new sort can't forget it.
+        return primary.and(Sort.by(Sort.Order.asc("id")));
     }
 
     private Lookup loadLookup(List<TourOfferingEntity> rows) {
