@@ -24,8 +24,11 @@ import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.BookingDetailResponse;
 import com.CampusToursLive.web.dto.CreateBookingRequest;
 import com.CampusToursLive.web.dto.SlotResponse;
+import jakarta.persistence.EntityManager;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
@@ -67,6 +70,7 @@ class BookingWriteIntegrationTest {
     @Autowired UniversityRepository universities;
     @Autowired GuideAvailabilityOccurrenceRepository occurrences;
     @Autowired GuideBookingSettingsRepository settingsRepo;
+    @Autowired EntityManager entityManager;
 
     private UserEntity participant;
     private GuideProfileEntity guide;
@@ -120,6 +124,112 @@ class BookingWriteIntegrationTest {
         o.setDuringEndAt(end);
         o.setGeneratedAt(Instant.now());
         return o;
+    }
+
+    @Test
+    void guideActiveQueryIncludesOngoingToursAndMatchesPastBoundary() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        BookingEntity booking = pendingAt(now.plus(3, ChronoUnit.DAYS));
+        List<BookingStatus> active = List.of(BookingStatus.CONFIRMED, BookingStatus.IN_PROGRESS);
+        booking.setStatus(BookingStatus.CONFIRMED);
+        assertThat(
+                        bookings
+                                .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        guide.getId(), active, now))
+                .containsExactly(booking);
+
+        booking.setScheduledStartAt(now.minusSeconds(1800));
+        booking.setScheduledEndAt(now.plusSeconds(1800));
+        booking.setReservedStartAt(booking.getScheduledStartAt());
+        booking.setReservedEndAt(booking.getScheduledEndAt());
+        assertThat(
+                        bookings
+                                .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        guide.getId(), active, now))
+                .containsExactly(booking);
+        booking.setStatus(BookingStatus.IN_PROGRESS);
+        assertThat(
+                        bookings
+                                .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        guide.getId(), active, now))
+                .containsExactly(booking);
+        booking.setScheduledEndAt(now);
+        booking.setReservedEndAt(now);
+        assertThat(
+                        bookings
+                                .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        guide.getId(), active, now))
+                .containsExactly(booking);
+        booking.setScheduledEndAt(now.minusMillis(1));
+        assertThat(
+                        bookings
+                                .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        guide.getId(), active, now))
+                .isEmpty();
+        booking.setScheduledEndAt(now);
+        booking.setStatus(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
+        assertThat(
+                        bookings
+                                .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        guide.getId(), active, now))
+                .isEmpty();
+    }
+
+    @Test
+    void expiryOnlyClaimsDuePendingRowsAndReleasesTheirSlot() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        BookingEntity due = pendingAt(now.plus(3, ChronoUnit.DAYS));
+        due.setGuideResponseDeadlineAt(now);
+        BookingEntity future = pendingAt(now.plus(4, ChronoUnit.DAYS));
+        future.setGuideResponseDeadlineAt(now.plusSeconds(60));
+        BookingEntity noDeadline = pendingAt(now.plus(5, ChronoUnit.DAYS));
+        noDeadline.setGuideResponseDeadlineAt(null);
+        BookingEntity confirmed = pendingAt(now.plus(6, ChronoUnit.DAYS));
+        confirmed.setStatus(BookingStatus.CONFIRMED);
+        confirmed.setGuideResponseDeadlineAt(now.minusSeconds(60));
+        bookings.flush();
+
+        BookingExpiryService expiry =
+                new BookingExpiryService(bookings, history, Clock.fixed(now, ZoneOffset.UTC));
+        assertThat(expiry.expireDueRequests()).isEqualTo(1);
+        assertThat(due.getStatus()).isEqualTo(BookingStatus.EXPIRED);
+        assertThat(future.getStatus()).isEqualTo(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
+        assertThat(noDeadline.getStatus()).isEqualTo(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
+        assertThat(confirmed.getStatus()).isEqualTo(BookingStatus.CONFIRMED);
+        assertThat(expiry.expireDueRequests()).isZero();
+        assertThat(history.findByBookingIdOrderByCreatedAtAsc(due.getId()))
+                .anySatisfy(
+                        event -> {
+                            assertThat(event.getNewStatus()).isEqualTo(BookingStatus.EXPIRED);
+                            assertThat(event.getActorType()).isEqualTo(BookingActor.SYSTEM);
+                        });
+        assertThat(pendingAt(due.getScheduledStartAt()).getStatus())
+                .isEqualTo(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
+    }
+
+    @Test
+    void expiryVersionPreventsStaleGuideActionFromResurrectingBooking() {
+        Instant now = Instant.now();
+        BookingEntity stale = pendingAt(now.plus(3, ChronoUnit.DAYS));
+        stale.setGuideResponseDeadlineAt(now.minusSeconds(1));
+        bookings.flush();
+        entityManager.detach(stale);
+        new BookingExpiryService(bookings, history, Clock.fixed(now, ZoneOffset.UTC))
+                .expireDueRequests();
+        entityManager.clear();
+        stale.setStatus(BookingStatus.CONFIRMED);
+        assertThatThrownBy(() -> bookings.saveAndFlush(stale))
+                .isInstanceOf(
+                        org.springframework.orm.ObjectOptimisticLockingFailureException.class);
+    }
+
+    private BookingEntity pendingAt(Instant start) {
+        BookingDetailResponse response =
+                service.createBooking(
+                        participant,
+                        new CreateBookingRequest(
+                                offering.getId().toString(), start.toString(), null));
+        return bookings.findById(UUID.fromString(response.id())).orElseThrow();
     }
 
     @Test
