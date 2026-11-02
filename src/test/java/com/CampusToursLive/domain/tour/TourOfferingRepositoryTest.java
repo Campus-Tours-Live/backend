@@ -44,6 +44,7 @@ class TourOfferingRepositoryTest {
     private UUID archivedId;
     private UUID pendingGuideOfferingId;
     private UUID inactiveUniversityOfferingId;
+    private UUID pendingGuideId;
 
     @BeforeEach
     void seedVisibilityFixtures() {
@@ -55,8 +56,7 @@ class TourOfferingRepositoryTest {
         approvedGuideId = insertGuide(activeUniversityId, "VERIFIED");
         UUID pendingGuideUserId = UUID.randomUUID();
         insertUser(pendingGuideUserId, "Pending Guide");
-        UUID pendingGuideId =
-                insertGuideWithUser(activeUniversityId, pendingGuideUserId, "PENDING");
+        pendingGuideId = insertGuideWithUser(activeUniversityId, pendingGuideUserId, "PENDING");
 
         discoverableId =
                 insertOffering(
@@ -197,6 +197,73 @@ class TourOfferingRepositoryTest {
         }
 
         assertThat(paged).doesNotHaveDuplicates().containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    void findDiscoverableByGuide_returnsOnlyThatGuidesVisibleOfferings() {
+        List<TourOfferingEntity> rows =
+                offerings
+                        .findDiscoverableByGuide(approvedGuideId, PageRequest.of(0, 20))
+                        .getContent();
+        // Only the ACTIVE offering at the ACTIVE university — this guide's draft/paused/archived
+        // and
+        // its inactive-university offering are all excluded.
+        assertThat(rows).extracting(TourOfferingEntity::getId).containsExactly(discoverableId);
+    }
+
+    /**
+     * Same tie-paging guarantee as the catalog, for one guide's list: paging through this guide's
+     * offerings that tie on every RECOMMENDED key (rating 0, count 0, same created_at) with the
+     * service's id tiebreaker must visit each exactly once. Order-agnostic, since Java's UUID
+     * ordering differs from Postgres's.
+     */
+    @Test
+    void findDiscoverableByGuide_idTiebreakerPagesTiedRowsCompletelyWithoutDuplicates() {
+        List<UUID> expected = new ArrayList<>(List.of(discoverableId));
+        for (int i = 0; i < 3; i++) {
+            expected.add(
+                    insertOffering(
+                            approvedGuideId,
+                            activeUniversityId,
+                            searchMarker + " guide-tie",
+                            "guide-tie-" + i + "-" + searchMarker,
+                            "ACTIVE"));
+        }
+        entityManager.flush();
+        Sort recommended =
+                Sort.by(
+                        Sort.Order.desc("avgRating"),
+                        Sort.Order.desc("reviewCount"),
+                        Sort.Order.desc("createdAt"),
+                        Sort.Order.asc("id"));
+
+        List<UUID> paged = new ArrayList<>();
+        for (int p = 0; p < expected.size(); p++) {
+            offerings
+                    .findDiscoverableByGuide(approvedGuideId, PageRequest.of(p, 1, recommended))
+                    .forEach(o -> paged.add(o.getId()));
+        }
+
+        assertThat(paged).doesNotHaveDuplicates().containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    void findDiscoverableByGuide_pendingGuide_returnsEmpty() {
+        // The pending guide has an ACTIVE offering, but a non-VERIFIED guide is never discoverable.
+        assertThat(
+                        offerings
+                                .findDiscoverableByGuide(pendingGuideId, PageRequest.of(0, 20))
+                                .getContent())
+                .isEmpty();
+    }
+
+    @Test
+    void findDiscoverableByGuide_unknownGuide_returnsEmpty() {
+        assertThat(
+                        offerings
+                                .findDiscoverableByGuide(UUID.randomUUID(), PageRequest.of(0, 20))
+                                .getContent())
+                .isEmpty();
     }
 
     @Test
