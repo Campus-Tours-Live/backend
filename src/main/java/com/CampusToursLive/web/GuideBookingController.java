@@ -52,7 +52,7 @@ public class GuideBookingController {
             summary = "List guide bookings",
             description =
                     "Lists this guide's bookings. filter=pending (awaiting accept/decline),"
-                            + " upcoming (CONFIRMED starting now or later), or all (default).")
+                            + " upcoming (CONFIRMED or IN_PROGRESS ending now or later), or all (default).")
     @ApiResponse(
             responseCode = "200",
             description = "The guide's bookings for the requested filter.",
@@ -124,7 +124,7 @@ public class GuideBookingController {
             content =
                     @Content(
                             mediaType = "application/json",
-                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_DETAIL)))
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_ACCEPTED)))
     @ApiResponse(
             responseCode = "401",
             description = "No valid principal / account not provisioned.",
@@ -173,7 +173,7 @@ public class GuideBookingController {
             content =
                     @Content(
                             mediaType = "application/json",
-                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_DETAIL)))
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_DECLINED)))
     @ApiResponse(
             responseCode = "401",
             description = "No valid principal / account not provisioned.",
