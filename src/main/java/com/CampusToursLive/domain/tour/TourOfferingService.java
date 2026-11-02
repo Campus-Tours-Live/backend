@@ -147,6 +147,7 @@ public class TourOfferingService {
         if (o.getStatus() != TourStatus.DRAFT && o.getStatus() != TourStatus.PAUSED) {
             throw new ValidationException("Only a draft or paused offering can be activated");
         }
+        requireLanguages(readStringArray(o.getLanguages()));
         o.setStatus(TourStatus.ACTIVE);
         offerings.save(o);
         return toResponse(o);
@@ -188,7 +189,7 @@ public class TourOfferingService {
         if (req.description() != null) offering.setDescription(req.description().trim());
         offering.setTopic(nextTopic);
         if (req.languages() != null)
-            offering.setLanguages(writeJson(SupportedLanguages.requireSupported(req.languages())));
+            offering.setLanguages(writeJson(requireLanguages(req.languages())));
         if (req.features() != null) {
             offering.setFeatures(writeJson(validateFeatures(req.features(), nextTopic)));
         } else if (req.topic() != null) {
@@ -246,6 +247,14 @@ public class TourOfferingService {
         copy.setStatus(TourStatus.DRAFT);
         offerings.save(copy);
         return toResponse(copy);
+    }
+
+    private static List<String> requireLanguages(List<String> raw) {
+        List<String> languages = SupportedLanguages.requireSupported(raw);
+        if (languages.isEmpty()) {
+            throw new ValidationException("At least one language is required");
+        }
+        return languages;
     }
 
     private TourOfferingEntity findOwned(UUID offeringId, GuideProfileEntity guide) {

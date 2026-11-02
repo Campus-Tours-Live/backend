@@ -640,6 +640,43 @@ class TourOfferingServiceTest {
     }
 
     @Test
+    void update_rejectsEmptyLanguages() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity draft = offering(oid, gid, TourStatus.DRAFT);
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(draft));
+        for (List<String> languages : List.of(List.<String>of(), List.of(" "))) {
+            assertThrows(
+                    ValidationException.class,
+                    () ->
+                            service()
+                                    .update(
+                                            user(uid),
+                                            oid,
+                                            new UpdateOfferingRequest(
+                                                    null, null, null, null, null, null, languages,
+                                                    null)));
+        }
+        verify(offerings, never()).save(any());
+    }
+
+    @Test
+    void activate_rejectsLegacyOfferingWithoutLanguages() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubApprovedGuide(uid, gid);
+        TourOfferingEntity draft = offering(oid, gid, TourStatus.DRAFT);
+        draft.setLanguages("[]");
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(draft));
+        assertThrows(ValidationException.class, () -> service().activate(user(uid), oid));
+        assertEquals(TourStatus.DRAFT, draft.getStatus());
+        verify(offerings, never()).save(any());
+    }
+
+    @Test
     void update_rejectsPublicOrEmptyRequests() {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
