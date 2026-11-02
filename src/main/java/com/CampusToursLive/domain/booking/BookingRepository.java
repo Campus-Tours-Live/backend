@@ -77,10 +77,10 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
             UUID guideId, List<BookingStatus> statuses);
 
     /**
-     * Guide upcoming confirmed tours: CONFIRMED (or other status) starting at/after {@code from}.
+     * Guide active tours: matching statuses ending at/after {@code from}, including ongoing tours.
      */
     List<BookingEntity>
-            findByGuideIdAndStatusInAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc(
+            findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
                     UUID guideId, List<BookingStatus> statuses, Instant from);
 
     /**

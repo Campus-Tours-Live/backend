@@ -2104,7 +2104,7 @@ class BookingServiceTest {
                         guideProfileId,
                         UUID.randomUUID(),
                         UUID.randomUUID(),
-                        BookingStatus.CONFIRMED,
+                        BookingStatus.IN_PROGRESS,
                         sooner,
                         sooner.plus(60, ChronoUnit.MINUTES));
         confirmed.setParticipantUserId(UUID.randomUUID());
@@ -2112,9 +2112,9 @@ class BookingServiceTest {
         when(guides.findByUserId(guideUserId))
                 .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
         when(bookings
-                        .findByGuideIdAndStatusInAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                        .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
                                 eq(guideProfileId),
-                                eq(List.of(BookingStatus.CONFIRMED)),
+                                eq(List.of(BookingStatus.CONFIRMED, BookingStatus.IN_PROGRESS)),
                                 any(Instant.class)))
                 .thenReturn(List.of(confirmed));
         when(bookings.findByGuideIdAndStatusInOrderByScheduledStartAtAsc(
