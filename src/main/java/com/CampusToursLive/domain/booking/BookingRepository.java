@@ -10,6 +10,15 @@ import org.springframework.data.repository.query.Param;
 
 public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
 
+    /** Bounded claim; concurrent schedulers skip rows already owned by another transaction. */
+    @Query(
+            value =
+                    "SELECT * FROM bookings WHERE status = 'PENDING_GUIDE_ACCEPTANCE' "
+                            + "AND guide_response_deadline_at <= :now "
+                            + "ORDER BY guide_response_deadline_at, id LIMIT 100 FOR UPDATE SKIP LOCKED",
+            nativeQuery = true)
+    List<BookingEntity> claimExpiredGuideRequests(@Param("now") Instant now);
+
     /**
      * Next confirmed tour: the single soonest CONFIRMED booking for a participant that has not yet
      * started. Used for the "Next Tour" card on the participant dashboard.
@@ -56,6 +65,23 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
     List<BookingEntity>
             findByGuideIdAndStatusAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc(
                     UUID guideId, BookingStatus status, Instant from);
+
+    /** A guide's own booking — scopes guide accept/decline so guides can only touch their rows. */
+    Optional<BookingEntity> findByIdAndGuideId(UUID id, UUID guideId);
+
+    /**
+     * Guide inbox: bookings in the given statuses for this guide, chronological by scheduled start.
+     * Used for pending (response queue) and upcoming (confirmed) lists.
+     */
+    List<BookingEntity> findByGuideIdAndStatusInOrderByScheduledStartAtAsc(
+            UUID guideId, List<BookingStatus> statuses);
+
+    /**
+     * Guide active tours: matching statuses ending at/after {@code from}, including ongoing tours.
+     */
+    List<BookingEntity>
+            findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                    UUID guideId, List<BookingStatus> statuses, Instant from);
 
     /**
      * Does any slot-holding booking already reserve part of [{@code newStart}, {@code newEnd}) for
