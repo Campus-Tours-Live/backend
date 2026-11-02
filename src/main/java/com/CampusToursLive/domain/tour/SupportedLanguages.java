@@ -1,12 +1,14 @@
 package com.CampusToursLive.domain.tour;
 
 import com.CampusToursLive.error.ValidationException;
+import java.util.Arrays;
 import java.util.IllformedLocaleException;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Curated language picker options, with well-formed BCP-47 variants accepted on writes so existing
@@ -18,8 +20,8 @@ public final class SupportedLanguages {
             List.of("en-US", "es", "zh", "fr", "de", "ja", "ko", "ar", "hi", "pt");
 
     private static final Set<String> ALLOWED_LANGUAGES =
-            TAGS.stream()
-                    .map(tag -> Locale.forLanguageTag(tag).getLanguage())
+            Arrays.stream(Locale.getISOLanguages())
+                    .flatMap(tag -> Stream.of(tag, Locale.forLanguageTag(tag).getISO3Language()))
                     .collect(Collectors.toUnmodifiableSet());
 
     private SupportedLanguages() {}

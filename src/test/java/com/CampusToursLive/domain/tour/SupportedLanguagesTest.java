@@ -53,6 +53,9 @@ class SupportedLanguagesTest {
                 SupportedLanguages.requireSupported(
                         List.of("fr-FR", "en-GB", "en", "zh-CN", "zh-Hant-TW")));
         assertTrue(SupportedLanguages.isSupported("EN-gb"));
+        assertTrue(SupportedLanguages.isSupported("it"));
+        assertTrue(SupportedLanguages.isSupported("it-IT"));
+        assertTrue(SupportedLanguages.isSupported("fra"));
         assertFalse(SupportedLanguages.isSupported(""));
         assertFalse(SupportedLanguages.isSupported("en-US-invalid-long-subtag"));
     }
