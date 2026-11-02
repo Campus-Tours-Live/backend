@@ -1876,6 +1876,8 @@ class BookingServiceTest {
         assertEquals("CONFIRMED", resp.status());
         assertEquals(BookingStatus.CONFIRMED, b.getStatus());
         assertNotNull(b.getConfirmedAt());
+        assertNull(b.getGuideResponseDeadlineAt());
+        assertNull(resp.guideResponseDeadline());
 
         ArgumentCaptor<BookingStatusHistoryEntity> audit =
                 ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
@@ -2032,6 +2034,22 @@ class BookingServiceTest {
                 service()
                         .listForGuide(guideUser, BookingService.GuideBookingFilter.PENDING)
                         .isEmpty());
+    }
+
+    @Test
+    void guideBookingFilter_isIndependentOfDefaultLocale() {
+        java.util.Locale previous = java.util.Locale.getDefault();
+        try {
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr-TR"));
+            assertEquals(
+                    BookingService.GuideBookingFilter.PENDING,
+                    BookingService.GuideBookingFilter.fromParam("PENDING"));
+            assertEquals(
+                    BookingService.GuideBookingFilter.UPCOMING,
+                    BookingService.GuideBookingFilter.fromParam("UPCOMING"));
+        } finally {
+            java.util.Locale.setDefault(previous);
+        }
     }
 
     @Test

@@ -25,6 +25,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -674,7 +675,7 @@ public class BookingService {
 
         public static GuideBookingFilter fromParam(String raw) {
             if (raw == null || raw.isBlank()) return ALL;
-            return switch (raw.trim().toLowerCase()) {
+            return switch (raw.trim().toLowerCase(Locale.ROOT)) {
                 case "pending" -> PENDING;
                 case "upcoming" -> UPCOMING;
                 case "all" -> ALL;
@@ -745,6 +746,7 @@ public class BookingService {
         BookingStatus previous = b.getStatus();
         b.setStatus(BookingStatus.CONFIRMED);
         b.setConfirmedAt(Instant.now());
+        b.setGuideResponseDeadlineAt(null);
         bookings.save(b);
         recordTransition(b, previous, BookingActor.GUIDE, guideUser.getId(), "GUIDE_ACCEPTED");
         return toGuideDetailResponse(b);
