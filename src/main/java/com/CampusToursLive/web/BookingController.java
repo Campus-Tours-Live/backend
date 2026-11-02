@@ -26,18 +26,21 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Participant booking endpoints (Core: /bookings; BFF path /v1/bookings/*): dashboard reads plus
- * the create/cancel writes. All require the PARTICIPANT role; ownership of a booking is enforced in
- * the service.
+ * Booking endpoints (Core: /bookings; BFF path /v1/bookings/*): participant dashboard reads and
+ * create, the guide's accept/decline responses, and cancel (which either party may call). Every
+ * operation requires a valid platform JWT; the participant reads/create require the PARTICIPANT
+ * role, the guide responses require the GUIDE role, and cancel resolves the caller's relationship
+ * to the booking. Ownership is always enforced in the service.
  */
 @RestController
 @RequestMapping("/bookings")
 @Tag(
-        name = "Participant bookings",
+        name = "Bookings",
         description =
-                "A participant's tour bookings: dashboard reads plus create and cancel. Every"
-                        + " operation requires a valid platform JWT and the PARTICIPANT role"
-                        + " (authorization reads user_roles).")
+                "Tour bookings: participant dashboard reads and create, the guide's accept/decline"
+                        + " responses, and cancel (callable by the booking's participant or guide)."
+                        + " Every operation requires a valid platform JWT; authorization reads"
+                        + " user_roles and the service enforces per-booking ownership.")
 public class BookingController {
 
     private final CurrentUser currentUser;
@@ -216,14 +219,16 @@ public class BookingController {
         return ApiEnvelope.of(bookingService.createBooking(user, req));
     }
 
-    /** Cancel the participant's own upcoming booking. The body (a reason) is optional. */
+    /** Cancel a booking as its participant or its guide. The body (a reason) is optional. */
     @Operation(
             summary = "Cancel a booking",
             description =
-                    "Cancels the participant's own upcoming booking (pending or CONFIRMED, before"
-                            + " the scheduled start). Idempotent when the booking is already"
-                            + " participant-cancelled; an optional reason (max 1000 characters) is"
-                            + " recorded.")
+                    "Cancels a booking on behalf of whichever party the caller is. The booking's"
+                            + " PARTICIPANT may cancel a pending or CONFIRMED booking before the"
+                            + " scheduled start; the booking's GUIDE may cancel a CONFIRMED booking"
+                            + " before the start (a full participant refund is owed once payments"
+                            + " land). Idempotent when already cancelled by that party; an optional"
+                            + " reason (max 1000 characters) is recorded.")
     @ApiResponse(
             responseCode = "200",
             description = "The cancelled booking.",
@@ -240,16 +245,9 @@ public class BookingController {
                             schema = @Schema(implementation = Problem.class),
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
     @ApiResponse(
-            responseCode = "403",
-            description = "Caller does not hold the PARTICIPANT role.",
-            content =
-                    @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(implementation = Problem.class),
-                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
-    @ApiResponse(
             responseCode = "404",
-            description = "Booking not found, or not owned by the caller.",
+            description =
+                    "Booking not found, or the caller is neither its participant nor its guide.",
             content =
                     @Content(
                             mediaType = "application/json",
@@ -274,7 +272,129 @@ public class BookingController {
     @PostMapping("/{id}/cancel")
     public ApiEnvelope<BookingDetailResponse> cancel(
             @PathVariable UUID id, @RequestBody(required = false) CancelBookingRequest req) {
-        var user = currentUser.requireRole(UserRole.PARTICIPANT);
+        var user = currentUser.require();
         return ApiEnvelope.of(bookingService.cancelBooking(user, id, req));
+    }
+
+    /** Guide accepts a pending request → CONFIRMED. */
+    @Operation(
+            summary = "Accept a booking (guide)",
+            description =
+                    "The booking's guide confirms a request that is awaiting their response"
+                            + " (PENDING_GUIDE_ACCEPTANCE → CONFIRMED). Idempotent when the booking"
+                            + " is already confirmed.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The confirmed booking.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.BOOKING_DETAIL)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "Booking not found, or not owned by the calling guide.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @ApiResponse(
+            responseCode = "409",
+            description = "The booking was modified concurrently — retry.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_409)))
+    @ApiResponse(
+            responseCode = "422",
+            description = "The booking is no longer awaiting the guide's response.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @PostMapping("/{id}/accept")
+    public ApiEnvelope<BookingDetailResponse> accept(@PathVariable UUID id) {
+        var user = currentUser.requireRole(UserRole.GUIDE);
+        return ApiEnvelope.of(bookingService.acceptBooking(user, id));
+    }
+
+    /** Guide declines a pending request → DECLINED_BY_GUIDE (releases the held slot). */
+    @Operation(
+            summary = "Decline a booking (guide)",
+            description =
+                    "The booking's guide declines a request that is awaiting their response"
+                            + " (PENDING_GUIDE_ACCEPTANCE → DECLINED_BY_GUIDE), releasing the held"
+                            + " slot. Idempotent when already declined; an optional reason (max 1000"
+                            + " characters) is recorded.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The declined booking.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = ApiExamples.BOOKING_CANCELLED)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "Booking not found, or not owned by the calling guide.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
+    @ApiResponse(
+            responseCode = "409",
+            description = "The booking was modified concurrently — retry.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_409)))
+    @ApiResponse(
+            responseCode = "422",
+            description = "The booking is no longer awaiting the guide's response.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @PostMapping("/{id}/decline")
+    public ApiEnvelope<BookingDetailResponse> decline(
+            @PathVariable UUID id, @RequestBody(required = false) CancelBookingRequest req) {
+        var user = currentUser.requireRole(UserRole.GUIDE);
+        return ApiEnvelope.of(bookingService.declineBooking(user, id, req));
     }
 }
