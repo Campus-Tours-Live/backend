@@ -110,6 +110,52 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String GUIDE_BOOKING_ACTION_PREFIX =
+            "{\"data\":{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"bookingNumber\":\"CTL-2026-00042\",\"status\":";
+    String GUIDE_BOOKING_ACTION_FIELDS =
+            ",\"scheduledAt\":\"2026-08-01T15:00:00Z\","
+                    + "\"offeringId\":\"a1a2c3d4-0000-4000-8000-000000000002\","
+                    + "\"offeringTitle\":\"North Campus highlights\","
+                    + "\"participantName\":\"Sam Rivera\",\"participantNotes\":null,"
+                    + "\"universityName\":\"North Coast University\",\"durationMin\":60,"
+                    + "\"priceCents\":4200,\"currency\":\"USD\",\"guideResponseDeadline\":";
+    String GUIDE_BOOKING_ACCEPTED =
+            GUIDE_BOOKING_ACTION_PREFIX
+                    + "\"CONFIRMED\""
+                    + GUIDE_BOOKING_ACTION_FIELDS
+                    + "null},"
+                    + META
+                    + "}";
+    String GUIDE_BOOKING_DECLINED =
+            GUIDE_BOOKING_ACTION_PREFIX
+                    + "\"CANCELLED\""
+                    + GUIDE_BOOKING_ACTION_FIELDS
+                    + "\"2026-07-30T15:00:00Z\"},"
+                    + META
+                    + "}";
+    String GUIDE_BOOKING_COMPLETED =
+            GUIDE_BOOKING_ACTION_PREFIX
+                    + "\"COMPLETED\""
+                    + GUIDE_BOOKING_ACTION_FIELDS
+                    + "null},"
+                    + META
+                    + "}";
+    String GUIDE_BOOKING_NO_SHOW =
+            GUIDE_BOOKING_ACTION_PREFIX
+                    + "\"PARTICIPANT_NO_SHOW\""
+                    + GUIDE_BOOKING_ACTION_FIELDS
+                    + "null},"
+                    + META
+                    + "}";
+    String GUIDE_BOOKING_CANCELLED =
+            GUIDE_BOOKING_ACTION_PREFIX
+                    + "\"CANCELLED\""
+                    + GUIDE_BOOKING_ACTION_FIELDS
+                    + "null},"
+                    + META
+                    + "}";
+
     String GUIDE_BOOKING_FULL_DETAIL =
             "{\"data\":{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
                     + "\"bookingNumber\":\"CTL-2026-00042\","

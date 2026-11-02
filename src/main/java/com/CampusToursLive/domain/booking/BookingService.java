@@ -701,8 +701,8 @@ public class BookingService {
 
     /**
      * List this guide's bookings for the inbox. {@code pending} = awaiting accept/decline; {@code
-     * upcoming} = CONFIRMED starting now or later; {@code past} = completed / no-show / overdue
-     * confirmed (newest first); {@code all} = pending + upcoming only.
+     * upcoming} = CONFIRMED or IN_PROGRESS ending now or later; {@code past} = completed / no-show
+     * / overdue confirmed (newest first); {@code all} = pending + upcoming only.
      */
     @Transactional(readOnly = true)
     public List<GuideBookingDetailResponse> listForGuide(
@@ -716,8 +716,12 @@ public class BookingService {
                                     guide.getId(), List.of(BookingStatus.PENDING_GUIDE_ACCEPTANCE));
                     case UPCOMING ->
                             bookings
-                                    .findByGuideIdAndStatusInAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc(
-                                            guide.getId(), List.of(BookingStatus.CONFIRMED), now);
+                                    .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                            guide.getId(),
+                                            List.of(
+                                                    BookingStatus.CONFIRMED,
+                                                    BookingStatus.IN_PROGRESS),
+                                            now);
                     case PAST -> {
                         List<BookingEntity> terminal =
                                 bookings.findByGuideIdAndStatusInOrderByScheduledStartAtDesc(
@@ -735,9 +739,11 @@ public class BookingService {
                                         List.of(BookingStatus.PENDING_GUIDE_ACCEPTANCE));
                         List<BookingEntity> upcoming =
                                 bookings
-                                        .findByGuideIdAndStatusInAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                                        .findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
                                                 guide.getId(),
-                                                List.of(BookingStatus.CONFIRMED),
+                                                List.of(
+                                                        BookingStatus.CONFIRMED,
+                                                        BookingStatus.IN_PROGRESS),
                                                 now);
                         yield mergeByScheduledStart(pending, upcoming);
                     }

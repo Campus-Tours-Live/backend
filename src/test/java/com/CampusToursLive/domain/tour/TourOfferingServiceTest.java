@@ -640,6 +640,47 @@ class TourOfferingServiceTest {
     }
 
     @Test
+    void update_doesNotCountItsOwnSlugAsACollision() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity draft = offering(oid, gid, TourStatus.DRAFT);
+        draft.setTitle("Campus walk");
+        draft.setSlug("campus-walk");
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(draft));
+        service()
+                .update(
+                        user(uid),
+                        oid,
+                        new UpdateOfferingRequest(
+                                "Campus walk!", null, null, null, null, null, null, null));
+        assertEquals("campus-walk", draft.getSlug());
+        verify(offerings, never()).existsByGuideIdAndSlug(any(), anyString());
+    }
+
+    @Test
+    void update_keepsOwnSuffixedSlugButSkipsOtherOfferingCollisions() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity draft = offering(oid, gid, TourStatus.DRAFT);
+        draft.setTitle("Campus walk");
+        draft.setSlug("campus-walk-2");
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(draft));
+        when(offerings.existsByGuideIdAndSlug(gid, "campus-walk")).thenReturn(true);
+        service()
+                .update(
+                        user(uid),
+                        oid,
+                        new UpdateOfferingRequest(
+                                "Campus walk!", null, null, null, null, null, null, null));
+        assertEquals("campus-walk-2", draft.getSlug());
+        verify(offerings, never()).existsByGuideIdAndSlug(gid, "campus-walk-2");
+    }
+
+    @Test
     void update_rejectsEmptyLanguages() {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
@@ -806,6 +847,7 @@ class TourOfferingServiceTest {
         assertEquals("DRAFT", copy.status());
         assertEquals("Copy of Campus walk", copy.title());
         assertEquals("copy-of-campus-walk", copy.slug());
+        verify(offerings).existsByGuideIdAndSlug(gid, "copy-of-campus-walk");
     }
 
     // ---------- listOwn ----------

@@ -101,6 +101,43 @@ class OpenApiDocsExportTest {
         assertThat(Files.size(OPENAPI_OUTPUT)).isGreaterThan(0L);
     }
 
+    @Test
+    void guideActionExamplesMatchSuccessfulTransition() throws Exception {
+        var spec =
+                new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readTree(rest.getForObject("/v3/api-docs", String.class));
+        for (var entry :
+                java.util.Map.of(
+                                "accept",
+                                "CONFIRMED",
+                                "decline",
+                                "CANCELLED",
+                                "complete",
+                                "COMPLETED",
+                                "no-show",
+                                "PARTICIPANT_NO_SHOW")
+                        .entrySet()) {
+            var example =
+                    spec.path("paths")
+                            .path("/guide/bookings/{id}/" + entry.getKey())
+                            .path("post")
+                            .path("responses")
+                            .path("200")
+                            .path("content")
+                            .path("application/json")
+                            .path("example");
+            assertThat(example.path("data").path("status").asText()).isEqualTo(entry.getValue());
+            assertThat(example.path("data").path("bookingNumber").asText()).isNotBlank();
+            assertThat(example.has("meta")).isTrue();
+            if (!entry.getKey().equals("decline")) {
+                assertThat(example.path("data").path("guideResponseDeadline").isNull()).isTrue();
+            } else {
+                assertThat(example.path("data").path("guideResponseDeadline").asText())
+                        .isEqualTo("2026-07-30T15:00:00Z");
+            }
+        }
+    }
+
     /**
      * CTL-97: /userinfo and /session/current-role are removed (Core no longer owns current-role);
      * /users/me and /users/me/role-eligibility replace them. Asserted against the generated spec's

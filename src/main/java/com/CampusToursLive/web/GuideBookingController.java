@@ -55,7 +55,7 @@ public class GuideBookingController {
             summary = "List guide bookings",
             description =
                     "Lists this guide's bookings. filter=pending (awaiting accept/decline),"
-                            + " upcoming (CONFIRMED starting now or later), past (completed /"
+                            + " upcoming (CONFIRMED or IN_PROGRESS ending now or later), past (completed /"
                             + " no-show / overdue confirmed, newest first), or all (pending +"
                             + " upcoming; default).")
     @ApiResponse(
@@ -164,7 +164,7 @@ public class GuideBookingController {
             content =
                     @Content(
                             mediaType = "application/json",
-                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_DETAIL)))
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_ACCEPTED)))
     @ApiResponse(
             responseCode = "401",
             description = "No valid principal / account not provisioned.",
@@ -213,7 +213,7 @@ public class GuideBookingController {
             content =
                     @Content(
                             mediaType = "application/json",
-                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_DETAIL)))
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_DECLINED)))
     @ApiResponse(
             responseCode = "401",
             description = "No valid principal / account not provisioned.",
@@ -264,7 +264,7 @@ public class GuideBookingController {
             content =
                     @Content(
                             mediaType = "application/json",
-                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_DETAIL)))
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_COMPLETED)))
     @ApiResponse(
             responseCode = "401",
             description = "No valid principal / account not provisioned.",
@@ -315,7 +315,7 @@ public class GuideBookingController {
             content =
                     @Content(
                             mediaType = "application/json",
-                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_DETAIL)))
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_NO_SHOW)))
     @ApiResponse(
             responseCode = "401",
             description = "No valid principal / account not provisioned.",
