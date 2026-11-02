@@ -249,7 +249,7 @@ class TourOfferingServiceTest {
         stubCreateReady(uid, gid);
         CreateOfferingRequest req =
                 new CreateOfferingRequest(
-                        "Walk", UNI, "GENERAL_CAMPUS", 60, 5000L, null, List.of("xx-YY"));
+                        "Walk", UNI, "GENERAL_CAMPUS", 60, 5000L, null, List.of("en_US"));
         assertThrows(ValidationException.class, () -> service().create(user(uid), req));
     }
 
