@@ -1678,7 +1678,7 @@ class GuideServiceTest {
                         "CS",
                         null,
                         null,
-                        List.of("xx-YY"),
+                        List.of("en_US"),
                         null,
                         null,
                         false,
