@@ -40,6 +40,20 @@ class SupportedLanguagesTest {
     void requireSupported_throwsOnUnknownTag() {
         assertThrows(
                 ValidationException.class,
-                () -> SupportedLanguages.requireSupported(List.of("fr-FR")));
+                () -> SupportedLanguages.requireSupported(List.of("xx-YY")));
+        assertThrows(
+                ValidationException.class,
+                () -> SupportedLanguages.requireSupported(List.of("en_US")));
+    }
+
+    @Test
+    void acceptsWellFormedRegionalAndScriptVariantsOfSupportedLanguages() {
+        assertEquals(
+                List.of("fr-FR", "en-GB", "en", "zh-CN", "zh-Hant-TW"),
+                SupportedLanguages.requireSupported(
+                        List.of("fr-FR", "en-GB", "en", "zh-CN", "zh-Hant-TW")));
+        assertTrue(SupportedLanguages.isSupported("EN-gb"));
+        assertFalse(SupportedLanguages.isSupported(""));
+        assertFalse(SupportedLanguages.isSupported("en-US-invalid-long-subtag"));
     }
 }
