@@ -115,7 +115,9 @@ class OpenApiDocsExportTest {
                                 "complete",
                                 "COMPLETED",
                                 "no-show",
-                                "PARTICIPANT_NO_SHOW")
+                                "PARTICIPANT_NO_SHOW",
+                                "cancel",
+                                "CANCELLED")
                         .entrySet()) {
             var example =
                     spec.path("paths")

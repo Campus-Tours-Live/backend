@@ -367,7 +367,7 @@ public class GuideBookingController {
             content =
                     @Content(
                             mediaType = "application/json",
-                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_DETAIL)))
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_BOOKING_CANCELLED)))
     @ApiResponse(
             responseCode = "401",
             description = "No valid principal / account not provisioned.",
