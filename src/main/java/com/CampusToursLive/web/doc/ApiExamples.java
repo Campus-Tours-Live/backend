@@ -94,6 +94,8 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String GUIDE_PENDING_ACTIONS = "{\"data\":{\"pendingAcceptance\":2}," + META + "}";
+
     String GUIDE_BOOKING_DETAIL =
             "{\"data\":{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
                     + "\"bookingNumber\":\"CTL-2026-00042\","

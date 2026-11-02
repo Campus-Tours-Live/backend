@@ -2,6 +2,8 @@ package com.CampusToursLive.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
@@ -43,6 +45,46 @@ class OpenApiDocsExportTest {
     @MockitoBean private JwtDecoder jwtDecoder;
 
     @Autowired private TestRestTemplate rest;
+
+    @Autowired private ObjectMapper mapper;
+
+    @Test
+    void guidePendingActions_hasAnEnvelopedSuccessExample() throws Exception {
+        String body = rest.getForObject("/v3/api-docs", String.class);
+        JsonNode content =
+                mapper.readTree(body)
+                        .path("paths")
+                        .path("/guide/bookings/pending-actions")
+                        .path("get")
+                        .path("responses")
+                        .path("200")
+                        .path("content")
+                        .path("application/json");
+        JsonNode example = content.path("example");
+        if (example.isMissingNode()) {
+            assertThat(content.path("examples").isEmpty()).isFalse();
+            example = content.path("examples").elements().next().path("value");
+        }
+        assertThat(example.path("data").path("pendingAcceptance").asInt(-1)).isEqualTo(2);
+        assertThat(example.path("meta").path("requestId").asText()).isNotBlank();
+        JsonNode schemas = mapper.readTree(body).path("components").path("schemas");
+        assertThat(content.path("schema").path("$ref").asText())
+                .endsWith("/GuidePendingActionsEnvelope");
+        assertThat(
+                        schemas.path("GuidePendingActionsEnvelope")
+                                .path("properties")
+                                .path("data")
+                                .path("$ref")
+                                .asText())
+                .endsWith("/GuidePendingActionsResponse");
+        assertThat(
+                        schemas.path("GuidePendingActionsResponse")
+                                .path("properties")
+                                .path("pendingAcceptance")
+                                .path("type")
+                                .asText())
+                .isEqualTo("integer");
+    }
 
     @Test
     void exportsGeneratedOpenApiSpec() throws Exception {

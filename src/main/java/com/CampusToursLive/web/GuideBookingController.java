@@ -5,6 +5,7 @@ import com.CampusToursLive.domain.booking.BookingService.GuideBookingFilter;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.doc.ApiExamples;
+import com.CampusToursLive.web.doc.GuidePendingActionsEnvelope;
 import com.CampusToursLive.web.dto.ApiEnvelope;
 import com.CampusToursLive.web.dto.CancelBookingRequest;
 import com.CampusToursLive.web.dto.GuideBookingDetailResponse;
@@ -102,7 +103,8 @@ public class GuideBookingController {
             content =
                     @Content(
                             mediaType = "application/json",
-                            schema = @Schema(implementation = GuidePendingActionsResponse.class)))
+                            schema = @Schema(implementation = GuidePendingActionsEnvelope.class),
+                            examples = @ExampleObject(value = ApiExamples.GUIDE_PENDING_ACTIONS)))
     @ApiResponse(
             responseCode = "401",
             description = "No valid principal / account not provisioned.",
