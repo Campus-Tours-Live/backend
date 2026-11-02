@@ -10,6 +10,15 @@ import org.springframework.data.repository.query.Param;
 
 public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
 
+    /** Bounded claim; concurrent schedulers skip rows already owned by another transaction. */
+    @Query(
+            value =
+                    "SELECT * FROM bookings WHERE status = 'PENDING_GUIDE_ACCEPTANCE' "
+                            + "AND guide_response_deadline_at <= :now "
+                            + "ORDER BY guide_response_deadline_at, id LIMIT 100 FOR UPDATE SKIP LOCKED",
+            nativeQuery = true)
+    List<BookingEntity> claimExpiredGuideRequests(@Param("now") Instant now);
+
     /**
      * Next confirmed tour: the single soonest CONFIRMED booking for a participant that has not yet
      * started. Used for the "Next Tour" card on the participant dashboard.

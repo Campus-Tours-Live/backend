@@ -474,6 +474,15 @@ envelope; errors are `application/problem+json`.
 | `GET`         | `/meta/tour-topics`               | Controlled vocabulary for tour topics                     |
 | `POST`        | `/admin/guides/{userId}/decision` | Admin approve/reject a guide application                  |
 
+### Expired guide booking requests
+
+Pending guide-acceptance requests are expired using their stored response deadline. A scheduled
+transaction claims at most 100 due requests with `FOR UPDATE SKIP LOCKED`, changes their status
+to `EXPIRED`, clears the response deadline, and writes a `SYSTEM` audit event. This releases the
+guide and participant overlap holds without changing payment fields. Optimistic versions prevent
+stale guide actions from overwriting expiry. The job runs every 60 seconds after an initial
+60-second delay; override `booking.expiry.delay-ms` and `booking.expiry.initial-delay-ms` as needed.
+
 > **Role scoping is by authorization, not by path.** Booking and cart live at generic resource
 > paths (`/bookings*`, `/cart*`), _not_ under a `/participant/` prefix. The **PARTICIPANT** role is
 > enforced inside the controller (`requireRole(PARTICIPANT)`), so the Core owns one canonical path

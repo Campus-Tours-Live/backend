@@ -13,9 +13,9 @@ import org.junit.jupiter.api.Test;
 class SupportedLanguagesTest {
 
     @Test
-    void isSupported_rejectsNullAndUnknown() {
+    void isSupported_rejectsNullAndMalformed() {
         assertFalse(SupportedLanguages.isSupported(null));
-        assertFalse(SupportedLanguages.isSupported("xx-YY"));
+        assertFalse(SupportedLanguages.isSupported("en_US"));
         assertTrue(SupportedLanguages.isSupported("en-US"));
     }
 
@@ -37,9 +37,30 @@ class SupportedLanguagesTest {
     }
 
     @Test
-    void requireSupported_throwsOnUnknownTag() {
+    void requireSupported_throwsOnMalformedTag() {
         assertThrows(
                 ValidationException.class,
-                () -> SupportedLanguages.requireSupported(List.of("fr-FR")));
+                () -> SupportedLanguages.requireSupported(List.of("en_US")));
+        assertThrows(
+                ValidationException.class,
+                () -> SupportedLanguages.requireSupported(List.of("en--US")));
+    }
+
+    @Test
+    void acceptsWellFormedRegionalAndScriptVariantsOfSupportedLanguages() {
+        assertEquals(
+                List.of("fr-FR", "en-GB", "en", "zh-CN", "zh-Hant-TW"),
+                SupportedLanguages.requireSupported(
+                        List.of("fr-FR", "en-GB", "en", "zh-CN", "zh-Hant-TW")));
+        assertTrue(SupportedLanguages.isSupported("EN-gb"));
+        assertTrue(SupportedLanguages.isSupported("it"));
+        assertTrue(SupportedLanguages.isSupported("it-IT"));
+        assertTrue(SupportedLanguages.isSupported("fra"));
+        assertTrue(SupportedLanguages.isSupported("fil-PH"));
+        assertTrue(SupportedLanguages.isSupported("xx-YY"));
+        assertTrue(SupportedLanguages.isSupported("und"));
+        assertTrue(SupportedLanguages.isSupported("x-private"));
+        assertFalse(SupportedLanguages.isSupported(""));
+        assertFalse(SupportedLanguages.isSupported("en-US-invalid-long-subtag"));
     }
 }
