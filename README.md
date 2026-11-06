@@ -464,7 +464,7 @@ envelope; errors are `application/problem+json`.
 | `GET`         | `/universities?state=`            | One state's universities (Scorecard directory)            |
 | `GET`         | `/universities/{slug}`            | Platform university profile + live-tour stats            |
 | `GET`         | `/meta/tour-topics`               | Controlled vocabulary for tour topics                     |
-| `POST`        | `/admin/guides/{userId}/decision` | Admin approve/reject a guide application                  |
+| `POST`        | `/admin/guides/{userId}/decision` | Approve / reject a PENDING guide application (ADMIN)      |
 
 > **Role scoping is by authorization, not by path.** Booking and cart live at generic resource
 > paths (`/bookings*`, `/cart*`), _not_ under a `/participant/` prefix. The **PARTICIPANT** role is
@@ -506,6 +506,32 @@ curl -s "http://localhost:4000/v1/tours?sort=RECOMMENDED&limit=20" \
 
 See the endpoint tables above for the full request/response contract. Cross-repo integration (BFF
 `/v1` passthrough, frontend) is described in the PR that introduced this endpoint.
+
+### Guide application decision (`POST /admin/guides/{userId}/decision`)
+
+An **ADMIN** approves or rejects a guide whose application is **PENDING**. `{userId}` is the
+guide's **user** id (not the guide profile id).
+
+```json
+{ "decision": "REJECT", "reason": "Student ID photo is unreadable" }
+```
+
+- `decision` is `APPROVE` or `REJECT`. `reason` (≤ 500 chars) is optional for `APPROVE` and
+  required (non-blank) for `REJECT`.
+- **APPROVE** sets the guide to `VERIFIED` (stamping `approved_at`) and marks their PENDING school
+  rows `VERIFIED`. The guide can then publish offerings, and those appear in `GET /tours`.
+- **REJECT** sets the guide and their PENDING school rows to `REJECTED`. There is no reapply path
+  from `REJECTED` yet.
+- Every decision writes one `audit_log` row (`GUIDE_APPLICATION_DECIDED`, the admin as actor, the
+  decision and trimmed reason in metadata).
+- The decision is a conditional update on `guide_status = PENDING`, so two admins deciding at once
+  cannot both win — the second gets `409`.
+
+**Responses:** `200` `{ "userId", "status" }` · `401` no token · `403` not an ADMIN · `404` no guide
+profile for that user · `409` `GUIDE_APPLICATION_NOT_PENDING` (already decided; `currentStatus` in
+the body), `GUIDE_SELF_DECISION` (an admin deciding their own application), or
+`GUIDE_UNIVERSITY_NOT_PENDING` (no PENDING school row to verify) · `422` invalid body or a reject
+without a reason.
 
 ---
 
