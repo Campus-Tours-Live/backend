@@ -71,4 +71,28 @@ public final class ConflictException extends RuntimeException implements CodedPr
                 "ROLE_PROFILE_STATE_INVALID",
                 Map.of("role", role));
     }
+
+    /** Only a PENDING guide application can be approved or rejected. */
+    public static ConflictException guideApplicationNotPending(String currentStatus) {
+        return new ConflictException(
+                "Guide application is not pending: " + currentStatus,
+                "GUIDE_APPLICATION_NOT_PENDING",
+                Map.of("currentStatus", currentStatus));
+    }
+
+    /** An admin must not approve or reject their own guide application. */
+    public static ConflictException guideSelfDecision() {
+        return new ConflictException(
+                "An admin cannot decide their own guide application",
+                "GUIDE_SELF_DECISION",
+                Map.of());
+    }
+
+    /** The profile changed but no PENDING university row matched the decision. */
+    public static ConflictException guideUniversityNotPending() {
+        return new ConflictException(
+                "No pending university verification to decide",
+                "GUIDE_UNIVERSITY_NOT_PENDING",
+                Map.of());
+    }
 }

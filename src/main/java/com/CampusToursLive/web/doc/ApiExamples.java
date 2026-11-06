@@ -53,6 +53,11 @@ public interface ApiExamples {
             "{\"type\":\"about:blank\",\"title\":\"Not eligible for role: PARTICIPANT\","
                     + "\"status\":409,\"code\":\"ROLE_NOT_ELIGIBLE\",\"role\":\"PARTICIPANT\"}";
 
+    String PROBLEM_409_GUIDE_NOT_PENDING =
+            "{\"type\":\"about:blank\","
+                    + "\"title\":\"Guide application is not pending: VERIFIED\",\"status\":409,"
+                    + "\"code\":\"GUIDE_APPLICATION_NOT_PENDING\",\"currentStatus\":\"VERIFIED\"}";
+
     String PROBLEM_422 =
             "{\"type\":\"about:blank\",\"title\":\"Validation failed\",\"status\":422,"
                     + "\"detail\":\"One or more fields are invalid.\"}";
@@ -411,6 +416,12 @@ public interface ApiExamples {
     String SLOT_LIST =
             "{\"data\":[{\"startAt\":\"2026-07-14T10:00:00Z\","
                     + "\"endAt\":\"2026-07-14T11:00:00Z\"}],"
+                    + META
+                    + "}";
+
+    String GUIDE_DECISION =
+            "{\"data\":{\"userId\":\"a1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"status\":\"VERIFIED\"},"
                     + META
                     + "}";
 
