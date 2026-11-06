@@ -20,6 +20,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -111,7 +112,7 @@ public class TourDiscoveryService {
     public static TourDiscoverySort parseSort(String raw) {
         if (raw == null || raw.isBlank()) return TourDiscoverySort.RECOMMENDED;
         try {
-            return TourDiscoverySort.valueOf(raw.trim().toUpperCase());
+            return TourDiscoverySort.valueOf(raw.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             throw new ValidationException("Invalid sort: " + raw);
         }
