@@ -30,6 +30,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -1391,7 +1392,7 @@ public class AvailabilityWriteService {
 
     private static AvailabilityExceptionKind parseKind(String raw) {
         try {
-            return AvailabilityExceptionKind.valueOf(raw.trim().toUpperCase());
+            return AvailabilityExceptionKind.valueOf(raw.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             throw new ValidationException(
                     "Invalid kind (expected UNAVAILABLE or ADDITIONAL): " + raw);
@@ -1400,7 +1401,7 @@ public class AvailabilityWriteService {
 
     private static AcceptanceMode parseAcceptanceMode(String raw) {
         try {
-            return AcceptanceMode.valueOf(raw.trim().toUpperCase());
+            return AcceptanceMode.valueOf(raw.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             throw new ValidationException(
                     "Invalid acceptanceMode (expected AUTO or MANUAL): " + raw);
