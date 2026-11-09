@@ -436,6 +436,39 @@ class SlotGenerationServiceIntegrationTest {
                 .containsExactly(withinPreview);
     }
 
+    @Test
+    void getAvailabilityPreview_defaultWindowUsesGuideLocalDateAcrossUtcMidnight() {
+        // At 01:00 UTC on Nov 6, Los Angeles is still Nov 5 at 17:00. The occurrence starts at
+        // 19:00 local (03:00 UTC), clears its one-hour notice window, and belongs in the local
+        // Nov 5 preview. Deriving the default from UTC's Nov 6 would parse its lower bound as
+        // Nov 6 00:00 LA (08:00 UTC) and incorrectly exclude this slot.
+        Instant utcNow = Instant.parse("2026-11-06T01:00:00Z");
+        SlotGenerationService localDateService =
+                new SlotGenerationService(
+                        offerings,
+                        occurrences,
+                        bookings,
+                        settingsRepo,
+                        Clock.fixed(utcNow, ZoneOffset.UTC));
+        TourOfferingEntity offering = offering(60);
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setGuideId(guide.getId());
+        guideSettings.setTimezone("America/Los_Angeles");
+        guideSettings.setMinNoticeMin(60);
+        settingsRepo.saveAndFlush(guideSettings);
+        Instant eveningSlot = Instant.parse("2026-11-06T03:00:00Z");
+        occurrence(eveningSlot, eveningSlot.plus(1, java.time.temporal.ChronoUnit.HOURS));
+
+        OfferingAvailabilityPreviewResponse preview =
+                localDateService.getAvailabilityPreview(offering.getId(), null, null, 3);
+
+        assertThat(preview.hasAvailability()).isTrue();
+        assertThat(preview.nextStartAt()).isEqualTo(eveningSlot);
+        assertThat(preview.sampleSlots())
+                .extracting(SlotResponse::startAt)
+                .containsExactly(eveningSlot);
+    }
+
     // ---------------------------------------------------------------------
     // Fixtures.
     // ---------------------------------------------------------------------

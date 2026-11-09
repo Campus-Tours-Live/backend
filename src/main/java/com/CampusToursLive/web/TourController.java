@@ -172,17 +172,23 @@ public class TourController {
     @GetMapping("/{tourId}/availability-preview")
     public ApiEnvelope<OfferingAvailabilityPreviewResponse> availabilityPreview(
             @Parameter(description = "Id (UUID) of the tour offering.") @PathVariable UUID tourId,
-            @Parameter(description = "ISO yyyy-MM-dd; inclusive lower bound of the preview window.")
+            @Parameter(
+                            description =
+                                    "ISO yyyy-MM-dd in the guide's local timezone; inclusive lower bound"
+                                            + " of the preview window.")
                     @RequestParam(required = false)
                     String from,
-            @Parameter(description = "ISO yyyy-MM-dd; exclusive upper bound of the preview window.")
+            @Parameter(
+                            description =
+                                    "ISO yyyy-MM-dd in the guide's local timezone; exclusive upper bound"
+                                            + " of the preview window.")
                     @RequestParam(required = false)
                     String to,
             @Parameter(
                             description =
                                     "How many concrete slots to include in sampleSlots; max 10. If"
                                             + " from/to are omitted, preview defaults to the next"
-                                            + " 14 UTC calendar days.")
+                                            + " 14 guide-local calendar days.")
                     @RequestParam(required = false, defaultValue = "3")
                     int limit) {
         return ApiEnvelope.of(slots.getAvailabilityPreview(tourId, from, to, limit));
