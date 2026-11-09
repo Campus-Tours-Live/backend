@@ -23,6 +23,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -358,7 +359,7 @@ public class GuideService {
     /** Best-effort IANA zone for a US state code (demo-grade; onboarding can refine later). */
     private static String tzForState(String state) {
         if (state == null) return "America/New_York";
-        return switch (state.trim().toUpperCase()) {
+        return switch (state.trim().toUpperCase(Locale.ROOT)) {
             case "CA", "WA", "OR", "NV" -> "America/Los_Angeles";
             case "AZ" -> "America/Phoenix";
             case "CO", "UT", "NM", "MT", "WY", "ID" -> "America/Denver";
