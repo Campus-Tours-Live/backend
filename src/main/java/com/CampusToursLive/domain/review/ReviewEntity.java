@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.DynamicUpdate;
 
 /**
  * Maps the {@code reviews} table (V1__schema.sql) — a participant's review of a completed booking.
@@ -19,10 +20,19 @@ import lombok.Setter;
  * review per booking is enforced by the DB {@code UNIQUE(booking_id)} constraint. Rating columns
  * are {@code smallint} bounded 1-5 by DB CHECK constraints; {@link #overallRating} is required, the
  * four sub-ratings are optional.
+ *
+ * <p><b>{@code @DynamicUpdate}: each write touches only the columns it changed.</b> Different
+ * writers own different columns of the same row: a guide reply sets {@code guide_response}, while
+ * admin moderation sets {@code status} / {@code published_at}. With Hibernate's default all-columns
+ * UPDATE, a writer that loaded the row before a concurrent writer committed would write its stale
+ * copy of the other's columns back. For example, a reply could restore {@code PUBLISHED} over an
+ * admin's {@code REMOVED}, or a moderation could erase a reply. Writing only the dirty columns
+ * keeps both changes, and the row lock taken by the UPDATE orders writes to the same column.
  */
 @Getter
 @Setter
 @Entity
+@DynamicUpdate
 @Table(name = "reviews")
 public class ReviewEntity {
 
