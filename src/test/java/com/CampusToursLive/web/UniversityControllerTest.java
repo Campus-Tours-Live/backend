@@ -2,7 +2,12 @@ package com.CampusToursLive.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.CampusToursLive.domain.university.UniversityReadService;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.UniversityDirectory;
 import com.CampusToursLive.integration.scorecard.UniversityDirectory.DirectorySchool;
@@ -10,14 +15,18 @@ import com.CampusToursLive.integration.scorecard.UniversityDirectory.Snapshot;
 import com.CampusToursLive.web.dto.ApiEnvelope;
 import com.CampusToursLive.web.dto.StateUniversitiesResponse;
 import com.CampusToursLive.web.dto.StateUniversityCountsResponse;
+import com.CampusToursLive.web.dto.UniversityDetailResponse;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.server.ResponseStatusException;
 
 /** The browsable directory's two endpoints: the state summary and one state's list. */
@@ -37,7 +46,12 @@ class UniversityControllerTest {
     }
 
     private static UniversityController controllerOver(Snapshot snapshot) {
-        return new UniversityController(() -> snapshot);
+        return controllerOver(snapshot, Mockito.mock(UniversityReadService.class));
+    }
+
+    private static UniversityController controllerOver(
+            Snapshot snapshot, UniversityReadService platformUniversities) {
+        return new UniversityController(() -> snapshot, platformUniversities);
     }
 
     private static final UniversityController CONTROLLER =
@@ -189,5 +203,85 @@ class UniversityControllerTest {
     void anUnknownStateIsRejectedEvenWhenTheDirectoryIsDown() {
         assertThatThrownBy(() -> controllerOver(Snapshot.unavailable()).inState("PR"))
                 .isInstanceOf(ValidationException.class);
+    }
+
+    // --- /universities/{slug} ------------------------------------------------------------------
+
+    private static final UniversityDetailResponse PROFILE =
+            new UniversityDetailResponse(
+                    "01a2c3d4-0000-4000-8000-000000000003",
+                    "north-coast",
+                    "North Coast University",
+                    "NCU",
+                    "Arcata",
+                    "CA",
+                    "America/Los_Angeles",
+                    null,
+                    "ACTIVE",
+                    4,
+                    3800L,
+                    "USD");
+
+    private static UniversityReadService readServiceServing(UniversityDetailResponse profile) {
+        UniversityReadService reads = Mockito.mock(UniversityReadService.class);
+        Mockito.when(reads.getBySlug(profile.slug())).thenReturn(profile);
+        return reads;
+    }
+
+    private static MockMvc mvcOver(UniversityReadService reads) {
+        return MockMvcBuilders.standaloneSetup(
+                        controllerOver(
+                                snapshotWith(Map.of("CA", List.of("Stanford University"))), reads))
+                .build();
+    }
+
+    @Test
+    void bySlug_servesWhatTheReadServiceResolved() {
+        UniversityDetailResponse body =
+                Objects.requireNonNull(
+                                controllerOver(snapshotWith(Map.of()), readServiceServing(PROFILE))
+                                        .bySlug("north-coast"))
+                        .data();
+
+        assertThat(body).isEqualTo(PROFILE);
+    }
+
+    /** Literal `/state-summary` must win over `/{slug}` — otherwise the browse page breaks. */
+    @Test
+    void stateSummaryStillResolvesAheadOfTheSlugTemplate() throws Exception {
+        UniversityReadService reads = Mockito.mock(UniversityReadService.class);
+
+        mvcOver(reads)
+                .perform(get("/universities/state-summary"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.byState").exists());
+
+        Mockito.verifyNoInteractions(reads);
+    }
+
+    @Test
+    void theStateListStillResolvesOnTheRootPath() throws Exception {
+        UniversityReadService reads = Mockito.mock(UniversityReadService.class);
+
+        mvcOver(reads)
+                .perform(get("/universities").param("state", "CA"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.state").value("CA"));
+
+        Mockito.verifyNoInteractions(reads);
+    }
+
+    /** Detail has no Cache-Control; directory siblings keep their day-long max-age. */
+    @Test
+    void theProfileIsNotCacheable_unlikeTheDirectoryItSitsBeside() throws Exception {
+        MockMvc mvc = mvcOver(readServiceServing(PROFILE));
+
+        mvc.perform(get("/universities/north-coast"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tourCount").value(4))
+                .andExpect(header().doesNotExist(HttpHeaders.CACHE_CONTROL));
+
+        mvc.perform(get("/universities/state-summary"))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "public, max-age=86400"));
     }
 }
