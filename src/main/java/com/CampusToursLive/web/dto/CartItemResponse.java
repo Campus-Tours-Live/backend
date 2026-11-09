@@ -47,6 +47,14 @@ public record CartItemResponse(
                         requiredMode = Schema.RequiredMode.REQUIRED)
                 String guideName,
         @Schema(
+                        description =
+                                "ISO-8601 UTC deadline for the guide to respond; null when there is"
+                                        + " none. Always present (possibly null) so the cart keeps"
+                                        + " BookingDetailResponse's shape.",
+                        example = "2026-07-30T15:00:00Z",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                String guideResponseDeadline,
+        @Schema(
                         description = "Name of the university the tour is at.",
                         example = "North Coast University",
                         requiredMode = Schema.RequiredMode.REQUIRED)

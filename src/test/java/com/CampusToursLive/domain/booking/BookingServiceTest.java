@@ -49,6 +49,7 @@ class BookingServiceTest {
     @Mock BookingStatusHistoryRepository statusHistory;
     @Mock GuideAvailabilityOccurrenceRepository availabilityOccurrences;
     @Mock GuideBookingSettingsRepository settings;
+    @Mock ParticipantCartLock cartLock;
 
     private BookingService service() {
         return new BookingService(
@@ -59,7 +60,8 @@ class BookingServiceTest {
                 universities,
                 statusHistory,
                 availabilityOccurrences,
-                settings);
+                settings,
+                cartLock);
     }
 
     // ── entity builders ──────────────────────────────────────────────────────
@@ -1205,11 +1207,22 @@ class BookingServiceTest {
 
         CartItemResponse resp = service().addCartItem(participant, validRequest(ctx, null));
 
+        // The participant's cart lock is taken before the idempotency lookup, so concurrent
+        // retries serialize on it (CTL-83 review follow-up).
+        var order = inOrder(cartLock, bookings);
+        order.verify(cartLock).acquire(participant.getId());
+        order.verify(bookings)
+                .findFirstByParticipantUserIdAndTourOfferingIdAndScheduledStartAtAndStatusOrderByCreatedAtAsc(
+                        any(), any(), any(), any());
+        order.verify(bookings).countByParticipantUserIdAndStatus(any(), any());
+        order.verify(bookings).saveAndFlush(any());
+
         ArgumentCaptor<BookingEntity> saved = ArgumentCaptor.forClass(BookingEntity.class);
         verify(bookings).saveAndFlush(saved.capture());
         assertEquals(BookingStatus.DRAFT, saved.getValue().getStatus());
         assertNull(saved.getValue().getGuideResponseDeadlineAt());
         assertEquals("DRAFT", resp.status());
+        assertNull(resp.guideResponseDeadline());
 
         ArgumentCaptor<BookingStatusHistoryEntity> audit =
                 ArgumentCaptor.forClass(BookingStatusHistoryEntity.class);
@@ -1279,8 +1292,9 @@ class BookingServiceTest {
                         start,
                         start.plus(60, ChronoUnit.MINUTES));
         existing.setParticipantUserId(participant.getId());
-        when(bookings.findByParticipantUserIdAndTourOfferingIdAndScheduledStartAtAndStatus(
-                        participant.getId(), ctx.offeringId(), start, BookingStatus.DRAFT))
+        when(bookings
+                        .findFirstByParticipantUserIdAndTourOfferingIdAndScheduledStartAtAndStatusOrderByCreatedAtAsc(
+                                participant.getId(), ctx.offeringId(), start, BookingStatus.DRAFT))
                 .thenReturn(Optional.of(existing));
 
         CartItemResponse resp =
@@ -1355,6 +1369,21 @@ class BookingServiceTest {
         assertEquals("AVAILABLE", cart.get(0).cartStatus());
         assertEquals(5000L, cart.get(0).priceCents());
         assertEquals(5000L, cart.get(0).currentPriceCents());
+    }
+
+    @Test
+    void getCart_keepsGuideResponseDeadline_nullWhenUnset_isoWhenSet() {
+        // CartItemResponse must keep BookingDetailResponse's guideResponseDeadline key (bff's
+        // booking schema requires it, nullable) — null for a plain draft, ISO-8601 when set.
+        UUID uid = UUID.randomUUID();
+        BookingEntity item = cartItemFor(uid, futureStart());
+        stubAvailableCartLookups(item);
+
+        assertNull(service().getCart(uid).get(0).guideResponseDeadline());
+
+        Instant deadline = Instant.parse("2026-07-30T15:00:00Z");
+        item.setGuideResponseDeadlineAt(deadline);
+        assertEquals(deadline.toString(), service().getCart(uid).get(0).guideResponseDeadline());
     }
 
     @Test

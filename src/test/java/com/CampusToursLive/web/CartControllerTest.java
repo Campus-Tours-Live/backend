@@ -63,6 +63,7 @@ class CartControllerTest {
                 UUID.randomUUID().toString(),
                 "Campus Walk",
                 "Jane Guide",
+                null,
                 "Test University",
                 60,
                 5000L,

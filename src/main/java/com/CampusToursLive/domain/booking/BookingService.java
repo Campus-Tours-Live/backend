@@ -122,6 +122,7 @@ public class BookingService {
     private final BookingStatusHistoryRepository statusHistory;
     private final GuideAvailabilityOccurrenceRepository availabilityOccurrences;
     private final GuideBookingSettingsRepository settings;
+    private final ParticipantCartLock cartLock;
 
     public BookingService(
             BookingRepository bookings,
@@ -131,7 +132,8 @@ public class BookingService {
             UniversityRepository universities,
             BookingStatusHistoryRepository statusHistory,
             GuideAvailabilityOccurrenceRepository availabilityOccurrences,
-            GuideBookingSettingsRepository settings) {
+            GuideBookingSettingsRepository settings,
+            ParticipantCartLock cartLock) {
         this.bookings = bookings;
         this.offerings = offerings;
         this.guides = guides;
@@ -140,6 +142,7 @@ public class BookingService {
         this.statusHistory = statusHistory;
         this.availabilityOccurrences = availabilityOccurrences;
         this.settings = settings;
+        this.cartLock = cartLock;
     }
 
     /**
@@ -260,14 +263,21 @@ public class BookingService {
      * <p><b>Idempotent</b> on {@code (participant, offering, scheduledStartAt)}: re-adding the same
      * tour and time returns the existing cart item instead of inserting a duplicate (and does not
      * count against the max-items cap).
+     *
+     * <p><b>Concurrency:</b> the whole add runs under the participant's {@link
+     * ParticipantCartLock}, so concurrent retries of the same item serialize: the second one sees
+     * the first's committed row and returns it. The same lock keeps concurrent adds of different
+     * items from overrunning {@link #MAX_CART_ITEMS}.
      */
     @Transactional
     public CartItemResponse addCartItem(UserEntity participant, CreateBookingRequest req) {
         UUID offeringId = parseOfferingId(req.tourOfferingId());
         Instant start = parseStart(req.scheduledStartAt());
+        cartLock.acquire(participant.getId());
         Optional<BookingEntity> existing =
-                bookings.findByParticipantUserIdAndTourOfferingIdAndScheduledStartAtAndStatus(
-                        participant.getId(), offeringId, start, BookingStatus.DRAFT);
+                bookings
+                        .findFirstByParticipantUserIdAndTourOfferingIdAndScheduledStartAtAndStatusOrderByCreatedAtAsc(
+                                participant.getId(), offeringId, start, BookingStatus.DRAFT);
         if (existing.isPresent()) {
             return toCartItem(existing.get());
         }
@@ -760,6 +770,9 @@ public class BookingService {
                 b.getTourOfferingId().toString(),
                 offeringTitle,
                 guideName,
+                b.getGuideResponseDeadlineAt() != null
+                        ? b.getGuideResponseDeadlineAt().toString()
+                        : null,
                 universityName,
                 durationMin,
                 b.getBasePriceCents(),
