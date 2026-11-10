@@ -10,6 +10,7 @@ import com.CampusToursLive.error.ForbiddenException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.security.CurrentUser;
 import com.CampusToursLive.web.dto.BookingDetailResponse;
+import com.CampusToursLive.web.dto.CartItemResponse;
 import com.CampusToursLive.web.dto.CreateBookingRequest;
 import java.time.Instant;
 import java.util.List;
@@ -54,10 +55,27 @@ class CartControllerTest {
                 "USD");
     }
 
+    private static CartItemResponse mockCartItem(String cartStatus) {
+        return new CartItemResponse(
+                UUID.randomUUID().toString(),
+                "DRAFT",
+                Instant.now().toString(),
+                UUID.randomUUID().toString(),
+                "Campus Walk",
+                "Jane Guide",
+                null,
+                "Test University",
+                60,
+                5000L,
+                5000L,
+                "USD",
+                cartStatus);
+    }
+
     @Test
     void getCart_requiresParticipantRole_andWrapsListInEnvelope() {
         UserEntity u = participantUser();
-        List<BookingDetailResponse> cart = List.of(mockDetail("DRAFT"));
+        List<CartItemResponse> cart = List.of(mockCartItem("AVAILABLE"));
         when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
         when(bookingService.getCart(u.getId())).thenReturn(cart);
 
@@ -70,7 +88,7 @@ class CartControllerTest {
         CreateBookingRequest req =
                 new CreateBookingRequest(
                         UUID.randomUUID().toString(), "2026-07-10T17:00:00Z", null);
-        BookingDetailResponse detail = mockDetail("DRAFT");
+        CartItemResponse detail = mockCartItem("AVAILABLE");
         when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
         when(bookingService.addCartItem(u, req)).thenReturn(detail);
 
@@ -81,7 +99,7 @@ class CartControllerTest {
     void removeItem_requiresParticipantRole_andReturnsRemainingCart() {
         UserEntity u = participantUser();
         UUID itemId = UUID.randomUUID();
-        List<BookingDetailResponse> remaining = List.of();
+        List<CartItemResponse> remaining = List.of();
         when(currentUser.requireRole(UserRole.PARTICIPANT)).thenReturn(u);
         when(bookingService.removeCartItem(u, itemId)).thenReturn(remaining);
 
