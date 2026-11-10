@@ -31,6 +31,8 @@ public enum BookingStatus {
             case CONFIRMED -> "CONFIRMED";
             case IN_PROGRESS -> "CONFIRMED";
             case COMPLETED -> "COMPLETED";
+            case PARTICIPANT_NO_SHOW -> "PARTICIPANT_NO_SHOW";
+            case GUIDE_NO_SHOW -> "GUIDE_NO_SHOW";
             default -> "CANCELLED";
         };
     }
