@@ -37,6 +37,22 @@ class SupportedLanguagesTest {
     }
 
     @Test
+    void requireSupported_canonicalizesBeforeDeduplication() {
+        assertEquals(
+                List.of("en-US", "zh-Hant-TW", "fr-FR"),
+                SupportedLanguages.requireSupported(
+                        List.of(" en-us ", "EN-US", "en-US", "zh-hant-tw", "ZH-HANT-TW", "fr-fr")));
+    }
+
+    @Test
+    void requireSupported_preservesWellFormedUndeterminedAndPrivateUseTags() {
+        assertEquals(
+                List.of("und", "x-private", "fil-PH", "xx-YY"),
+                SupportedLanguages.requireSupported(
+                        List.of("UND", "und", "X-PRIVATE", "x-private", "fil-ph", "xx-yy")));
+    }
+
+    @Test
     void requireSupported_throwsOnMalformedTag() {
         assertThrows(
                 ValidationException.class,

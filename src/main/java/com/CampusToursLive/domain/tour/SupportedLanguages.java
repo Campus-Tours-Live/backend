@@ -33,8 +33,8 @@ public final class SupportedLanguages {
     }
 
     /**
-     * Validate BCP-47 syntax, not membership in the curated picker or a language registry.
-     * Duplicates and blanks are dropped; malformed tags fail the request.
+     * Validate BCP-47 syntax, not membership in the curated picker or a language registry. Tags are
+     * canonicalized before deduplication; blanks are dropped and malformed tags fail the request.
      */
     public static List<String> requireSupported(List<String> raw) {
         LinkedHashSet<String> out = new LinkedHashSet<>();
@@ -42,10 +42,11 @@ public final class SupportedLanguages {
         for (String s : raw) {
             if (s == null || s.isBlank()) continue;
             String tag = s.trim();
-            if (!isSupported(tag)) {
+            try {
+                out.add(new Locale.Builder().setLanguageTag(tag).build().toLanguageTag());
+            } catch (IllformedLocaleException ex) {
                 throw new ValidationException("Unsupported language: " + tag);
             }
-            out.add(tag);
         }
         return List.copyOf(out);
     }
