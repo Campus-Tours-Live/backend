@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -15,11 +16,14 @@ import com.CampusToursLive.domain.booking.BookingStatus;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
 import com.CampusToursLive.domain.tour.TourOfferingRepository;
 import com.CampusToursLive.domain.user.UserEntity;
+import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateReviewRequest;
+import com.CampusToursLive.web.dto.PublicReviewResponse;
 import com.CampusToursLive.web.dto.ReviewResponse;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -27,6 +31,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 
 @ExtendWith(MockitoExtension.class)
 class ReviewServiceTest {
@@ -35,9 +42,10 @@ class ReviewServiceTest {
     @Mock BookingRepository bookings;
     @Mock GuideProfileRepository guides;
     @Mock TourOfferingRepository offerings;
+    @Mock UserRepository users;
 
     private ReviewService service() {
-        return new ReviewService(reviews, bookings, guides, offerings);
+        return new ReviewService(reviews, bookings, guides, offerings, users);
     }
 
     private static UserEntity user(UUID id) {
@@ -306,5 +314,88 @@ class ReviewServiceTest {
         assertNull(resp.createdAt());
         assertNull(resp.publishedAt());
         assertSame(null, resp.guideResponse());
+    }
+
+    // ── public read surfaces ────────────────────────────────────────────────
+
+    private static ReviewEntity publishedReview(UUID guideId, UUID offeringId, UUID reviewerId) {
+        ReviewEntity r = new ReviewEntity();
+        r.setId(UUID.randomUUID());
+        r.setBookingId(UUID.randomUUID());
+        r.setParticipantUserId(reviewerId);
+        r.setGuideId(guideId);
+        r.setTourOfferingId(offeringId);
+        r.setOverallRating((short) 5);
+        r.setComment("great");
+        r.setPrivateFeedback("secret — must never leak");
+        r.setStatus(ReviewStatus.PUBLISHED);
+        return r;
+    }
+
+    @Test
+    void getGuideReviews_mapsPublicShape_resolvesNamesInOneBatch_andHidesPrivateFeedback() {
+        UUID guideId = UUID.randomUUID();
+        UUID reviewerId = UUID.randomUUID();
+        ReviewEntity review = publishedReview(guideId, UUID.randomUUID(), reviewerId);
+        Page<ReviewEntity> page = new PageImpl<>(List.of(review));
+        when(reviews.findByGuideIdAndStatusOrderByPublishedAtDesc(
+                        eq(guideId), eq(ReviewStatus.PUBLISHED), any(Pageable.class)))
+                .thenReturn(page);
+        UserEntity reviewer = user(reviewerId);
+        reviewer.setDisplayName("Pat P.");
+        when(users.findAllById(List.of(reviewerId))).thenReturn(List.of(reviewer));
+
+        Page<PublicReviewResponse> result = service().getGuideReviews(guideId, 0, 20);
+
+        assertEquals(1, result.getContent().size());
+        PublicReviewResponse dto = result.getContent().get(0);
+        assertEquals("Pat P.", dto.reviewerName());
+        assertEquals(5, dto.overallRating());
+        assertEquals("great", dto.comment());
+        assertEquals(guideId.toString(), dto.guideId());
+        // Batched exactly once — never per row (the N+1 the list must avoid).
+        verify(users).findAllById(List.of(reviewerId));
+    }
+
+    @Test
+    void getOfferingReviews_delegatesToOfferingQuery() {
+        UUID offeringId = UUID.randomUUID();
+        UUID reviewerId = UUID.randomUUID();
+        ReviewEntity review = publishedReview(UUID.randomUUID(), offeringId, reviewerId);
+        when(reviews.findByTourOfferingIdAndStatusOrderByPublishedAtDesc(
+                        eq(offeringId), eq(ReviewStatus.PUBLISHED), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(review)));
+        when(users.findAllById(List.of(reviewerId))).thenReturn(List.of(user(reviewerId)));
+
+        Page<PublicReviewResponse> result = service().getOfferingReviews(offeringId, 0, 20);
+        assertEquals(offeringId.toString(), result.getContent().get(0).offeringId());
+    }
+
+    @Test
+    void getGuideReviews_missingReviewerRow_yieldsNullName() {
+        UUID guideId = UUID.randomUUID();
+        UUID reviewerId = UUID.randomUUID();
+        ReviewEntity review = publishedReview(guideId, UUID.randomUUID(), reviewerId);
+        when(reviews.findByGuideIdAndStatusOrderByPublishedAtDesc(
+                        eq(guideId), eq(ReviewStatus.PUBLISHED), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(review)));
+        when(users.findAllById(List.of(reviewerId))).thenReturn(List.of()); // reviewer not found
+
+        Page<PublicReviewResponse> result = service().getGuideReviews(guideId, 0, 20);
+        assertNull(result.getContent().get(0).reviewerName());
+    }
+
+    @Test
+    void getGuideReviews_pageSizeClampedToMax_andNegativePageFloored() {
+        UUID guideId = UUID.randomUUID();
+        var pageable = org.mockito.ArgumentCaptor.forClass(Pageable.class);
+        when(reviews.findByGuideIdAndStatusOrderByPublishedAtDesc(
+                        eq(guideId), eq(ReviewStatus.PUBLISHED), pageable.capture()))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        service().getGuideReviews(guideId, -3, 9999);
+
+        assertEquals(0, pageable.getValue().getPageNumber()); // negative floored to 0
+        assertEquals(100, pageable.getValue().getPageSize()); // clamped to MAX_PAGE_SIZE
     }
 }
