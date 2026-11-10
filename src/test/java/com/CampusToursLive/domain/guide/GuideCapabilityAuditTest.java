@@ -79,9 +79,10 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
  *       {@code BookingService.requireApprovedGuide} (also gates VERIFIED) — the same "prepare while
  *       pending, go live only once verified" precedent {@link TourOfferingService#create} already
  *       documents for DRAFT offerings. No outward effect exists without one of the two gates above.
- *   <li>Guide-driven booking accept/decline and offering duplicate/import DO NOT EXIST in this
- *       codebase yet (see {@code BookingService}'s class javadoc: "Guide accept/decline ... still
- *       deferred") — nothing to gate or test.
+ *   <li>Guide-driven booking accept/decline exist under {@code /guide/bookings} (list + accept +
+ *       decline). Ownership is enforced via {@code guide_profiles.id}; bookings only reach pending
+ *       when the offering's guide was VERIFIED at create time ({@code requireApprovedGuide}).
+ *       Offering duplicate/import still DO NOT EXIST.
  * </ul>
  */
 @ExtendWith(MockitoExtension.class)
