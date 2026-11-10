@@ -19,6 +19,7 @@ import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateReviewRequest;
+import com.CampusToursLive.web.dto.GuideReviewResponseRequest;
 import com.CampusToursLive.web.dto.ReviewResponse;
 import java.util.Optional;
 import java.util.UUID;
@@ -306,5 +307,107 @@ class ReviewServiceTest {
         assertNull(resp.createdAt());
         assertNull(resp.publishedAt());
         assertSame(null, resp.guideResponse());
+    }
+
+    // ── guide response ──────────────────────────────────────────────────────
+
+    private static ReviewEntity reviewOwnedBy(UUID guideProfileId) {
+        ReviewEntity r = new ReviewEntity();
+        r.setId(UUID.randomUUID());
+        r.setBookingId(UUID.randomUUID());
+        r.setParticipantUserId(UUID.randomUUID());
+        r.setGuideId(guideProfileId);
+        r.setTourOfferingId(UUID.randomUUID());
+        r.setOverallRating((short) 5);
+        r.setStatus(ReviewStatus.PUBLISHED);
+        return r;
+    }
+
+    @Test
+    void respondToReview_setsResponse_savesAndReturnsIt() {
+        UUID guideId = UUID.randomUUID();
+        ReviewEntity review = reviewOwnedBy(guideId);
+        when(reviews.findById(review.getId())).thenReturn(Optional.of(review));
+
+        ReviewResponse resp =
+                service()
+                        .respondToReview(
+                                guideId,
+                                review.getId(),
+                                new GuideReviewResponseRequest("  Thanks so much!  "));
+
+        assertEquals("Thanks so much!", review.getGuideResponse()); // trimmed
+        assertEquals("Thanks so much!", resp.guideResponse());
+        verify(reviews).save(review);
+    }
+
+    @Test
+    void respondToReview_replacesExistingResponse() {
+        UUID guideId = UUID.randomUUID();
+        ReviewEntity review = reviewOwnedBy(guideId);
+        review.setGuideResponse("old reply");
+        when(reviews.findById(review.getId())).thenReturn(Optional.of(review));
+
+        service()
+                .respondToReview(
+                        guideId, review.getId(), new GuideReviewResponseRequest("new reply"));
+        assertEquals("new reply", review.getGuideResponse());
+    }
+
+    @Test
+    void respondToReview_unknownReview_throwsNotFound() {
+        UUID reviewId = UUID.randomUUID();
+        when(reviews.findById(reviewId)).thenReturn(Optional.empty());
+
+        assertThrows(
+                NotFoundException.class,
+                () ->
+                        service()
+                                .respondToReview(
+                                        UUID.randomUUID(),
+                                        reviewId,
+                                        new GuideReviewResponseRequest("hi")));
+        verify(reviews, never()).save(any());
+    }
+
+    @Test
+    void respondToReview_reviewOfAnotherGuide_throwsNotFound_noLeak() {
+        ReviewEntity review = reviewOwnedBy(UUID.randomUUID()); // owned by some other guide
+        when(reviews.findById(review.getId())).thenReturn(Optional.of(review));
+
+        assertThrows(
+                NotFoundException.class,
+                () ->
+                        service()
+                                .respondToReview(
+                                        UUID.randomUUID(), // a different guide
+                                        review.getId(),
+                                        new GuideReviewResponseRequest("hi")));
+        verify(reviews, never()).save(any());
+    }
+
+    @Test
+    void respondToReview_blankResponse_throwsValidation_beforeAnyLookup() {
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .respondToReview(
+                                        UUID.randomUUID(),
+                                        UUID.randomUUID(),
+                                        new GuideReviewResponseRequest("   ")));
+        verify(reviews, never()).findById(any());
+    }
+
+    @Test
+    void respondToReview_tooLongResponse_throwsValidation() {
+        assertThrows(
+                ValidationException.class,
+                () ->
+                        service()
+                                .respondToReview(
+                                        UUID.randomUUID(),
+                                        UUID.randomUUID(),
+                                        new GuideReviewResponseRequest("x".repeat(1001))));
     }
 }
