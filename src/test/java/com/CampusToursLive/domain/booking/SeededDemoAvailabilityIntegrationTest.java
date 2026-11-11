@@ -28,7 +28,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * CTL-120 migration coverage: V2 seeds the demo marketplace, while V3 makes those seeded offerings
+ * CTL-120 migration coverage: V2 seeds the demo marketplace, while V5 makes those seeded offerings
  * actually bookable by adding guide settings, weekly rules, and materialized occurrences.
  */
 @DataJpaTest

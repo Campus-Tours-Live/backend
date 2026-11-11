@@ -1,7 +1,7 @@
 -- =====================================================================
--- V4 -- Broader demo availability for local booking-flow testing
+-- V6 -- Broader demo availability for local booking-flow testing
 --
--- V3 made the demo catalog bookable on weekday mornings. Keep that
+-- V5 made the demo catalog bookable on weekday mornings. Keep that
 -- applied migration immutable and add weekend choices forward-only so a
 -- tester can complete the flow on any day of the week.
 -- =====================================================================

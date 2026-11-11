@@ -1,5 +1,5 @@
 -- =====================================================================
--- V3 -- Demo guide availability for bookable tour slots
+-- V5 -- Demo guide availability for bookable tour slots
 --
 -- V2 intentionally seeded marketplace tours without availability rows, so
 -- GET /offerings/{id}/slots returned [] for the local/demo catalog. This
