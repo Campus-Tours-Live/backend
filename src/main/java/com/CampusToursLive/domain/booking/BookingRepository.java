@@ -10,6 +10,15 @@ import org.springframework.data.repository.query.Param;
 
 public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
 
+    /** Bounded claim; concurrent schedulers skip rows already owned by another transaction. */
+    @Query(
+            value =
+                    "SELECT * FROM bookings WHERE status = 'PENDING_GUIDE_ACCEPTANCE' "
+                            + "AND guide_response_deadline_at <= :now "
+                            + "ORDER BY guide_response_deadline_at, id LIMIT 100 FOR UPDATE SKIP LOCKED",
+            nativeQuery = true)
+    List<BookingEntity> claimExpiredGuideRequests(@Param("now") Instant now);
+
     /**
      * Next confirmed tour: the single soonest CONFIRMED booking for a participant that has not yet
      * started. Used for the "Next Tour" card on the participant dashboard.
@@ -56,6 +65,37 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
     List<BookingEntity>
             findByGuideIdAndStatusAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc(
                     UUID guideId, BookingStatus status, Instant from);
+
+    /** A guide's own booking — scopes guide accept/decline so guides can only touch their rows. */
+    Optional<BookingEntity> findByIdAndGuideId(UUID id, UUID guideId);
+
+    /**
+     * Guide inbox: bookings in the given statuses for this guide, chronological by scheduled start.
+     * Used for pending (response queue) and upcoming (confirmed) lists.
+     */
+    List<BookingEntity> findByGuideIdAndStatusInOrderByScheduledStartAtAsc(
+            UUID guideId, List<BookingStatus> statuses);
+
+    /** Count guide bookings in one status (e.g. pending acceptance for the dashboard badge). */
+    long countByGuideIdAndStatus(UUID guideId, BookingStatus status);
+
+    /**
+     * Guide active tours: matching statuses ending at/after {@code from}, including ongoing tours.
+     */
+    List<BookingEntity>
+            findByGuideIdAndStatusInAndScheduledEndAtGreaterThanEqualOrderByScheduledStartAtAsc(
+                    UUID guideId, List<BookingStatus> statuses, Instant from);
+
+    /** Guide past terminal outcomes (completed / no-show): newest scheduled start first. */
+    List<BookingEntity> findByGuideIdAndStatusInOrderByScheduledStartAtDesc(
+            UUID guideId, List<BookingStatus> statuses);
+
+    /**
+     * Guide overdue confirmed tours: statuses whose scheduled end is already past, newest first.
+     */
+    List<BookingEntity>
+            findByGuideIdAndStatusInAndScheduledEndAtLessThanOrderByScheduledStartAtDesc(
+                    UUID guideId, List<BookingStatus> statuses, Instant before);
 
     /**
      * Does any slot-holding booking already reserve part of [{@code newStart}, {@code newEnd}) for

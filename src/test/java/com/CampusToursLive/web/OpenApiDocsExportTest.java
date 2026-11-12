@@ -2,6 +2,8 @@ package com.CampusToursLive.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
@@ -44,6 +46,46 @@ class OpenApiDocsExportTest {
 
     @Autowired private TestRestTemplate rest;
 
+    @Autowired private ObjectMapper mapper;
+
+    @Test
+    void guidePendingActions_hasAnEnvelopedSuccessExample() throws Exception {
+        String body = rest.getForObject("/v3/api-docs", String.class);
+        JsonNode content =
+                mapper.readTree(body)
+                        .path("paths")
+                        .path("/guide/bookings/pending-actions")
+                        .path("get")
+                        .path("responses")
+                        .path("200")
+                        .path("content")
+                        .path("application/json");
+        JsonNode example = content.path("example");
+        if (example.isMissingNode()) {
+            assertThat(content.path("examples").isEmpty()).isFalse();
+            example = content.path("examples").elements().next().path("value");
+        }
+        assertThat(example.path("data").path("pendingAcceptance").asInt(-1)).isEqualTo(2);
+        assertThat(example.path("meta").path("requestId").asText()).isNotBlank();
+        JsonNode schemas = mapper.readTree(body).path("components").path("schemas");
+        assertThat(content.path("schema").path("$ref").asText())
+                .endsWith("/GuidePendingActionsEnvelope");
+        assertThat(
+                        schemas.path("GuidePendingActionsEnvelope")
+                                .path("properties")
+                                .path("data")
+                                .path("$ref")
+                                .asText())
+                .endsWith("/GuidePendingActionsResponse");
+        assertThat(
+                        schemas.path("GuidePendingActionsResponse")
+                                .path("properties")
+                                .path("pendingAcceptance")
+                                .path("type")
+                                .asText())
+                .isEqualTo("integer");
+    }
+
     @Test
     void exportsGeneratedOpenApiSpec() throws Exception {
         ResponseEntity<String> resp = rest.getForEntity("/v3/api-docs", String.class);
@@ -57,6 +99,45 @@ class OpenApiDocsExportTest {
         Files.createDirectories(OPENAPI_OUTPUT.getParent());
         Files.writeString(OPENAPI_OUTPUT, body);
         assertThat(Files.size(OPENAPI_OUTPUT)).isGreaterThan(0L);
+    }
+
+    @Test
+    void guideActionExamplesMatchSuccessfulTransition() throws Exception {
+        var spec =
+                new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readTree(rest.getForObject("/v3/api-docs", String.class));
+        for (var entry :
+                java.util.Map.of(
+                                "accept",
+                                "CONFIRMED",
+                                "decline",
+                                "CANCELLED",
+                                "complete",
+                                "COMPLETED",
+                                "no-show",
+                                "PARTICIPANT_NO_SHOW",
+                                "cancel",
+                                "CANCELLED")
+                        .entrySet()) {
+            var example =
+                    spec.path("paths")
+                            .path("/guide/bookings/{id}/" + entry.getKey())
+                            .path("post")
+                            .path("responses")
+                            .path("200")
+                            .path("content")
+                            .path("application/json")
+                            .path("example");
+            assertThat(example.path("data").path("status").asText()).isEqualTo(entry.getValue());
+            assertThat(example.path("data").path("bookingNumber").asText()).isNotBlank();
+            assertThat(example.has("meta")).isTrue();
+            if (!entry.getKey().equals("decline")) {
+                assertThat(example.path("data").path("guideResponseDeadline").isNull()).isTrue();
+            } else {
+                assertThat(example.path("data").path("guideResponseDeadline").asText())
+                        .isEqualTo("2026-07-30T15:00:00Z");
+            }
+        }
     }
 
     /**
