@@ -23,12 +23,14 @@ import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.domain.user.UserRole;
 import com.CampusToursLive.error.ConflictException;
+import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.integration.scorecard.SchoolDirectory;
 import com.CampusToursLive.security.GuideProfileSnapshot;
 import com.CampusToursLive.web.dto.GuideProfileResponse;
 import com.CampusToursLive.web.dto.GuideProfileUpdateRequest;
 import com.CampusToursLive.web.dto.GuideUniversityView;
+import com.CampusToursLive.web.dto.PublicGuideProfileResponse;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
@@ -1960,5 +1962,67 @@ class GuideServiceTest {
                     ValidationException.class,
                     () -> svc.updateProfile(actor, guideRequestWith(entry.max() + 1, null)));
         }
+    }
+
+    // ── public guide profile (GET /guides/{id}) ─────────────────────────────
+
+    private static GuideProfileEntity guideProfile(UUID id, UUID userId, GuideStatus status) {
+        GuideProfileEntity g = new GuideProfileEntity();
+        g.setId(id);
+        g.setUserId(userId);
+        g.setStatus(status);
+        g.setBio("bio");
+        g.setSpokenLanguages("[\"en-US\",\"zh\"]");
+        g.setTourTopics("[\"GENERAL_CAMPUS\"]");
+        return g;
+    }
+
+    @Test
+    void getPublicProfile_verifiedGuide_returnsPublicFields() {
+        UUID guideId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        when(guides.findById(guideId))
+                .thenReturn(Optional.of(guideProfile(guideId, userId, GuideStatus.VERIFIED)));
+        UserEntity u = user(userId);
+        u.setDisplayName("Maya Chen");
+        when(users.findById(userId)).thenReturn(Optional.of(u));
+
+        PublicGuideProfileResponse resp = service().getPublicProfile(guideId);
+
+        assertEquals(guideId.toString(), resp.guideId());
+        assertEquals("Maya Chen", resp.displayName());
+        assertEquals("bio", resp.bio());
+        assertEquals(List.of("en-US", "zh"), resp.spokenLanguages());
+        assertEquals(List.of("GENERAL_CAMPUS"), resp.tourTopics());
+    }
+
+    @Test
+    void getPublicProfile_nonVerifiedGuide_throwsNotFound_noLeak() {
+        UUID guideId = UUID.randomUUID();
+        when(guides.findById(guideId))
+                .thenReturn(
+                        Optional.of(guideProfile(guideId, UUID.randomUUID(), GuideStatus.PENDING)));
+
+        assertThrows(NotFoundException.class, () -> service().getPublicProfile(guideId));
+        verify(users, never()).findById(any());
+    }
+
+    @Test
+    void getPublicProfile_unknownGuide_throwsNotFound() {
+        UUID guideId = UUID.randomUUID();
+        when(guides.findById(guideId)).thenReturn(Optional.empty());
+
+        assertThrows(NotFoundException.class, () -> service().getPublicProfile(guideId));
+    }
+
+    @Test
+    void getPublicProfile_missingUserRow_displayNameNull() {
+        UUID guideId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        when(guides.findById(guideId))
+                .thenReturn(Optional.of(guideProfile(guideId, userId, GuideStatus.VERIFIED)));
+        when(users.findById(userId)).thenReturn(Optional.empty());
+
+        assertEquals(null, service().getPublicProfile(guideId).displayName());
     }
 }
