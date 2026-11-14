@@ -413,7 +413,7 @@ public class TourOfferingService {
                 o.getPriceCents(),
                 o.getCurrency(),
                 o.getDescription(),
-                readStringArray(o.getLanguages()),
+                SupportedLanguages.normalizeStored(readStringArray(o.getLanguages())),
                 readStringArray(o.getFeatures()));
     }
 }

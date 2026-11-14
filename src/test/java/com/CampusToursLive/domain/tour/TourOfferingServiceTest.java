@@ -853,6 +853,21 @@ class TourOfferingServiceTest {
     // ---------- listOwn ----------
 
     @Test
+    void listOwn_normalizesLegacyLanguagesWithoutMutatingStoredValues() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity row = offering(UUID.randomUUID(), gid, TourStatus.DRAFT);
+        String legacy = "[\"en-us\",\"EN-US\",\"en_US\"]";
+        row.setLanguages(legacy);
+        when(offerings.findByGuideId(gid)).thenReturn(List.of(row));
+
+        assertEquals(List.of("en-US", "en_US"), service().listOwn(user(uid)).get(0).languages());
+        assertEquals(legacy, row.getLanguages());
+        verify(offerings, never()).save(any());
+    }
+
+    @Test
     void listOwn_returnsMappedOfferings() {
         UUID uid = UUID.randomUUID();
         UUID gid = UUID.randomUUID();
