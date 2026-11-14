@@ -30,65 +30,65 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
-            .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .authorizeHttpRequests(
-                auth ->
-                    auth.requestMatchers(
-                        "/health",
-                        "/actuator/health",
-                        "/actuator/health/**",
-                        "/v3/api-docs/**",
-                        "/swagger-ui/**",
-                        "/swagger-ui.html")
-                        .permitAll()
-                        // Public marketplace: the tour catalog + reference-data
-                        // lookups are readable without a session.
-                        //
-                        // HEAD is listed alongside GET deliberately. Without
-                        // it a HEAD fell through to anyRequest().authenticated()
-                        // and
-                        // 401'd -- and because the BFF forwards public paths
-                        // anonymously and turns any Core 401 into requireReauth ->
-                        // clearSession, a single HEAD from a signed-in user's
-                        // browser, a prefetcher or an uptime probe DESTROYED their
-                        // session. A publicly readable resource must be publicly
-                        // HEAD-able; anything else makes a metadata request a
-                        // logout.
-                        .requestMatchers(
-                            org.springframework.http.HttpMethod.GET,
-                            "/tours",
-                            "/tours/**",
-                            "/meta/**",
-                            // The browsable university directory: counts per
-                            // state and each state's list. Public for the same
-                            // reason the tour catalog is — it is what an
-                            // anonymous visitor came to look at.
-                            "/universities",
-                            "/universities/**",
-                            // A verified guide's public profile — marketplace
-                            // content a visitor reads before booking. Single
-                            // segment, so it does not cover /guides/{id}/*.
-                            "/guides/*")
-                        .permitAll()
-                        .requestMatchers(
-                            org.springframework.http.HttpMethod.HEAD,
-                            "/tours",
-                            "/tours/**",
-                            "/meta/**",
-                            // The browsable university directory: counts per
-                            // state and each state's list. Public for the same
-                            // reason the tour catalog is — it is what an
-                            // anonymous visitor came to look at.
-                            "/universities",
-                            "/universities/**",
-                            // A verified guide's public profile — see the GET
-                            // block above; HEAD kept public too so a metadata
-                            // request never forces a logout.
-                            "/guides/*")
-                        .permitAll()
-                        .anyRequest()
-                        .authenticated())
-            .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()));
+                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(
+                        auth ->
+                                auth.requestMatchers(
+                                                "/health",
+                                                "/actuator/health",
+                                                "/actuator/health/**",
+                                                "/v3/api-docs/**",
+                                                "/swagger-ui/**",
+                                                "/swagger-ui.html")
+                                        .permitAll()
+                                        // Public marketplace: the tour catalog + reference-data
+                                        // lookups are readable without a session.
+                                        //
+                                        // HEAD is listed alongside GET deliberately. Without
+                                        // it a HEAD fell through to anyRequest().authenticated()
+                                        // and
+                                        // 401'd -- and because the BFF forwards public paths
+                                        // anonymously and turns any Core 401 into requireReauth ->
+                                        // clearSession, a single HEAD from a signed-in user's
+                                        // browser, a prefetcher or an uptime probe DESTROYED their
+                                        // session. A publicly readable resource must be publicly
+                                        // HEAD-able; anything else makes a metadata request a
+                                        // logout.
+                                        .requestMatchers(
+                                                org.springframework.http.HttpMethod.GET,
+                                                "/tours",
+                                                "/tours/**",
+                                                "/meta/**",
+                                                // The browsable university directory: counts per
+                                                // state and each state's list. Public for the same
+                                                // reason the tour catalog is — it is what an
+                                                // anonymous visitor came to look at.
+                                                "/universities",
+                                                "/universities/**",
+                                                // A verified guide's public profile — marketplace
+                                                // content a visitor reads before booking. Single
+                                                // segment, so it does not cover /guides/{id}/*.
+                                                "/guides/*")
+                                        .permitAll()
+                                        .requestMatchers(
+                                                org.springframework.http.HttpMethod.HEAD,
+                                                "/tours",
+                                                "/tours/**",
+                                                "/meta/**",
+                                                // The browsable university directory: counts per
+                                                // state and each state's list. Public for the same
+                                                // reason the tour catalog is — it is what an
+                                                // anonymous visitor came to look at.
+                                                "/universities",
+                                                "/universities/**",
+                                                // A verified guide's public profile — see the GET
+                                                // block above; HEAD kept public too so a metadata
+                                                // request never forces a logout.
+                                                "/guides/*")
+                                        .permitAll()
+                                        .anyRequest()
+                                        .authenticated())
+                .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()));
         return http.build();
     }
 
@@ -103,8 +103,8 @@ public class SecurityConfig {
      */
     @Bean
     public JwtDecoder jwtDecoder(
-        @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}") String issuerUri,
-        @Value("${app.auth.audience:}") String audience) {
+            @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}") String issuerUri,
+            @Value("${app.auth.audience:}") String audience) {
         // Build (and validate) the token validator BEFORE fetching the issuer's JWKS, so a blank
         // audience fails startup immediately rather than after a network round-trip.
         OAuth2TokenValidator<Jwt> validator = tokenValidator(issuerUri, audience);
@@ -123,11 +123,11 @@ public class SecurityConfig {
     static OAuth2TokenValidator<Jwt> tokenValidator(String issuerUri, String audience) {
         if (audience.isBlank()) {
             throw new IllegalStateException(
-                "app.auth.audience is blank — set GOOGLE_CLIENT_ID. Without it every"
-                    + " validly-signed Google id_token would be accepted, whoever it was"
-                    + " issued for.");
+                    "app.auth.audience is blank — set GOOGLE_CLIENT_ID. Without it every"
+                            + " validly-signed Google id_token would be accepted, whoever it was"
+                            + " issued for.");
         }
         return new DelegatingOAuth2TokenValidator<>(
-            JwtValidators.createDefaultWithIssuer(issuerUri), new AudienceValidator(audience));
+                JwtValidators.createDefaultWithIssuer(issuerUri), new AudienceValidator(audience));
     }
 }
