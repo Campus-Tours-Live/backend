@@ -33,6 +33,9 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -113,8 +116,9 @@ class TourOfferingServiceTest {
         TourOfferingEntity draft = new TourOfferingEntity();
         draft.setId(oid);
         draft.setGuideId(gid);
+        draft.setUniversityId(UUID.fromString(UNI));
         draft.setStatus(TourStatus.DRAFT);
-        when(guides.findByUserId(uid)).thenReturn(Optional.of(guide(gid, GuideStatus.VERIFIED)));
+        stubApprovedGuide(uid, gid);
         when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(draft));
         when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -332,6 +336,7 @@ class TourOfferingServiceTest {
         TourOfferingEntity o = new TourOfferingEntity();
         o.setId(id);
         o.setGuideId(gid);
+        o.setUniversityId(UUID.fromString(UNI));
         o.setStatus(status);
         return o;
     }
@@ -576,6 +581,90 @@ class TourOfferingServiceTest {
     }
 
     // ---------- lifecycle management ----------
+
+    @ParameterizedTest
+    @EnumSource(
+            value = TourStatus.class,
+            names = {"DRAFT", "PAUSED", "ACTIVE"})
+    void activate_persistsCanonicalLegacyLanguages(TourStatus status) {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubApprovedGuide(uid, gid);
+        TourOfferingEntity row = offering(oid, gid, status);
+        row.setLanguages("[\"en-us\",\"EN-US\"]");
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(row));
+
+        assertEquals(List.of("en-US"), service().activate(user(uid), oid).languages());
+        assertEquals("[\"en-US\"]", row.getLanguages());
+        assertEquals(TourStatus.ACTIVE, row.getStatus());
+        verify(offerings).save(row);
+    }
+
+    @ParameterizedTest
+    @EnumSource(
+            value = TourStatus.class,
+            names = {"DRAFT", "PAUSED", "ACTIVE"})
+    void activate_rejectsRevokedUniversityMembership(TourStatus status) {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubApprovedGuide(uid, gid);
+        when(guideUniversities.findByGuideProfileId(gid)).thenReturn(List.of());
+        TourOfferingEntity row = offering(oid, gid, status);
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(row));
+
+        assertThrows(ValidationException.class, () -> service().activate(user(uid), oid));
+        assertEquals(status, row.getStatus());
+        verify(offerings, never()).save(any());
+    }
+
+    @Test
+    void duplicate_persistsCanonicalLanguagesWithoutChangingSource() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity source = offering(oid, gid, TourStatus.DRAFT);
+        source.setLanguages("[\"en-us\",\"EN-US\"]");
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(source));
+
+        assertEquals(List.of("en-US"), service().duplicate(user(uid), oid).languages());
+        ArgumentCaptor<TourOfferingEntity> saved =
+                ArgumentCaptor.forClass(TourOfferingEntity.class);
+        verify(offerings).save(saved.capture());
+        assertEquals("[\"en-US\"]", saved.getValue().getLanguages());
+        assertEquals("[\"en-us\",\"EN-US\"]", source.getLanguages());
+    }
+
+    @Test
+    void duplicate_rejectsRevokedUniversityMembership() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        when(guideUniversities.findByGuideProfileId(gid)).thenReturn(List.of());
+        when(offerings.findByIdAndGuideId(oid, gid))
+                .thenReturn(Optional.of(offering(oid, gid, TourStatus.DRAFT)));
+
+        assertThrows(ValidationException.class, () -> service().duplicate(user(uid), oid));
+        verify(offerings, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"[]", "[\"en_US\"]"})
+    void duplicate_rejectsMissingOrMalformedLanguages(String languages) {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID oid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity source = offering(oid, gid, TourStatus.DRAFT);
+        source.setLanguages(languages);
+        when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(source));
+
+        assertThrows(ValidationException.class, () -> service().duplicate(user(uid), oid));
+        verify(offerings, never()).save(any());
+    }
 
     @Test
     void update_updatesDraftFields() {

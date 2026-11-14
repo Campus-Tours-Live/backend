@@ -144,11 +144,19 @@ public class TourOfferingService {
                         .findByIdAndGuideId(offeringId, guide.getId())
                         .orElseThrow(() -> new NotFoundException("Offering not found"));
 
-        if (o.getStatus() == TourStatus.ACTIVE) return toResponse(o); // idempotent
-        if (o.getStatus() != TourStatus.DRAFT && o.getStatus() != TourStatus.PAUSED) {
+        if (!isGuidesVerifiedUniversity(guide, o.getUniversityId())) {
+            throw new ValidationException("universityId must be a university you are verified for");
+        }
+        if (o.getStatus() != TourStatus.ACTIVE
+                && o.getStatus() != TourStatus.DRAFT
+                && o.getStatus() != TourStatus.PAUSED) {
             throw new ValidationException("Only a draft or paused offering can be activated");
         }
-        requireLanguages(readStringArray(o.getLanguages()));
+        String languages = writeJson(requireLanguages(readStringArray(o.getLanguages())));
+        if (o.getStatus() == TourStatus.ACTIVE && languages.equals(o.getLanguages())) {
+            return toResponse(o); // Already active and canonical: no write needed.
+        }
+        o.setLanguages(languages);
         o.setStatus(TourStatus.ACTIVE);
         offerings.save(o);
         return toResponse(o);
@@ -232,6 +240,10 @@ public class TourOfferingService {
     public TourOfferingResponse duplicate(UserEntity user, UUID offeringId) {
         GuideProfileEntity guide = requireGuideProfile(user);
         TourOfferingEntity source = findOwned(offeringId, guide);
+        if (!isGuidesVerifiedUniversity(guide, source.getUniversityId())) {
+            throw new ValidationException("universityId must be a university you are verified for");
+        }
+        String languages = writeJson(requireLanguages(readStringArray(source.getLanguages())));
         TourOfferingEntity copy = new TourOfferingEntity();
         copy.setId(UUID.randomUUID());
         copy.setGuideId(guide.getId());
@@ -243,7 +255,7 @@ public class TourOfferingService {
         copy.setDurationMin(source.getDurationMin());
         copy.setPriceCents(source.getPriceCents());
         copy.setCurrency(source.getCurrency());
-        copy.setLanguages(source.getLanguages());
+        copy.setLanguages(languages);
         copy.setFeatures(source.getFeatures());
         copy.setStatus(TourStatus.DRAFT);
         offerings.save(copy);
