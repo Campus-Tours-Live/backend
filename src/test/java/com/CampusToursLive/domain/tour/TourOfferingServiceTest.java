@@ -236,8 +236,21 @@ class TourOfferingServiceTest {
                         null,
                         List.of("en-US"),
                         List.of("Q_AND_A", "HIDDEN_SPOTS"));
-        service().create(user(uid), req);
+        TourOfferingResponse res = service().create(user(uid), req);
         assertEquals("[\"Q_AND_A\",\"HIDDEN_SPOTS\"]", saved.get().getFeatures());
+        assertEquals(List.of("Q_AND_A", "HIDDEN_SPOTS"), res.features());
+        assertEquals(List.of("en-US"), res.languages());
+    }
+
+    @Test
+    void create_throws422_whenLanguageUnsupported() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubCreateReady(uid, gid);
+        CreateOfferingRequest req =
+                new CreateOfferingRequest(
+                        "Walk", UNI, "GENERAL_CAMPUS", 60, 5000L, null, List.of("en_US"));
+        assertThrows(ValidationException.class, () -> service().create(user(uid), req));
     }
 
     @Test
@@ -562,6 +575,21 @@ class TourOfferingServiceTest {
     }
 
     // ---------- listOwn ----------
+
+    @Test
+    void listOwn_normalizesLegacyLanguagesWithoutMutatingStoredValues() {
+        UUID uid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        stubPendingGuide(uid, gid);
+        TourOfferingEntity row = offering(UUID.randomUUID(), gid, TourStatus.DRAFT);
+        String legacy = "[\"en-us\",\"EN-US\",\"en_US\"]";
+        row.setLanguages(legacy);
+        when(offerings.findByGuideId(gid)).thenReturn(List.of(row));
+
+        assertEquals(List.of("en-US", "en_US"), service().listOwn(user(uid)).get(0).languages());
+        assertEquals(legacy, row.getLanguages());
+        verify(offerings, never()).save(any());
+    }
 
     @Test
     void listOwn_returnsMappedOfferings() {
