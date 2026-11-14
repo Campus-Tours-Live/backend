@@ -50,4 +50,23 @@ public final class SupportedLanguages {
         }
         return List.copyOf(out);
     }
+
+    /**
+     * Normalize persisted tags for responses without making legacy data unreadable. Malformed
+     * legacy labels are retained; new writes must still use {@link #requireSupported(List)}.
+     */
+    public static List<String> normalizeStored(List<String> raw) {
+        if (raw == null) return List.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (String value : raw) {
+            if (value == null || value.isBlank()) continue;
+            String tag = value.trim();
+            try {
+                out.add(new Locale.Builder().setLanguageTag(tag).build().toLanguageTag());
+            } catch (IllformedLocaleException ex) {
+                out.add(tag);
+            }
+        }
+        return List.copyOf(out);
+    }
 }
