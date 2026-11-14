@@ -204,4 +204,10 @@ public class ParticipantController {
     private UserEntity loadManagedUser(ProvisionedAccount account) {
         return users.findById(account.userId()).orElseThrow(ConflictException::accountStateInvalid);
     }
+
+    // temp controller test
+    @GetMapping("/examtest")
+    public String tempAPTTest() {
+        return "OK";
+    }
 }

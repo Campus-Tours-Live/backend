@@ -233,4 +233,10 @@ public class CartController {
         var user = currentUser.requireRole(UserRole.PARTICIPANT);
         return ApiEnvelope.of(bookingService.checkout(user));
     }
+
+    // temp controller test
+    @GetMapping("/examtest")
+    public String tempAPTTest() {
+        return "OK";
+    }
 }

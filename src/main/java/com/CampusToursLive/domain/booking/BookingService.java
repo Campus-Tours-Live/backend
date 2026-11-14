@@ -24,8 +24,11 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -155,12 +158,10 @@ public class BookingService {
      */
     @Transactional(readOnly = true)
     public List<BookingDetailResponse> getUpcomingBookings(UUID participantUserId) {
-        return bookings
-                .findByParticipantUserIdAndStatusInAndScheduledStartAtAfterOrderByScheduledStartAtAsc(
-                        participantUserId, UPCOMING_STATUSES, Instant.now())
-                .stream()
-                .map(this::toDetailResponse)
-                .toList();
+        return toDetailResponses(
+                bookings
+                        .findByParticipantUserIdAndStatusInAndScheduledStartAtAfterOrderByScheduledStartAtAsc(
+                                participantUserId, UPCOMING_STATUSES, Instant.now()));
     }
 
     /**
@@ -200,9 +201,13 @@ public class BookingService {
             // the audit row's FK needs the booking row in place, and flushing here is what
             // lets this catch actually see an exclusion-constraint race.
             bookings.saveAndFlush(b);
-        } catch (DataIntegrityViolationException raceLost) {
-            // A concurrent request won the slot between our pre-check and the insert —
-            // the exclusion constraint is the source of truth.
+        } catch (DataIntegrityViolationException ex) {
+            // A concurrent request won the slot between our pre-check and the insert — the
+            // exclusion constraint is the source of truth. Only THAT is a slot race; any other
+            // integrity violation propagates to the generic handler rather than being mislabelled.
+            if (!isSlotConflict(ex)) {
+                throw ex;
+            }
             throw new ValidationException(
                     "That time slot was just taken — please pick another time");
         }
@@ -273,7 +278,7 @@ public class BookingService {
     /** The participant's cart: their DRAFT bookings, oldest first. */
     @Transactional(readOnly = true)
     public List<BookingDetailResponse> getCart(UUID participantUserId) {
-        return cartItems(participantUserId).stream().map(this::toDetailResponse).toList();
+        return toDetailResponses(cartItems(participantUserId));
     }
 
     /**
@@ -317,14 +322,19 @@ public class BookingService {
         }
         try {
             bookings.saveAllAndFlush(items);
-        } catch (DataIntegrityViolationException raceLost) {
+        } catch (DataIntegrityViolationException ex) {
+            // Only an exclusion-constraint race is a "slot taken" case; other integrity violations
+            // propagate to the generic handler rather than being mislabelled (CTL-36).
+            if (!isSlotConflict(ex)) {
+                throw ex;
+            }
             throw new ValidationException(
                     "One or more time slots were just taken — please review your cart");
         }
         for (BookingEntity b : items) {
             recordTransition(b, BookingStatus.DRAFT, participant.getId(), "CART_CHECKOUT");
         }
-        return items.stream().map(this::toDetailResponse).toList();
+        return toDetailResponses(items);
     }
 
     // ---------------------------------------------------------------------------
@@ -361,8 +371,7 @@ public class BookingService {
         b.setAcceptanceModeSnap(AcceptanceMode.MANUAL);
         b.setScheduledStartAt(start);
         b.setScheduledEndAt(end);
-        b.setReservedStartAt(start.minus(Duration.ofMinutes(guideSettings.getBufferBeforeMin())));
-        b.setReservedEndAt(end.plus(Duration.ofMinutes(guideSettings.getBufferAfterMin())));
+        applyReservedInterval(b, guideSettings);
         // Price snapshot — no payments yet, so fees and taxes are zero and the guide
         // amount equals the total (see class javadoc).
         b.setBasePriceCents(offering.getPriceCents());
@@ -397,6 +406,35 @@ public class BookingService {
     private static void promoteToPending(BookingEntity b) {
         b.setStatus(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
         b.setGuideResponseDeadlineAt(Instant.now().plus(GUIDE_RESPONSE_WINDOW));
+    }
+
+    /**
+     * Derives the guide-reserved interval from the booking's SCHEDULED interval and the guide's
+     * current buffers (CTL-36). The reserved bounds are ALWAYS a pure function of scheduledStart /
+     * scheduledEnd and the buffers — never set independently — so the create path ({@link
+     * #buildDraftBooking}) and the checkout re-snapshot ({@link #revalidateCartItem}) cannot drift.
+     * Requires scheduledStart and scheduledEnd to already be set on {@code b}.
+     */
+    private static void applyReservedInterval(
+            BookingEntity b, GuideBookingSettingsEntity settings) {
+        b.setReservedStartAt(
+                b.getScheduledStartAt().minus(Duration.ofMinutes(settings.getBufferBeforeMin())));
+        b.setReservedEndAt(
+                b.getScheduledEndAt().plus(Duration.ofMinutes(settings.getBufferAfterMin())));
+    }
+
+    /**
+     * Is this integrity violation the guide/participant overlap EXCLUDE constraint firing — i.e. a
+     * genuine slot race — rather than some other constraint (a booking_number UNIQUE collision, an
+     * FK, a NOT NULL)? Only the former should be re-labelled as a friendly "slot taken" 422; the
+     * rest must surface as the generic 500 so they are not silently mislabelled (CTL-36).
+     */
+    private static boolean isSlotConflict(DataIntegrityViolationException ex) {
+        Throwable cause = ex.getMostSpecificCause();
+        String message = cause != null ? cause.getMessage() : null;
+        return message != null
+                && (message.contains("excl_guide_no_overlap")
+                        || message.contains("excl_participant_no_overlap"));
     }
 
     /** Friendly 422s for conflicts with slot-holding bookings (DB constraints are the backstop). */
@@ -503,10 +541,10 @@ public class BookingService {
         b.setCurrency(offering.getCurrency());
         Instant end = b.getScheduledStartAt().plus(Duration.ofMinutes(offering.getDurationMin()));
         b.setScheduledEndAt(end);
-        b.setReservedStartAt(
-                b.getScheduledStartAt()
-                        .minus(Duration.ofMinutes(guideSettings.getBufferBeforeMin())));
-        b.setReservedEndAt(end.plus(Duration.ofMinutes(guideSettings.getBufferAfterMin())));
+        // Recompute the reserved interval from the (possibly re-snapshotted) scheduled interval and
+        // the guide's CURRENT buffers — scheduledStart is immutable at checkout, but scheduledEnd
+        // and both buffers can change, so reservedStart AND reservedEnd are both re-derived here.
+        applyReservedInterval(b, guideSettings);
 
         // CTL-54 Task 6: re-check containment at checkout — the guide's availability can change
         // (or the re-snapshot above can change the scheduled end) between add-to-cart and
@@ -661,10 +699,62 @@ public class BookingService {
         statusHistory.save(h);
     }
 
+    /**
+     * Maps a LIST of bookings to responses with the name lookups batched (CTL-35): each of the four
+     * related entities (offering, guide profile, that guide's user, university) is fetched once for
+     * the whole list via {@code findAllById} and joined in memory, instead of the per-row {@code
+     * findById} fan-out {@link #toDetailResponse(BookingEntity)} does (~4 queries/row → N+1). Used
+     * by every list surface — {@code getUpcomingBookings}, {@code getCart}, {@code checkout} — and
+     * the place to hook the future {@code GET /bookings} list (CTL-39) in.
+     */
+    private List<BookingDetailResponse> toDetailResponses(List<BookingEntity> list) {
+        if (list.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, TourOfferingEntity> offeringsById =
+                byId(
+                        offerings.findAllById(distinctIds(list, BookingEntity::getTourOfferingId)),
+                        TourOfferingEntity::getId);
+        Map<UUID, GuideProfileEntity> guidesById =
+                byId(
+                        guides.findAllById(distinctIds(list, BookingEntity::getGuideId)),
+                        GuideProfileEntity::getId);
+        Map<UUID, UserEntity> guideUsersById =
+                byId(
+                        users.findAllById(
+                                guidesById.values().stream()
+                                        .map(GuideProfileEntity::getUserId)
+                                        .distinct()
+                                        .toList()),
+                        UserEntity::getId);
+        Map<UUID, UniversityEntity> universitiesById =
+                byId(
+                        universities.findAllById(distinctIds(list, BookingEntity::getUniversityId)),
+                        UniversityEntity::getId);
+
+        return list.stream()
+                .map(
+                        b ->
+                                toDetailResponse(
+                                        b,
+                                        offeringTitleOf(offeringsById.get(b.getTourOfferingId())),
+                                        guideNameOf(guidesById.get(b.getGuideId()), guideUsersById),
+                                        universityNameOf(
+                                                universitiesById.get(b.getUniversityId()))))
+                .toList();
+    }
+
     private BookingDetailResponse toDetailResponse(BookingEntity b) {
-        String offeringTitle = resolveOfferingTitle(b.getTourOfferingId());
-        String guideName = resolveGuideName(b.getGuideId());
-        String universityName = resolveUniversityName(b.getUniversityId());
+        return toDetailResponse(
+                b,
+                resolveOfferingTitle(b.getTourOfferingId()),
+                resolveGuideName(b.getGuideId()),
+                resolveUniversityName(b.getUniversityId()));
+    }
+
+    /** Builds the wire response once the three related names are resolved (batched or per-row). */
+    private static BookingDetailResponse toDetailResponse(
+            BookingEntity b, String offeringTitle, String guideName, String universityName) {
         int durationMin =
                 (int) Duration.between(b.getScheduledStartAt(), b.getScheduledEndAt()).toMinutes();
         String guideResponseDeadline =
@@ -684,6 +774,31 @@ public class BookingService {
                 durationMin,
                 b.getBasePriceCents(),
                 b.getCurrency());
+    }
+
+    private static List<UUID> distinctIds(
+            List<BookingEntity> list, Function<BookingEntity, UUID> idOf) {
+        return list.stream().map(idOf).distinct().toList();
+    }
+
+    private static <T> Map<UUID, T> byId(List<T> entities, Function<T, UUID> idOf) {
+        return entities.stream().collect(Collectors.toMap(idOf, Function.identity()));
+    }
+
+    private static String offeringTitleOf(TourOfferingEntity o) {
+        return o != null ? o.getTitle() : "Tour";
+    }
+
+    private static String guideNameOf(GuideProfileEntity guide, Map<UUID, UserEntity> usersById) {
+        if (guide == null) {
+            return "";
+        }
+        UserEntity u = usersById.get(guide.getUserId());
+        return u != null ? u.getDisplayName() : "";
+    }
+
+    private static String universityNameOf(UniversityEntity u) {
+        return u != null ? u.getName() : "";
     }
 
     private String resolveOfferingTitle(UUID offeringId) {

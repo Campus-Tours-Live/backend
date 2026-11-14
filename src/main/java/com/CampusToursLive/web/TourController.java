@@ -133,4 +133,10 @@ public class TourController {
             @Parameter(description = "Id (UUID) of the tour offering.") @PathVariable UUID tourId) {
         return ApiEnvelope.of(discovery.getById(tourId));
     }
+
+    // temp controller test
+    @GetMapping("/examtest")
+    public String tempAPTTest() {
+        return "OK";
+    }
 }

@@ -17,6 +17,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -151,5 +152,11 @@ public class OnboardingController {
             @AuthenticationPrincipal Jwt jwt,
             @Valid @RequestBody ParticipantOnboardingRequest req) {
         return ApiEnvelope.of(onboardingService.onboardParticipant(jwt, req));
+    }
+
+    // temp controller test
+    @GetMapping("/examtest")
+    public String tempAPTTest() {
+        return "OK";
     }
 }

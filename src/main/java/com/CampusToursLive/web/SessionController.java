@@ -208,4 +208,10 @@ public class SessionController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown role: " + raw);
         }
     }
+
+    // temp controller test
+    @GetMapping("/examtest")
+    public String tempAPTTest() {
+        return "OK";
+    }
 }

@@ -117,4 +117,10 @@ public class OfferingSlotController {
         currentUser.requireRole(UserRole.PARTICIPANT);
         return ApiEnvelope.of(slots.getBookableSlots(id, from, to));
     }
+
+    // temp controller test
+    @GetMapping("/examtest")
+    public String tempAPTTest() {
+        return "OK";
+    }
 }
