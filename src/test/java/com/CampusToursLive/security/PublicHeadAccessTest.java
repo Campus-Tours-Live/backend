@@ -4,6 +4,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.CampusToursLive.domain.booking.SlotGenerationService;
 import com.CampusToursLive.domain.tour.TourDiscoveryService;
 import com.CampusToursLive.web.TourController;
 import org.junit.jupiter.api.Test;
@@ -42,6 +43,7 @@ class PublicHeadAccessTest {
     @MockitoBean private JwtDecoder jwtDecoder;
 
     @MockitoBean private TourDiscoveryService tourDiscoveryService;
+    @MockitoBean private SlotGenerationService slotGenerationService;
 
     @Test
     void headOnPublicTourCatalogIsNotRejectedAsUnauthenticated() throws Exception {

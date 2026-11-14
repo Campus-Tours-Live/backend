@@ -22,6 +22,7 @@ import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.web.dto.OfferingAvailabilityPreviewResponse;
 import com.CampusToursLive.web.dto.SlotResponse;
 import java.time.Clock;
 import java.time.Duration;
@@ -390,6 +391,82 @@ class SlotGenerationServiceIntegrationTest {
         assertThatThrownBy(() -> service.getBookableSlots(offering.getId(), from, to))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("to must be after from");
+    }
+
+    // ---------------------------------------------------------------------
+    // Public availability preview.
+    // ---------------------------------------------------------------------
+
+    @Test
+    void getAvailabilityPreview_returnsNextCountAndSampleSlots() {
+        TourOfferingEntity offering = offering(60);
+        Instant start = FIXED_NOW.plus(3, java.time.temporal.ChronoUnit.DAYS);
+        occurrence(start, start.plus(4, java.time.temporal.ChronoUnit.HOURS));
+
+        OfferingAvailabilityPreviewResponse preview =
+                service.getAvailabilityPreview(offering.getId(), "2026-07-13", "2026-07-15", 2);
+
+        assertThat(preview.hasAvailability()).isTrue();
+        assertThat(preview.totalSlots()).isEqualTo(4);
+        assertThat(preview.nextStartAt()).isEqualTo(start);
+        assertThat(preview.nextEndAt())
+                .isEqualTo(start.plus(1, java.time.temporal.ChronoUnit.HOURS));
+        assertThat(preview.sampleSlots()).hasSize(2);
+        assertThat(preview.sampleSlots())
+                .extracting(SlotResponse::startAt)
+                .containsExactly(start, start.plus(1, java.time.temporal.ChronoUnit.HOURS));
+    }
+
+    @Test
+    void getAvailabilityPreview_defaultsToBoundedTwoWeekWindow() {
+        TourOfferingEntity offering = offering(60);
+        Instant withinPreview = FIXED_NOW.plus(3, java.time.temporal.ChronoUnit.DAYS);
+        Instant outsidePreview = FIXED_NOW.plus(20, java.time.temporal.ChronoUnit.DAYS);
+        occurrence(withinPreview, withinPreview.plus(1, java.time.temporal.ChronoUnit.HOURS));
+        occurrence(outsidePreview, outsidePreview.plus(1, java.time.temporal.ChronoUnit.HOURS));
+
+        OfferingAvailabilityPreviewResponse preview =
+                service.getAvailabilityPreview(offering.getId(), null, null, 3);
+
+        assertThat(preview.hasAvailability()).isTrue();
+        assertThat(preview.totalSlots()).isEqualTo(1);
+        assertThat(preview.nextStartAt()).isEqualTo(withinPreview);
+        assertThat(preview.sampleSlots())
+                .extracting(SlotResponse::startAt)
+                .containsExactly(withinPreview);
+    }
+
+    @Test
+    void getAvailabilityPreview_defaultWindowUsesGuideLocalDateAcrossUtcMidnight() {
+        // At 01:00 UTC on Nov 6, Los Angeles is still Nov 5 at 17:00. The occurrence starts at
+        // 19:00 local (03:00 UTC), clears its one-hour notice window, and belongs in the local
+        // Nov 5 preview. Deriving the default from UTC's Nov 6 would parse its lower bound as
+        // Nov 6 00:00 LA (08:00 UTC) and incorrectly exclude this slot.
+        Instant utcNow = Instant.parse("2026-11-06T01:00:00Z");
+        SlotGenerationService localDateService =
+                new SlotGenerationService(
+                        offerings,
+                        occurrences,
+                        bookings,
+                        settingsRepo,
+                        Clock.fixed(utcNow, ZoneOffset.UTC));
+        TourOfferingEntity offering = offering(60);
+        GuideBookingSettingsEntity guideSettings = new GuideBookingSettingsEntity();
+        guideSettings.setGuideId(guide.getId());
+        guideSettings.setTimezone("America/Los_Angeles");
+        guideSettings.setMinNoticeMin(60);
+        settingsRepo.saveAndFlush(guideSettings);
+        Instant eveningSlot = Instant.parse("2026-11-06T03:00:00Z");
+        occurrence(eveningSlot, eveningSlot.plus(1, java.time.temporal.ChronoUnit.HOURS));
+
+        OfferingAvailabilityPreviewResponse preview =
+                localDateService.getAvailabilityPreview(offering.getId(), null, null, 3);
+
+        assertThat(preview.hasAvailability()).isTrue();
+        assertThat(preview.nextStartAt()).isEqualTo(eveningSlot);
+        assertThat(preview.sampleSlots())
+                .extracting(SlotResponse::startAt)
+                .containsExactly(eveningSlot);
     }
 
     // ---------------------------------------------------------------------
