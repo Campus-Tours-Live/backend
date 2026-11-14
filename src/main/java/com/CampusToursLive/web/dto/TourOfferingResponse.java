@@ -1,6 +1,8 @@
 package com.CampusToursLive.web.dto;
 
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.util.List;
 
 /**
  * A guide's tour offering, as returned by the offerings endpoints — an immutable record whose field
@@ -60,4 +62,19 @@ public record TourOfferingResponse(
                         description = "Longer marketing description.",
                         example = "A guided walk through the north campus.",
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
-                String description) {}
+                String description,
+        @ArraySchema(
+                        arraySchema =
+                                @Schema(
+                                        description =
+                                                "BCP-47 languages this tour can be given in."),
+                        schema = @Schema(example = "en-US"))
+                List<String> languages,
+        @ArraySchema(
+                        arraySchema =
+                                @Schema(
+                                        description =
+                                                "Feature chips (≤3) selected from the topic"
+                                                        + " catalog."),
+                        schema = @Schema(example = "Q_AND_A"))
+                List<String> features) {}
