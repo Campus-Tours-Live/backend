@@ -59,7 +59,18 @@ class GuideOfferingControllerTest {
         UserEntity u = user();
         TourOfferingResponse row =
                 new TourOfferingResponse(
-                        "o1", "Campus walk", null, null, null, null, null, null, null, null);
+                        "o1",
+                        "Campus walk",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
         when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
         when(offerings.listOwn(u)).thenReturn(List.of(row));
 
@@ -151,7 +162,9 @@ class GuideOfferingControllerTest {
                         null,
                         null,
                         null,
-                        null);
+                        null,
+                        List.of("en-US"),
+                        List.of());
         when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
         when(offerings.create(eq(u), any())).thenReturn(o);
 
@@ -179,7 +192,9 @@ class GuideOfferingControllerTest {
                         null,
                         null,
                         null,
-                        null);
+                        null,
+                        List.of("en-US"),
+                        List.of());
         when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
         when(offerings.activate(u, id)).thenReturn(o);
 

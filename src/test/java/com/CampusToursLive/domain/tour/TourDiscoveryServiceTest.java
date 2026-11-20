@@ -407,6 +407,7 @@ class TourDiscoveryServiceTest {
         assertEquals("Campus walk", res.title());
         assertEquals("A great tour", res.description());
         assertEquals(List.of("en-US"), res.languages());
+        assertEquals(List.of("Q_AND_A"), res.features());
         assertEquals("north-coast", res.universitySlug());
         assertEquals("Bio text", res.guideBio());
         assertEquals("https://r2.example/Stanford%20University.png", res.universityImageUrl());
@@ -673,6 +674,35 @@ class TourDiscoveryServiceTest {
     void getById_filtersNullAndBlankLanguageEntries() {
         TourDetailResponse res = detailWithLanguages("[\"en-US\", null, \"  \", \"fr-FR\"]");
         assertEquals(List.of("en-US", "fr-FR"), res.languages());
+    }
+
+    @Test
+    void getById_normalizesLegacyLanguagesWithoutDroppingMalformedLabels() {
+        TourDetailResponse res =
+                detailWithLanguages("[\" en-us \",\"EN-US\",\"zh-hant-tw\",\"en_US\"]");
+        assertEquals(List.of("en-US", "zh-Hant-TW", "en_US"), res.languages());
+    }
+
+    @Test
+    void list_normalizesLegacyLanguages() {
+        UUID oid = UUID.randomUUID();
+        UUID gid = UUID.randomUUID();
+        UUID uid = UUID.randomUUID();
+        UUID universityId = UUID.randomUUID();
+        TourOfferingEntity row = offering(oid, gid, universityId);
+        row.setLanguages("[\"en-us\",\"EN-US\"]");
+        when(offerings.findDiscoverable(any(), anyBoolean(), anyList(), any(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(row)));
+        stubGuideUserUniversity(gid, uid, universityId, true);
+
+        assertEquals(
+                List.of("en-US"),
+                service()
+                        .list(null, null, null, TourDiscoverySort.RECOMMENDED, 0, 20)
+                        .getContent()
+                        .get(0)
+                        .languages());
+        assertEquals("[\"en-us\",\"EN-US\"]", row.getLanguages());
     }
 
     // ---- helpers ----
