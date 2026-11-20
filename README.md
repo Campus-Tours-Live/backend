@@ -521,8 +521,9 @@ guide's **user** id (not the guide profile id).
   required (non-blank) for `REJECT`.
 - **APPROVE** sets the guide to `VERIFIED` (stamping `approved_at`) and marks their PENDING school
   rows `VERIFIED`. The guide can then publish offerings, and those appear in `GET /tours`.
-- **REJECT** sets the guide and their PENDING school rows to `REJECTED`. There is no reapply path
-  from `REJECTED` yet.
+- **REJECT** sets the guide and their PENDING school rows to `REJECTED`. There is no API path back
+  to `PENDING` from `REJECTED` yet: `PATCH /guide/profile` forces `submit=false`, and
+  `POST /users/me/roles/guide` rejects accounts that already hold GUIDE (`ROLE_ALREADY_GRANTED`).
 - Every decision writes one `audit_log` row (`GUIDE_APPLICATION_DECIDED`, the admin as actor, the
   decision and trimmed reason in metadata).
 - The decision is a conditional update on `guide_status = PENDING`, so two admins deciding at once
