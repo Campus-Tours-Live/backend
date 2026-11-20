@@ -12,12 +12,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.CampusToursLive.domain.booking.SlotGenerationService;
 import com.CampusToursLive.domain.tour.TourDiscoveryService;
 import com.CampusToursLive.domain.tour.TourDiscoverySort;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.web.dto.OfferingAvailabilityPreviewResponse;
+import com.CampusToursLive.web.dto.SlotResponse;
 import com.CampusToursLive.web.dto.TourDetailResponse;
 import com.CampusToursLive.web.dto.TourSummaryResponse;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -41,6 +45,7 @@ class TourControllerTest {
     @Autowired private MockMvc mvc;
 
     @MockitoBean private TourDiscoveryService discovery;
+    @MockitoBean private SlotGenerationService slots;
 
     @Test
     void list_returnsEnvelope() throws Exception {
@@ -256,5 +261,48 @@ class TourControllerTest {
         mvc.perform(get("/tours/{tourId}", "not-a-uuid"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.status").value(422));
+    }
+
+    @Test
+    void availabilityPreview_returnsEnvelope() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(slots.getAvailabilityPreview(id, "2026-10-01", "2026-10-08", 2))
+                .thenReturn(
+                        new OfferingAvailabilityPreviewResponse(
+                                true,
+                                7,
+                                Instant.parse("2026-10-01T17:00:00Z"),
+                                Instant.parse("2026-10-01T18:00:00Z"),
+                                List.of(
+                                        new SlotResponse(
+                                                Instant.parse("2026-10-01T17:00:00Z"),
+                                                Instant.parse("2026-10-01T18:00:00Z")),
+                                        new SlotResponse(
+                                                Instant.parse("2026-10-02T17:00:00Z"),
+                                                Instant.parse("2026-10-02T18:00:00Z")))));
+
+        mvc.perform(
+                        get("/tours/{tourId}/availability-preview", id)
+                                .param("from", "2026-10-01")
+                                .param("to", "2026-10-08")
+                                .param("limit", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.hasAvailability").value(true))
+                .andExpect(jsonPath("$.data.totalSlots").value(7))
+                .andExpect(jsonPath("$.data.nextStartAt").value("2026-10-01T17:00:00Z"))
+                .andExpect(jsonPath("$.data.sampleSlots[1].startAt").value("2026-10-02T17:00:00Z"));
+
+        verify(slots).getAvailabilityPreview(id, "2026-10-01", "2026-10-08", 2);
+    }
+
+    @Test
+    void availabilityPreview_404_whenTourNotFound() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(slots.getAvailabilityPreview(id, null, null, 3))
+                .thenThrow(new NotFoundException("Tour not found"));
+
+        mvc.perform(get("/tours/{tourId}/availability-preview", id))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value(404));
     }
 }
