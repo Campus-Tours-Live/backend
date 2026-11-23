@@ -84,6 +84,19 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String REVIEW_LIST =
+            "{\"data\":{\"items\":[{\"id\":\"r1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"guideId\":\"g1a2c3d4-0000-4000-8000-000000000003\","
+                    + "\"offeringId\":\"o1a2c3d4-0000-4000-8000-000000000002\","
+                    + "\"reviewerName\":\"Pat P.\",\"overallRating\":5,\"knowledgeRating\":5,"
+                    + "\"communicationRating\":4,\"friendlinessRating\":5,\"helpfulnessRating\":5,"
+                    + "\"comment\":\"Fantastic tour, learned a ton about the campus.\","
+                    + "\"guideResponse\":null,\"createdAt\":\"2026-08-15T18:30:00Z\","
+                    + "\"publishedAt\":\"2026-08-15T18:30:00Z\"}],"
+                    + "\"page\":0,\"size\":20,\"totalElements\":1,\"totalPages\":1},"
+                    + META
+                    + "}";
+
     String BOOKING_LIST =
             "{\"data\":[{\"id\":\"b1a2c3d4-0000-4000-8000-000000000001\","
                     + "\"status\":\"CONFIRMED\",\"scheduledAt\":\"2026-08-01T15:00:00Z\","

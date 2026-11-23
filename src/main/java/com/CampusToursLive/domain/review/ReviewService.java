@@ -6,14 +6,21 @@ import com.CampusToursLive.domain.booking.BookingStatus;
 import com.CampusToursLive.domain.guide.GuideProfileRepository;
 import com.CampusToursLive.domain.tour.TourOfferingRepository;
 import com.CampusToursLive.domain.user.UserEntity;
+import com.CampusToursLive.domain.user.UserRepository;
 import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateReviewRequest;
+import com.CampusToursLive.web.dto.PublicReviewResponse;
 import com.CampusToursLive.web.dto.ReviewResponse;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,20 +49,26 @@ public class ReviewService {
     /** Cap on the free-text columns (comment, private feedback) — both TEXT. */
     private static final int MAX_FREE_TEXT_LENGTH = 1000;
 
+    /** Upper bound on the public read page size — keeps a single request's fan-out bounded. */
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final ReviewRepository reviews;
     private final BookingRepository bookings;
     private final GuideProfileRepository guides;
     private final TourOfferingRepository offerings;
+    private final UserRepository users;
 
     public ReviewService(
             ReviewRepository reviews,
             BookingRepository bookings,
             GuideProfileRepository guides,
-            TourOfferingRepository offerings) {
+            TourOfferingRepository offerings,
+            UserRepository users) {
         this.reviews = reviews;
         this.bookings = bookings;
         this.guides = guides;
         this.offerings = offerings;
+        this.users = users;
     }
 
     /**
@@ -137,6 +150,68 @@ public class ReviewService {
                         .filter(r -> r.getParticipantUserId().equals(participant.getId()))
                         .orElseThrow(() -> new NotFoundException("Review not found"));
         return toResponse(review);
+    }
+
+    /**
+     * A page of a guide's PUBLISHED reviews, newest first — the public guide-profile surface.
+     * Non-published reviews and {@code privateFeedback} are never exposed here.
+     */
+    @Transactional(readOnly = true)
+    public Page<PublicReviewResponse> getGuideReviews(UUID guideId, int page, int size) {
+        return toPublicPage(
+                reviews.findByGuideIdAndStatusOrderByPublishedAtDesc(
+                        guideId, ReviewStatus.PUBLISHED, pageRequest(page, size)));
+    }
+
+    /**
+     * A page of an offering's PUBLISHED reviews, newest first — the public tour-detail surface.
+     * Non-published reviews and {@code privateFeedback} are never exposed here.
+     */
+    @Transactional(readOnly = true)
+    public Page<PublicReviewResponse> getOfferingReviews(UUID offeringId, int page, int size) {
+        return toPublicPage(
+                reviews.findByTourOfferingIdAndStatusOrderByPublishedAtDesc(
+                        offeringId, ReviewStatus.PUBLISHED, pageRequest(page, size)));
+    }
+
+    /**
+     * Map a page of reviews to the public shape, resolving reviewer display names in ONE batch
+     * ({@code findAllById}) rather than per row — the N+1 the list surfaces must avoid.
+     */
+    private Page<PublicReviewResponse> toPublicPage(Page<ReviewEntity> page) {
+        List<UUID> reviewerIds =
+                page.getContent().stream()
+                        .map(ReviewEntity::getParticipantUserId)
+                        .distinct()
+                        .toList();
+        // HashMap#put (not Collectors.toMap, which NPEs on a null value) so a reviewer with a null
+        // display name resolves to a null name rather than blowing up the whole page.
+        Map<UUID, String> names = new HashMap<>();
+        users.findAllById(reviewerIds).forEach(u -> names.put(u.getId(), u.getDisplayName()));
+        return page.map(r -> toPublicResponse(r, names.get(r.getParticipantUserId())));
+    }
+
+    private static PageRequest pageRequest(int page, int size) {
+        int boundedPage = Math.max(page, 0);
+        int boundedSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
+        return PageRequest.of(boundedPage, boundedSize);
+    }
+
+    private static PublicReviewResponse toPublicResponse(ReviewEntity r, String reviewerName) {
+        return new PublicReviewResponse(
+                r.getId().toString(),
+                r.getGuideId().toString(),
+                r.getTourOfferingId().toString(),
+                reviewerName,
+                r.getOverallRating(),
+                toInteger(r.getKnowledgeRating()),
+                toInteger(r.getCommunicationRating()),
+                toInteger(r.getFriendlinessRating()),
+                toInteger(r.getHelpfulnessRating()),
+                r.getComment(),
+                r.getGuideResponse(),
+                r.getCreatedAt() == null ? null : r.getCreatedAt().toString(),
+                r.getPublishedAt() == null ? null : r.getPublishedAt().toString());
     }
 
     private BookingEntity requireOwnedBooking(UUID bookingId, UUID participantUserId) {

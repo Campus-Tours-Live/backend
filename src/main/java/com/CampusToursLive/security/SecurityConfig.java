@@ -65,6 +65,11 @@ public class SecurityConfig {
                                                 // anonymous visitor came to look at.
                                                 "/universities",
                                                 "/universities/**",
+                                                // Published reviews on a guide/offering page —
+                                                // public for the same reason: marketplace content
+                                                // an anonymous visitor reads before signing in.
+                                                "/guides/*/reviews",
+                                                "/offerings/*/reviews",
                                                 // A verified guide's public profile — marketplace
                                                 // content a visitor reads before booking. Single
                                                 // segment, so it does not cover /guides/{id}/*.
@@ -81,6 +86,11 @@ public class SecurityConfig {
                                                 // anonymous visitor came to look at.
                                                 "/universities",
                                                 "/universities/**",
+                                                // Published reviews on a guide/offering page —
+                                                // public for the same reason: marketplace content
+                                                // an anonymous visitor reads before signing in.
+                                                "/guides/*/reviews",
+                                                "/offerings/*/reviews",
                                                 // A verified guide's public profile — see the GET
                                                 // block above; HEAD kept public too so a metadata
                                                 // request never forces a logout.
