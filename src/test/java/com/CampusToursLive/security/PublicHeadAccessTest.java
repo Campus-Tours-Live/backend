@@ -4,6 +4,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.CampusToursLive.domain.booking.SlotGenerationService;
 import com.CampusToursLive.domain.tour.TourDiscoveryService;
 import com.CampusToursLive.web.TourController;
 import org.junit.jupiter.api.Test;
@@ -42,6 +43,7 @@ class PublicHeadAccessTest {
     @MockitoBean private JwtDecoder jwtDecoder;
 
     @MockitoBean private TourDiscoveryService tourDiscoveryService;
+    @MockitoBean private SlotGenerationService slotGenerationService;
 
     @Test
     void headOnPublicTourCatalogIsNotRejectedAsUnauthenticated() throws Exception {
@@ -53,6 +55,14 @@ class PublicHeadAccessTest {
         // /meta/** is served by another controller; what matters here is the security decision,
         // so a 404 from routing is a pass and a 401 from the filter chain is the failure.
         mvc.perform(head("/meta/tour-topics")).andExpect(status().is(not401()));
+    }
+
+    @Test
+    void headOnPublicUniversitiesIsNotRejectedAsUnauthenticated() throws Exception {
+        // /universities/** is public like /tours (CTL-116 detail + CTL-99 directory). Controller
+        // need not be loaded — 404 from routing is fine; 401 from the filter chain is the failure.
+        mvc.perform(head("/universities/state-summary")).andExpect(status().is(not401()));
+        mvc.perform(head("/universities/north-coast")).andExpect(status().is(not401()));
     }
 
     @Test

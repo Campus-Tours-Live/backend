@@ -39,6 +39,12 @@ public record TourDetailResponse(
                         requiredMode = Schema.RequiredMode.NOT_REQUIRED)
                 List<String> languages,
         @Schema(
+                        description =
+                                "Feature chips (≤3) the guide selected from the topic catalog.",
+                        example = "[\"Q_AND_A\"]",
+                        requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+                List<String> features,
+        @Schema(
                         description = "Id of the university this offering is at.",
                         example = "u1a2c3d4-0000-4000-8000-000000000003",
                         requiredMode = Schema.RequiredMode.REQUIRED)

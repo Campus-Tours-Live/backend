@@ -161,6 +161,15 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String PUBLIC_GUIDE_PROFILE =
+            "{\"data\":{\"guideId\":\"g1a2c3d4-0000-4000-8000-000000000003\","
+                    + "\"displayName\":\"Maya Chen\","
+                    + "\"bio\":\"Third-year marine biology major who loves the waterfront campus.\","
+                    + "\"spokenLanguages\":[\"en-US\",\"zh\"],"
+                    + "\"tourTopics\":[\"GENERAL_CAMPUS\",\"STEM\"]},"
+                    + META
+                    + "}";
+
     String GUIDE_PROFILE =
             "{\"data\":{\"guideStatus\":\"VERIFIED\","
                     + "\"universities\":[{\"universityId\":"
@@ -280,6 +289,28 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String UNIVERSITY_DETAIL =
+            "{\"data\":{\"id\":\"u1a2c3d4-0000-4000-8000-000000000003\","
+                    + "\"slug\":\"north-coast\",\"name\":\"North Coast University\","
+                    + "\"shortName\":\"NCU\",\"city\":\"Arcata\",\"region\":\"CA\","
+                    + "\"timezone\":\"America/Los_Angeles\","
+                    + "\"imageUrl\":\"https://pub-3225b84a9a0b4728b11f261ee52251ba.r2"
+                    + ".dev/North%20Coast%20University.png\","
+                    + "\"status\":\"ACTIVE\",\"tourCount\":4,\"fromPriceCents\":3800,"
+                    + "\"currency\":\"USD\"},"
+                    + META
+                    + "}";
+
+    String UNIVERSITY_DETAIL_NO_TOURS =
+            "{\"data\":{\"id\":\"u1a2c3d4-0000-4000-8000-000000000004\","
+                    + "\"slug\":\"redwood-state\",\"name\":\"Redwood State University\","
+                    + "\"shortName\":null,\"city\":\"Eureka\",\"region\":\"CA\","
+                    + "\"timezone\":\"America/Los_Angeles\",\"imageUrl\":null,"
+                    + "\"status\":\"ACTIVE\",\"tourCount\":0,\"fromPriceCents\":null,"
+                    + "\"currency\":null},"
+                    + META
+                    + "}";
+
     String MAJORS_LIVE =
             "{\"data\":[{\"value\":\"Computer Science\",\"label\":\"Computer Science\"}],"
                     + META
@@ -332,6 +363,7 @@ public interface ApiExamples {
                     + "\"topic\":\"GENERAL_CAMPUS\","
                     + "\"description\":\"A guided walk through the north campus.\","
                     + "\"languages\":[\"en-US\"],"
+                    + "\"features\":[\"Q_AND_A\"],"
                     + "\"universityId\":\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"universityName\":\"North Coast University\","
                     + "\"universityImageUrl\":\"https://pub-3225b84a9a0b4728b11f261ee52251ba.r2"
@@ -343,6 +375,16 @@ public interface ApiExamples {
                     + "\"guideBio\":\"Third-year student and campus tour lead.\","
                     + "\"durationMin\":60,\"priceCents\":4200,\"currency\":\"USD\","
                     + "\"avgRating\":4.5,\"reviewCount\":12},"
+                    + META
+                    + "}";
+
+    String TOUR_AVAILABILITY_PREVIEW =
+            "{\"data\":{\"hasAvailability\":true,\"totalSlots\":6,"
+                    + "\"nextStartAt\":\"2026-07-14T16:00:00Z\","
+                    + "\"nextEndAt\":\"2026-07-14T16:30:00Z\","
+                    + "\"sampleSlots\":[{\"startAt\":\"2026-07-14T16:00:00Z\","
+                    + "\"endAt\":\"2026-07-14T16:30:00Z\"},{\"startAt\":"
+                    + "\"2026-07-14T16:30:00Z\",\"endAt\":\"2026-07-14T17:00:00Z\"}]},"
                     + META
                     + "}";
 
@@ -429,6 +471,18 @@ public interface ApiExamples {
                     + "{\"matches\":[\"bachelor\"],\"years\":6},"
                     + "{\"matches\":[\"associate\",\"certificate\",\"diploma\"],\"years\":3}],"
                     + "\"defaultMaxYearsToGraduate\":8},"
+                    + META
+                    + "}";
+
+    // --- Reschedule (CTL-50) ---
+    String RESCHEDULE_PROPOSAL =
+            "{\"data\":{\"id\":\"r1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"bookingId\":\"b1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"requestedBy\":\"PARTICIPANT\",\"status\":\"PENDING_COUNTERPARTY\","
+                    + "\"proposedStartAt\":\"2026-08-05T17:00:00Z\","
+                    + "\"proposedEndAt\":\"2026-08-05T18:00:00Z\",\"feeCents\":0,"
+                    + "\"priceDiffCents\":0,\"expiresAt\":\"2026-08-03T17:00:00Z\","
+                    + "\"reason\":\"Class moved.\"},"
                     + META
                     + "}";
 }
