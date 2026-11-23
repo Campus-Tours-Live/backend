@@ -13,9 +13,11 @@ import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateOfferingRequest;
 import com.CampusToursLive.web.dto.TourOfferingResponse;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -114,8 +116,7 @@ public class TourOfferingService {
         o.setDurationMin(duration);
         o.setPriceCents(price);
         if (req.languages() != null) {
-            List<String> langs =
-                    req.languages().stream().filter(s -> s != null && !s.isBlank()).toList();
+            List<String> langs = SupportedLanguages.requireSupported(req.languages());
             if (!langs.isEmpty()) o.setLanguages(writeJson(langs));
         }
         if (req.features() != null) {
@@ -196,7 +197,7 @@ public class TourOfferingService {
     }
 
     private static String slugify(String s) {
-        return s.toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("(^-+|-+$)", "");
+        return s.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("(^-+|-+$)", "");
     }
 
     private String writeJson(Object value) {
@@ -235,6 +236,18 @@ public class TourOfferingService {
         return List.copyOf(out);
     }
 
+    private List<String> readStringArray(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            List<String> values = mapper.readValue(json, new TypeReference<>() {});
+            return values == null
+                    ? List.of()
+                    : values.stream().filter(s -> s != null && !s.isBlank()).toList();
+        } catch (Exception ex) {
+            return List.of();
+        }
+    }
+
     private TourOfferingResponse toResponse(TourOfferingEntity o) {
         return new TourOfferingResponse(
                 o.getId().toString(),
@@ -246,6 +259,8 @@ public class TourOfferingService {
                 o.getDurationMin(),
                 o.getPriceCents(),
                 o.getCurrency(),
-                o.getDescription());
+                o.getDescription(),
+                SupportedLanguages.normalizeStored(readStringArray(o.getLanguages())),
+                readStringArray(o.getFeatures()));
     }
 }
