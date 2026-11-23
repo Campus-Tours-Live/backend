@@ -455,6 +455,7 @@ envelope; errors are `application/problem+json`.
 | `GET`         | `/bookings/upcoming`              | Upcoming active-lifecycle bookings, chronological         |
 | `GET`         | `/bookings/pending-actions`       | Outstanding-action counts (payments, guide, reviews)      |
 | `POST`        | `/bookings`                       | Create a booking for a bookable offering                  |
+| `POST`        | `/bookings/{id}/reschedule-proposals` | Propose a new time for a CONFIRMED booking (CTL-50)   |
 | `POST`        | `/bookings/{id}/cancel`           | Cancel the participant's own upcoming booking             |
 | `GET`         | `/cart`                           | The booking cart (DRAFT bookings — hold no slot)          |
 | `POST`        | `/cart/items`                     | Validate + add a cart item                                |
