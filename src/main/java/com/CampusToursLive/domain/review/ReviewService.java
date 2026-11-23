@@ -10,8 +10,10 @@ import com.CampusToursLive.error.ConflictException;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
 import com.CampusToursLive.web.dto.CreateReviewRequest;
+import com.CampusToursLive.web.dto.ModerateReviewRequest;
 import com.CampusToursLive.web.dto.ReviewResponse;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -137,6 +139,51 @@ public class ReviewService {
                         .filter(r -> r.getParticipantUserId().equals(participant.getId()))
                         .orElseThrow(() -> new NotFoundException("Review not found"));
         return toResponse(review);
+    }
+
+    /**
+     * Admin moderation: move a review to PUBLISHED or REMOVED, then recompute the guide's and
+     * offering's aggregates (only PUBLISHED reviews count, so a removal drops them and the public
+     * read surfaces stop returning it). Not ownership-scoped — an admin may moderate any review.
+     *
+     * @throws ValidationException the target status is missing or is not PUBLISHED / REMOVED.
+     * @throws NotFoundException the review does not exist.
+     */
+    @Transactional
+    public ReviewResponse moderateReview(UUID reviewId, ModerateReviewRequest req) {
+        ReviewStatus target = parseModerationTarget(req.status());
+        ReviewEntity review =
+                reviews.findById(reviewId)
+                        .orElseThrow(() -> new NotFoundException("Review not found"));
+
+        review.setStatus(target);
+        if (target == ReviewStatus.PUBLISHED && review.getPublishedAt() == null) {
+            review.setPublishedAt(Instant.now());
+        }
+        reviews.save(review);
+
+        guides.recomputeRatingAggregate(review.getGuideId());
+        offerings.recomputeRatingAggregate(review.getTourOfferingId());
+        return toResponse(review);
+    }
+
+    /**
+     * Only PUBLISHED / REMOVED are valid moderation targets; PENDING_MODERATION and junk are 422.
+     */
+    private static ReviewStatus parseModerationTarget(String value) {
+        if (value == null || value.isBlank()) {
+            throw new ValidationException("status is required (PUBLISHED or REMOVED)");
+        }
+        ReviewStatus target;
+        try {
+            target = ReviewStatus.valueOf(value.strip().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException unknown) {
+            throw new ValidationException("status must be PUBLISHED or REMOVED");
+        }
+        if (target != ReviewStatus.PUBLISHED && target != ReviewStatus.REMOVED) {
+            throw new ValidationException("status must be PUBLISHED or REMOVED");
+        }
+        return target;
     }
 
     private BookingEntity requireOwnedBooking(UUID bookingId, UUID participantUserId) {
