@@ -26,6 +26,14 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+      # setup-java's `cache: maven` covers ~/.m2/repository only. The Maven distribution itself
+      # (~/.m2/wrapper, fetched by ./mvnw from Maven Central) is cached here so a transient
+      # download failure can't fail the job in seconds (CTL-140). Keyed on the wrapper config,
+      # so bumping the Maven version refreshes it.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/wrapper
+          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
       - name: Spotless (google-java-format) check
         run: ./mvnw -B spotless:check
 
@@ -39,6 +47,11 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+      # Maven distribution cache, see the lint job.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/wrapper
+          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
       # Unit + Testcontainers integration tests + JaCoCo 90% project gate.
       # (Spotless is checked in the lint job; skip it here to keep this signal test-only.)
       # `verify` also runs OpenApiDocsExportTest, which boots the app and writes the
@@ -66,6 +79,11 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+      # Maven distribution cache, see the lint job.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/wrapper
+          key: maven-wrapper-${{ hashFiles('.mvn/wrapper/maven-wrapper.properties') }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -74,7 +92,9 @@ jobs:
         run: |
           python -m pip install --quiet diff-cover
           BASE="${{ github.base_ref || 'main' }}"
-          git fetch --no-tags --depth=1 origin "+refs/heads/$BASE:refs/remotes/origin/$BASE"
+          # No --depth: a shallow base fetch cuts history at the base tip, so a PR that is behind its
+          # base has no merge base and diff-cover fails (CTL-140). Checkout already has full history.
+          git fetch --no-tags origin "+refs/heads/$BASE:refs/remotes/origin/$BASE"
           diff-cover target/site/jacoco/jacoco.xml \
             --compare-branch="origin/$BASE" \
             --src-roots src/main/java \
