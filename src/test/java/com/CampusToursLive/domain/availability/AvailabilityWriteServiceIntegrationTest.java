@@ -1433,6 +1433,20 @@ class AvailabilityWriteServiceIntegrationTest {
     }
 
     @Test
+    void setDayActive_on_differentDatesWithoutTimeOverlap_isAllowed() {
+        // Different effective ranges are fine as long as the times don't overlap.
+        UUID season = rule(TODAY_DOW, "15:00", 60, FIXED_TODAY, FIXED_TODAY.plusDays(30));
+        deactivate(season);
+        UUID regular = rule(TODAY_DOW, "09:00", 60, null, null);
+        deactivate(regular);
+
+        writeService.setDayActive(guideAId, new RulesActiveRequest(TODAY_DOW, true));
+
+        assertThat(dayState(TODAY_DOW))
+                .containsExactly(tuple("09:00", 60, true), tuple("15:00", 60, true));
+    }
+
+    @Test
     void setDayActive_on_sameDatesOverlap_mergesLikeASingleRuleUpdate() {
         // Same coalesce group (same effective dates): overlapping ranges merge instead of 422.
         UUID first = rule(TODAY_DOW, "09:00", 60, null, null);
