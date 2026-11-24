@@ -19,6 +19,8 @@ import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 
@@ -52,14 +54,49 @@ class ReviewWriteFixtures {
         this.reviews = reviews;
     }
 
+    /** One guide + offering and {@code n} participants, each with a COMPLETED booking of it. */
+    record ReviewableGraph(
+            UUID guideId, UUID offeringId, List<UserEntity> participants, List<UUID> bookingIds) {}
+
+    /** Persists a guide, an offering and {@code n} reviewable (COMPLETED) bookings, one each. */
+    ReviewableGraph seedReviewableBookings(int n) {
+        TourOfferingEntity offering = seedOffering();
+        List<UserEntity> participants = new ArrayList<>();
+        List<UUID> bookingIds = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            UserEntity p = users.save(user("Participant " + i));
+            participants.add(p);
+            bookingIds.add(bookings.saveAndFlush(completedBooking(p, offering)).getId());
+        }
+        return new ReviewableGraph(
+                offering.getGuideId(), offering.getId(), participants, bookingIds);
+    }
+
     /** Persists the graph and returns the new PUBLISHED review's id. */
     UUID seedPublishedReview() {
+        UserEntity participant = users.save(user("Pat Participant"));
+        TourOfferingEntity offering = seedOffering();
+        BookingEntity booking = bookings.saveAndFlush(completedBooking(participant, offering));
+
+        ReviewEntity r = new ReviewEntity();
+        r.setId(UUID.randomUUID());
+        r.setBookingId(booking.getId());
+        r.setParticipantUserId(participant.getId());
+        r.setGuideId(offering.getGuideId());
+        r.setTourOfferingId(offering.getId());
+        r.setOverallRating((short) 4);
+        r.setStatus(ReviewStatus.PUBLISHED);
+        r.setPublishedAt(Instant.now());
+        return reviews.saveAndFlush(r).getId();
+    }
+
+    /** A VERIFIED guide with one ACTIVE offering at an ACTIVE university. */
+    private TourOfferingEntity seedOffering() {
         UniversityEntity university =
                 universities.findAll().stream()
                         .filter(u -> u.getStatus() == UniversityStatus.ACTIVE)
                         .findFirst()
                         .orElseThrow();
-        UserEntity participant = users.save(user("Pat Participant"));
         UserEntity guideUser = users.save(user("Jane Guide"));
 
         GuideProfileEntity g = new GuideProfileEntity();
@@ -78,20 +115,7 @@ class ReviewWriteFixtures {
         o.setDurationMin(60);
         o.setPriceCents(5000L);
         o.setStatus(TourStatus.ACTIVE);
-        TourOfferingEntity offering = offerings.save(o);
-
-        BookingEntity booking = bookings.saveAndFlush(completedBooking(participant, offering));
-
-        ReviewEntity r = new ReviewEntity();
-        r.setId(UUID.randomUUID());
-        r.setBookingId(booking.getId());
-        r.setParticipantUserId(participant.getId());
-        r.setGuideId(guide.getId());
-        r.setTourOfferingId(offering.getId());
-        r.setOverallRating((short) 4);
-        r.setStatus(ReviewStatus.PUBLISHED);
-        r.setPublishedAt(Instant.now());
-        return reviews.saveAndFlush(r).getId();
+        return offerings.save(o);
     }
 
     private static UserEntity user(String displayName) {
