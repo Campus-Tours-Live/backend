@@ -69,15 +69,25 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
     /** A guide's own booking — scopes guide accept/decline so guides can only touch their rows. */
     Optional<BookingEntity> findByIdAndGuideId(UUID id, UUID guideId);
 
-    /**
-     * Guide inbox: bookings in the given statuses for this guide, chronological by scheduled start.
-     * Used for pending (response queue) and upcoming (confirmed) lists.
-     */
-    List<BookingEntity> findByGuideIdAndStatusInOrderByScheduledStartAtAsc(
-            UUID guideId, List<BookingStatus> statuses);
+    /** Pending requests that can still be answered, even before the expiry sweep runs. */
+    @Query(
+            """
+            select b from BookingEntity b where b.guideId = :guideId
+              and b.status = com.CampusToursLive.domain.booking.BookingStatus.PENDING_GUIDE_ACCEPTANCE
+              and (b.guideResponseDeadlineAt is null or b.guideResponseDeadlineAt > :now)
+            order by b.scheduledStartAt asc, b.id asc
+            """)
+    List<BookingEntity> findActionablePendingForGuide(
+            @Param("guideId") UUID guideId, @Param("now") Instant now);
 
-    /** Count guide bookings in one status (e.g. pending acceptance for the dashboard badge). */
-    long countByGuideIdAndStatus(UUID guideId, BookingStatus status);
+    /** Dashboard count uses the same response-window boundary as the pending list. */
+    @Query(
+            """
+            select count(b) from BookingEntity b where b.guideId = :guideId
+              and b.status = com.CampusToursLive.domain.booking.BookingStatus.PENDING_GUIDE_ACCEPTANCE
+              and (b.guideResponseDeadlineAt is null or b.guideResponseDeadlineAt > :now)
+            """)
+    long countActionablePendingForGuide(@Param("guideId") UUID guideId, @Param("now") Instant now);
 
     /**
      * Guide active tours: matching statuses ending at/after {@code from}, including ongoing tours.
@@ -126,6 +136,21 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
      */
     boolean
             existsByParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
+                    UUID participantUserId,
+                    List<BookingStatus> statuses,
+                    Instant newEnd,
+                    Instant newStart);
+
+    boolean existsByIdNotAndGuideIdAndStatusInAndReservedStartAtLessThanAndReservedEndAtGreaterThan(
+            UUID excludedBookingId,
+            UUID guideId,
+            List<BookingStatus> statuses,
+            Instant newEnd,
+            Instant newStart);
+
+    boolean
+            existsByIdNotAndParticipantUserIdAndStatusInAndScheduledStartAtLessThanAndScheduledEndAtGreaterThan(
+                    UUID excludedBookingId,
                     UUID participantUserId,
                     List<BookingStatus> statuses,
                     Instant newEnd,

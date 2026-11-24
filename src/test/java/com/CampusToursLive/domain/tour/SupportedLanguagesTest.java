@@ -37,6 +37,15 @@ class SupportedLanguagesTest {
     }
 
     @Test
+    void normalizeStored_isTolerantAndCanonicalizesBeforeDeduplication() {
+        assertEquals(List.of(), SupportedLanguages.normalizeStored(null));
+        assertEquals(
+                List.of("en-US", "en_US", "x-private", "und"),
+                SupportedLanguages.normalizeStored(
+                        Arrays.asList(null, " ", " en-us ", "EN-US", "en_US", "X-PRIVATE", "UND")));
+    }
+
+    @Test
     void requireSupported_canonicalizesBeforeDeduplication() {
         assertEquals(
                 List.of("en-US", "zh-Hant-TW", "fr-FR"),

@@ -95,7 +95,7 @@ public class GuideBookingController {
     @Operation(
             summary = "Guide pending booking counts",
             description =
-                    "Returns how many bookings are awaiting this guide's accept/decline. Used by"
+                    "Returns how many unexpired bookings await this guide's accept/decline. Used by"
                             + " the guide dashboard.")
     @ApiResponse(
             responseCode = "200",
@@ -240,7 +240,7 @@ public class GuideBookingController {
                             examples = @ExampleObject(value = ApiExamples.PROBLEM_404)))
     @ApiResponse(
             responseCode = "422",
-            description = "Booking cannot be declined (wrong status).",
+            description = "Booking cannot be declined (wrong status or response window expired).",
             content =
                     @Content(
                             mediaType = "application/json",

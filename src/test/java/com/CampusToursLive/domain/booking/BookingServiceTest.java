@@ -1057,6 +1057,25 @@ class BookingServiceTest {
     }
 
     @Test
+    void createBooking_nonExclusionIntegrityViolation_propagates_notMislabelledAsSlotTaken() {
+        // CTL-36: a booking_number UNIQUE collision (or any non-exclusion violation) must NOT be
+        // dressed up as a "slot taken" 422 — it propagates to the generic 500 handler.
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        Bookable ctx = stubBookableOffering();
+        stubNoOverlaps();
+        when(bookings.saveAndFlush(any()))
+                .thenThrow(
+                        new DataIntegrityViolationException(
+                                "duplicate key value violates unique constraint"
+                                        + " \"bookings_booking_number_key\""));
+
+        assertThrows(
+                DataIntegrityViolationException.class,
+                () -> service().createBooking(participant, validRequest(ctx, null)));
+        verifyNoInteractions(statusHistory);
+    }
+
+    @Test
     void createBooking_notesOverLengthCap_isRejected() {
         UserEntity participant = user(UUID.randomUUID(), "Pat");
         Bookable ctx = stubBookableOffering();
@@ -1445,6 +1464,28 @@ class BookingServiceTest {
                 .thenThrow(new DataIntegrityViolationException("excl_guide_no_overlap"));
 
         assertThrows(ValidationException.class, () -> service().checkout(participant));
+        verifyNoInteractions(statusHistory);
+    }
+
+    @Test
+    void checkout_nonExclusionIntegrityViolation_propagates_notMislabelledAsSlotTaken() {
+        // CTL-36: parity with createBooking — a non-exclusion violation at checkout must propagate,
+        // not be re-labelled "time slots were just taken".
+        UserEntity participant = user(UUID.randomUUID(), "Pat");
+        BookingEntity item =
+                draftItem(participant.getId(), Instant.now().plus(3, ChronoUnit.DAYS), 60);
+        when(bookings.findByParticipantUserIdAndStatusOrderByCreatedAtAsc(
+                        participant.getId(), BookingStatus.DRAFT))
+                .thenReturn(List.of(item));
+        stubCheckoutLookups(item, TourStatus.ACTIVE);
+        stubNoOverlaps();
+        when(bookings.saveAllAndFlush(any()))
+                .thenThrow(
+                        new DataIntegrityViolationException(
+                                "duplicate key value violates unique constraint"
+                                        + " \"bookings_booking_number_key\""));
+
+        assertThrows(DataIntegrityViolationException.class, () -> service().checkout(participant));
         verifyNoInteractions(statusHistory);
     }
 
@@ -2000,6 +2041,7 @@ class BookingServiceTest {
         when(bookings.save(b)).thenReturn(b);
         stubGuideDetailLookups(b);
 
+        b.setGuideResponseDeadlineAt(Instant.now().plus(1, ChronoUnit.HOURS));
         var resp =
                 service()
                         .declineBooking(
@@ -2009,6 +2051,8 @@ class BookingServiceTest {
         assertEquals(BookingStatus.DECLINED_BY_GUIDE, b.getStatus());
         assertEquals(BookingActor.GUIDE, b.getCancellationActor());
         assertNotNull(b.getCancelledAt());
+        assertNull(b.getGuideResponseDeadlineAt());
+        assertNull(resp.guideResponseDeadline());
         assertEquals("Schedule conflict", b.getCancellationReason());
         assertEquals("CANCELLED", resp.status()); // displayStatus for DECLINED_BY_GUIDE
 
@@ -2020,6 +2064,35 @@ class BookingServiceTest {
     }
 
     @Test
+    void declineBooking_rejectsExpiredResponseWindow_withoutMutatingBooking() {
+        UUID guideUserId = UUID.randomUUID();
+        UUID guideProfileId = UUID.randomUUID();
+        UserEntity guideUser = user(guideUserId, "Maya");
+        BookingEntity b =
+                booking(
+                        UUID.randomUUID(),
+                        guideProfileId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        BookingStatus.PENDING_GUIDE_ACCEPTANCE,
+                        Instant.now().plus(2, ChronoUnit.DAYS),
+                        Instant.now().plus(3, ChronoUnit.DAYS));
+        Instant expired = Instant.now().minusSeconds(1);
+        b.setGuideResponseDeadlineAt(expired);
+        when(guides.findByUserId(guideUserId))
+                .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
+        when(bookings.findByIdAndGuideId(b.getId(), guideProfileId)).thenReturn(Optional.of(b));
+
+        assertThrows(
+                ValidationException.class,
+                () -> service().declineBooking(guideUser, b.getId(), null));
+        assertEquals(BookingStatus.PENDING_GUIDE_ACCEPTANCE, b.getStatus());
+        assertEquals(expired, b.getGuideResponseDeadlineAt());
+        verify(bookings, never()).save(any());
+        verifyNoInteractions(statusHistory);
+    }
+
+    @Test
     void listForGuide_pending_queriesPendingStatus() {
         UUID guideUserId = UUID.randomUUID();
         UUID guideProfileId = UUID.randomUUID();
@@ -2027,8 +2100,7 @@ class BookingServiceTest {
 
         when(guides.findByUserId(guideUserId))
                 .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
-        when(bookings.findByGuideIdAndStatusInOrderByScheduledStartAtAsc(
-                        eq(guideProfileId), eq(List.of(BookingStatus.PENDING_GUIDE_ACCEPTANCE))))
+        when(bookings.findActionablePendingForGuide(eq(guideProfileId), any(Instant.class)))
                 .thenReturn(List.of());
 
         assertTrue(
@@ -2120,8 +2192,7 @@ class BookingServiceTest {
                                 eq(List.of(BookingStatus.CONFIRMED, BookingStatus.IN_PROGRESS)),
                                 any(Instant.class)))
                 .thenReturn(List.of(confirmed));
-        when(bookings.findByGuideIdAndStatusInOrderByScheduledStartAtAsc(
-                        eq(guideProfileId), eq(List.of(BookingStatus.PENDING_GUIDE_ACCEPTANCE))))
+        when(bookings.findActionablePendingForGuide(eq(guideProfileId), any(Instant.class)))
                 .thenReturn(List.of(pending));
         stubGuideDetailLookups(pending);
         stubGuideDetailLookups(confirmed);
@@ -2558,8 +2629,7 @@ class BookingServiceTest {
 
         when(guides.findByUserId(guideUserId))
                 .thenReturn(Optional.of(guideProfile(guideProfileId, guideUserId)));
-        when(bookings.countByGuideIdAndStatus(
-                        guideProfileId, BookingStatus.PENDING_GUIDE_ACCEPTANCE))
+        when(bookings.countActionablePendingForGuide(eq(guideProfileId), any(Instant.class)))
                 .thenReturn(3L);
 
         assertEquals(3L, service().getPendingActionsForGuide(guideUser).pendingAcceptance());

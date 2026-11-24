@@ -127,6 +127,31 @@ class BookingWriteIntegrationTest {
     }
 
     @Test
+    void actionablePendingQueriesExcludeExpiredDeadlinesWithoutWaitingForSweep() {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+        BookingEntity booking = pendingAt(now.plus(3, ChronoUnit.DAYS));
+        for (Instant deadline : new Instant[] {now.minusSeconds(1), now}) {
+            booking.setGuideResponseDeadlineAt(deadline);
+            bookings.flush();
+            assertThat(bookings.findActionablePendingForGuide(guide.getId(), now)).isEmpty();
+            assertThat(bookings.countActionablePendingForGuide(guide.getId(), now)).isZero();
+        }
+        for (Instant deadline : new Instant[] {now.plusSeconds(1), null}) {
+            booking.setGuideResponseDeadlineAt(deadline);
+            bookings.flush();
+            assertThat(bookings.findActionablePendingForGuide(guide.getId(), now))
+                    .containsExactly(booking);
+            assertThat(bookings.countActionablePendingForGuide(guide.getId(), now)).isEqualTo(1);
+        }
+        assertThat(bookings.findActionablePendingForGuide(UUID.randomUUID(), now)).isEmpty();
+        assertThat(bookings.countActionablePendingForGuide(UUID.randomUUID(), now)).isZero();
+        booking.setStatus(BookingStatus.CONFIRMED);
+        bookings.flush();
+        assertThat(bookings.findActionablePendingForGuide(guide.getId(), now)).isEmpty();
+        assertThat(bookings.countActionablePendingForGuide(guide.getId(), now)).isZero();
+    }
+
+    @Test
     void guideActiveQueryIncludesOngoingToursAndMatchesPastBoundary() {
         Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
         BookingEntity booking = pendingAt(now.plus(3, ChronoUnit.DAYS));
@@ -319,14 +344,23 @@ class BookingWriteIntegrationTest {
 
         bookings.saveAndFlush(heldBooking(participant.getId(), start));
         // Same guide, second participant, starting mid-way through the reserved interval →
-        // excl_guide_no_overlap must reject it at flush.
+        // excl_guide_no_overlap must reject it at flush. CTL-36: assert the REAL Postgres violation
+        // message carries the constraint name, so BookingService.isSlotConflict's substring match
+        // actually recognises a genuine slot race (vs a hand-crafted message in the unit tests).
         assertThatThrownBy(
                         () ->
                                 bookings.saveAndFlush(
                                         heldBooking(
                                                 otherParticipant.getId(),
                                                 start.plus(30, ChronoUnit.MINUTES))))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .satisfies(
+                        ex ->
+                                assertThat(
+                                                ((DataIntegrityViolationException) ex)
+                                                        .getMostSpecificCause()
+                                                        .getMessage())
+                                        .contains("excl_guide_no_overlap"));
     }
 
     // ── CTL-54 design-gap fix: createBooking honors the guide's OWN settings, and agrees with

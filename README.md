@@ -449,6 +449,10 @@ envelope; errors are `application/problem+json`.
 | `GET` `PATCH` | `/guide/profile`                  | Read / upsert the guide profile (+ submit application)    |
 | `GET` `POST`  | `/guide/offerings`                | List / create a guide's tour offerings                    |
 | `POST`        | `/guide/offerings/{id}/activate`  | Publish a draft offering (requires an APPROVED guide)     |
+| `PATCH`       | `/guide/offerings/{id}`           | Edit an owned DRAFT or PAUSED offering                    |
+| `POST`        | `/guide/offerings/{id}/pause`     | Unpublish an owned ACTIVE offering                       |
+| `POST`        | `/guide/offerings/{id}/retire`    | Archive an owned offering                                |
+| `POST`        | `/guide/offerings/{id}/duplicate` | Copy an owned offering into a new draft                  |
 | `GET`         | `/guide/bookings`                 | Guide inbox (`?filter=pending\|upcoming\|past\|all`)      |
 | `GET`         | `/guide/bookings/pending-actions` | Pending acceptance count for the guide dashboard          |
 | `GET`         | `/guide/bookings/{id}`            | One booking with status history                           |
@@ -463,6 +467,7 @@ envelope; errors are `application/problem+json`.
 | `GET`         | `/bookings/upcoming`              | Upcoming active-lifecycle bookings, chronological         |
 | `GET`         | `/bookings/pending-actions`       | Outstanding-action counts (payments, guide, reviews)      |
 | `POST`        | `/bookings`                       | Create a booking for a bookable offering                  |
+| `POST`        | `/bookings/{id}/reschedule-proposals` | Propose a new time for a CONFIRMED booking (CTL-50)   |
 | `POST`        | `/bookings/{id}/cancel`           | Cancel the participant's own upcoming booking             |
 | `GET`         | `/cart`                           | The booking cart (DRAFT bookings — hold no slot)          |
 | `POST`        | `/cart/items`                     | Validate + add a cart item                                |
@@ -475,6 +480,15 @@ envelope; errors are `application/problem+json`.
 | `POST`        | `/admin/guides/{userId}/decision` | Admin approve/reject a guide application                  |
 
 ### Expired guide booking requests
+
+Guide mutations use `/guide/bookings/{id}/...` (BFF prefix `/v1`), matching the
+frontend guide inbox and detail page. `/bookings/{id}/cancel` remains participant-only;
+the alternative guide paths proposed in draft PR #46 are not part of this contract.
+The guide pending list and badge exclude elapsed response deadlines immediately, without
+waiting for the expiry sweep. Both accept and decline reject expired requests; successful
+responses clear the deadline. Legacy null deadlines remain actionable.
+Guide cancellation and decline retain the existing display status `CANCELLED`; detail
+status history identifies the GUIDE actor and `GUIDE_CANCELLED` / `GUIDE_DECLINED` event.
 
 Pending guide-acceptance requests are expired using their stored response deadline. A scheduled
 transaction claims at most 100 due requests with `FOR UPDATE SKIP LOCKED`, changes their status

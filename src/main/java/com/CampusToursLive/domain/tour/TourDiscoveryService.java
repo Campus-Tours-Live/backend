@@ -245,7 +245,7 @@ public class TourDiscoveryService {
                 o.getCurrency(),
                 toRating(o.getAvgRating()),
                 o.getReviewCount(),
-                readStringArray(o.getLanguages()),
+                SupportedLanguages.normalizeStored(readStringArray(o.getLanguages())),
                 readStringArray(o.getFeatures()),
                 isNew(o));
     }
@@ -282,7 +282,7 @@ public class TourDiscoveryService {
                 o.getSlug(),
                 o.getTopic() != null ? o.getTopic().name() : null,
                 o.getDescription(),
-                readStringArray(o.getLanguages()),
+                SupportedLanguages.normalizeStored(readStringArray(o.getLanguages())),
                 readStringArray(o.getFeatures()),
                 university.getId().toString(),
                 university.getName(),
