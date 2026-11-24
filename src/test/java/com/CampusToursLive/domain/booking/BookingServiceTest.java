@@ -1445,6 +1445,52 @@ class BookingServiceTest {
     }
 
     @Test
+    void getCart_offeringDeleted_fallsBackToDefaults_andReportsTourUnavailable() {
+        // A cart item whose offering no longer exists still renders: placeholder title, the
+        // add-time price as the "current" price, and TOUR_UNAVAILABLE.
+        UUID uid = UUID.randomUUID();
+        BookingEntity item = cartItemFor(uid, futureStart());
+        stubAvailableCartLookups(item);
+        when(offerings.findById(item.getTourOfferingId())).thenReturn(Optional.empty());
+
+        CartItemResponse cart = service().getCart(uid).get(0);
+
+        assertEquals("Tour", cart.offeringTitle());
+        assertEquals(item.getBasePriceCents(), cart.currentPriceCents());
+        assertEquals("TOUR_UNAVAILABLE", cart.cartStatus());
+    }
+
+    @Test
+    void getCart_universityMissingOrInactive_reportsTourUnavailable() {
+        UUID uid = UUID.randomUUID();
+        BookingEntity item = cartItemFor(uid, futureStart());
+        stubAvailableCartLookups(item);
+
+        when(universities.findById(item.getUniversityId())).thenReturn(Optional.empty());
+        CartItemResponse missing = service().getCart(uid).get(0);
+        assertEquals("", missing.universityName());
+        assertEquals("TOUR_UNAVAILABLE", missing.cartStatus());
+
+        UniversityEntity paused = university(item.getUniversityId(), "Test University");
+        paused.setStatus(UniversityStatus.PAUSED);
+        when(universities.findById(item.getUniversityId())).thenReturn(Optional.of(paused));
+        assertEquals("TOUR_UNAVAILABLE", service().getCart(uid).get(0).cartStatus());
+    }
+
+    @Test
+    void getCart_guideProfileMissing_blankNameAndGuideUnavailable() {
+        UUID uid = UUID.randomUUID();
+        BookingEntity item = cartItemFor(uid, futureStart());
+        stubAvailableCartLookups(item);
+        when(guides.findById(item.getGuideId())).thenReturn(Optional.empty());
+
+        CartItemResponse cart = service().getCart(uid).get(0);
+
+        assertEquals("", cart.guideName());
+        assertEquals("GUIDE_UNAVAILABLE", cart.cartStatus());
+    }
+
+    @Test
     void getCart_guideNoLongerApproved_reportsGuideUnavailable() {
         UUID uid = UUID.randomUUID();
         BookingEntity item = cartItemFor(uid, futureStart());
