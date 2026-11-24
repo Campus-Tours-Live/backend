@@ -10,6 +10,7 @@ import com.CampusToursLive.domain.guide.GuideStatus;
 import com.CampusToursLive.domain.user.AccountStatus;
 import com.CampusToursLive.domain.user.UserEntity;
 import com.CampusToursLive.domain.user.UserRepository;
+import com.CampusToursLive.web.dto.RulesActiveRequest;
 import com.CampusToursLive.web.dto.RulesReplaceRequest;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -112,6 +113,44 @@ class AvailabilityReplaceRulesAtomicityIntegrationTest {
         assertThat(stored).hasSize(1);
         assertThat(stored.get(0).getStartLocal()).isEqualTo(LocalTime.of(9, 0));
         assertThat(stored.get(0).getWindowMin()).isEqualTo(60);
+    }
+
+    @Test
+    void setDayActive_midTransactionFailure_rollsBack_noRuleFlipped() {
+        UUID guideId = seedGuide();
+        short dayOfWeek = 4; // Thursday — any fixed weekday.
+        // Two committed ACTIVE ranges on the day; a toggle-off must flip both or neither.
+        rules.saveAndFlush(activeRule(guideId, dayOfWeek, LocalTime.of(9, 0)));
+        rules.saveAndFlush(activeRule(guideId, dayOfWeek, LocalTime.of(14, 0)));
+
+        // Fails AFTER both rules were set inactive inside setDayActive's transaction.
+        doThrow(new RuntimeException("boom")).when(availabilityService).rematerialize(guideId);
+
+        assertThatThrownBy(
+                        () ->
+                                writeService.setDayActive(
+                                        guideId, new RulesActiveRequest((int) dayOfWeek, false)))
+                .isInstanceOf(RuntimeException.class);
+
+        // Rolled back as a whole: both ranges are still active.
+        assertThat(rules.findByGuideIdAndDayOfWeek(guideId, dayOfWeek))
+                .extracting(GuideAvailabilityRuleEntity::isActive)
+                .containsExactly(true, true);
+    }
+
+    private static GuideAvailabilityRuleEntity activeRule(
+            UUID guideId, short dayOfWeek, LocalTime start) {
+        GuideAvailabilityRuleEntity r = new GuideAvailabilityRuleEntity();
+        r.setId(UUID.randomUUID());
+        r.setGuideId(guideId);
+        r.setDayOfWeek(dayOfWeek);
+        r.setStartLocal(start);
+        r.setWindowMin(60);
+        r.setTimezone("America/Los_Angeles");
+        r.setEffectiveFrom(LocalDate.now(ZoneOffset.UTC));
+        r.setEffectiveTo(null);
+        r.setActive(true);
+        return r;
     }
 
     private UUID seedGuide() {

@@ -31,6 +31,12 @@ public interface GuideAvailabilityRuleRepository
             UUID guideId, short dayOfWeek);
 
     /**
+     * Every one of a guide's rules for a single day of week, active AND inactive — the set the
+     * atomic day on/off toggle ({@code POST /availability/rules/active}, CTL-60) flips together.
+     */
+    List<GuideAvailabilityRuleEntity> findByGuideIdAndDayOfWeek(UUID guideId, short dayOfWeek);
+
+    /**
      * Every distinct guide id that has at least one rule — half of the union {@link
      * OccurrenceHorizonJob} enumerates on each roll-forward tick (the other half is {@link
      * AvailabilityExceptionRepository#findDistinctGuideIds()}).

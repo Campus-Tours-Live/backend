@@ -17,6 +17,7 @@ import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
 import com.CampusToursLive.web.dto.OverrideReplaceRequest;
+import com.CampusToursLive.web.dto.RulesActiveRequest;
 import com.CampusToursLive.web.dto.RulesReplaceRequest;
 import jakarta.persistence.EntityManager;
 import java.time.Clock;
@@ -28,6 +29,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -589,6 +591,118 @@ public class AvailabilityWriteService {
 
         availabilityService.rematerialize(guideId);
         return rules.findByGuideIdAndDayOfWeekAndActiveTrue(guideId, dayOfWeek).stream()
+                .map(AvailabilityWriteService::toRuleResponse)
+                .toList();
+    }
+
+    /**
+     * Atomic day on/off toggle (CTL-60): sets EVERY rule the guide has on {@code dayOfWeek} to
+     * {@code active} in one transaction, so a multi-rule day can never end up half-flipped (the
+     * weekly editor used to send one {@code PATCH} per rule).
+     *
+     * <ul>
+     *   <li><b>Deactivate</b> never conflicts and never deletes: rules keep their ranges, so
+     *       turning the day back on restores them (deactivate-preserve).
+     *   <li><b>Activate</b> applies the same overlap rule as a single-rule update: rules in the
+     *       same coalesce group merge, while rules in DIFFERENT effective-range groups whose spans
+     *       and effective ranges both overlap conflict. The whole batch is checked in memory BEFORE
+     *       any mutation, including overlaps between two rules being activated together, so a
+     *       conflict is a 422 with zero partial writes.
+     *   <li>Already in the requested state (or no rules on that day): a no-op that returns the
+     *       day's rules unchanged, without re-materializing.
+     * </ul>
+     *
+     * <p>Runs under the per-guide advisory lock, with {@link AvailabilityService#rematerialize}
+     * joining this transaction, the same as {@link #replaceRules}: any failure rolls back every
+     * flip. Returns ALL of the day's rules afterwards (active and inactive), sorted by start time.
+     */
+    @Transactional
+    public List<AvailabilityRuleResponse> setDayActive(UUID guideId, RulesActiveRequest req) {
+        if (req == null) {
+            throw new ValidationException("Request body is required");
+        }
+        if (req.dayOfWeek() == null || req.dayOfWeek() < 0 || req.dayOfWeek() > 6) {
+            throw new ValidationException("dayOfWeek must be between 0 (Sunday) and 6 (Saturday)");
+        }
+        if (req.active() == null) {
+            throw new ValidationException("active is required");
+        }
+        short dayOfWeek = req.dayOfWeek().shortValue();
+        boolean active = req.active();
+
+        lockGuide(guideId);
+        List<GuideAvailabilityRuleEntity> dayRules =
+                rules.findByGuideIdAndDayOfWeek(guideId, dayOfWeek);
+        List<GuideAvailabilityRuleEntity> toFlip =
+                dayRules.stream().filter(r -> r.isActive() != active).toList();
+        if (toFlip.isEmpty()) {
+            return toSortedRuleResponses(dayRules);
+        }
+        if (active) {
+            // Read-only, in-memory check of the whole batch BEFORE any setter runs: a later
+            // repository query would auto-flush already-mutated entities (see coalesceActiveGroup).
+            validateDayActivation(dayOfWeek, dayRules, toFlip);
+        }
+
+        toFlip.forEach(r -> r.setActive(active));
+        rules.saveAll(toFlip);
+        if (active) {
+            // Merge each coalesce group that gained an active rule, like createRule/updateRule do.
+            toFlip.stream()
+                    .map(r -> Arrays.asList(r.getEffectiveFrom(), r.getEffectiveTo()))
+                    .distinct()
+                    .forEach(g -> coalesceActiveGroup(guideId, dayOfWeek, g.get(0), g.get(1)));
+        }
+
+        availabilityService.rematerialize(guideId);
+        return toSortedRuleResponses(rules.findByGuideIdAndDayOfWeek(guideId, dayOfWeek));
+    }
+
+    /**
+     * Rejects activating {@code toActivate} when any of them would overlap another rule that is
+     * active afterwards (already active, or activated in the same batch) in a DIFFERENT coalesce
+     * group whose effective range also overlaps: {@link #validateNoOverlap}'s rule, applied to the
+     * whole post-toggle active set at once. Same-group overlaps are allowed (they get merged).
+     */
+    private static void validateDayActivation(
+            short dayOfWeek,
+            List<GuideAvailabilityRuleEntity> dayRules,
+            List<GuideAvailabilityRuleEntity> toActivate) {
+        List<GuideAvailabilityRuleEntity> activeAfter =
+                dayRules.stream().filter(r -> r.isActive() || toActivate.contains(r)).toList();
+        for (GuideAvailabilityRuleEntity candidate : toActivate) {
+            IntervalMath.Span candidateSpan =
+                    IntervalMath.spanOf(candidate.getStartLocal(), candidate.getWindowMin());
+            for (GuideAvailabilityRuleEntity other : activeAfter) {
+                if (other == candidate
+                        || isSameCoalesceGroup(
+                                candidate.getEffectiveFrom(), candidate.getEffectiveTo(), other)) {
+                    continue;
+                }
+                IntervalMath.Span otherSpan =
+                        IntervalMath.spanOf(other.getStartLocal(), other.getWindowMin());
+                if (IntervalMath.overlaps(candidateSpan, otherSpan)
+                        && effectiveRangesOverlap(
+                                candidate.getEffectiveFrom(),
+                                candidate.getEffectiveTo(),
+                                other.getEffectiveFrom(),
+                                other.getEffectiveTo())) {
+                    throw new ValidationException(
+                            "Can't turn "
+                                    + dayLabel(dayOfWeek)
+                                    + " on: two of its ranges overlap and cover different dates."
+                                    + " Edit that day's hours instead.");
+                }
+            }
+        }
+    }
+
+    private static List<AvailabilityRuleResponse> toSortedRuleResponses(
+            List<GuideAvailabilityRuleEntity> dayRules) {
+        return dayRules.stream()
+                .sorted(
+                        Comparator.comparing(GuideAvailabilityRuleEntity::getStartLocal)
+                                .thenComparing(GuideAvailabilityRuleEntity::getEffectiveFrom))
                 .map(AvailabilityWriteService::toRuleResponse)
                 .toList();
     }

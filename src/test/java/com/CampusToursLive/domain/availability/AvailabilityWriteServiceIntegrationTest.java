@@ -30,6 +30,7 @@ import com.CampusToursLive.web.dto.AvailabilityRuleResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsResponse;
 import com.CampusToursLive.web.dto.GuideBookingSettingsUpdateRequest;
 import com.CampusToursLive.web.dto.OverrideReplaceRequest;
+import com.CampusToursLive.web.dto.RulesActiveRequest;
 import com.CampusToursLive.web.dto.RulesReplaceRequest;
 import jakarta.persistence.EntityManager;
 import java.time.Clock;
@@ -1317,6 +1318,174 @@ class AvailabilityWriteServiceIntegrationTest {
                 .extracting(
                         AvailabilityRuleResponse::startLocal, AvailabilityRuleResponse::windowMin)
                 .containsExactly(tuple("09:00", 120));
+    }
+
+    // ---------------------------------------------------------------------
+    // setDayActive — atomic day on/off toggle (CTL-60).
+    // ---------------------------------------------------------------------
+
+    /** Creates an active rule on {@code dow} through the real write path; returns its id. */
+    private UUID rule(int dow, String start, int windowMin, LocalDate from, LocalDate to) {
+        return UUID.fromString(
+                writeService
+                        .createRule(
+                                actingUser(guideAUserId),
+                                new AvailabilityRuleRequest(
+                                        dow,
+                                        start,
+                                        windowMin,
+                                        from == null ? null : from.toString(),
+                                        to == null ? null : to.toString(),
+                                        null))
+                        .id());
+    }
+
+    private void deactivate(UUID ruleId) {
+        writeService.updateRule(
+                actingUser(guideAUserId),
+                ruleId,
+                new AvailabilityRuleRequest(null, null, null, null, null, false));
+    }
+
+    /** (startLocal, active) for every rule on {@code dow}, by start time. */
+    private List<org.assertj.core.groups.Tuple> dayState(int dow) {
+        return rules.findByGuideIdAndDayOfWeek(guideAId, (short) dow).stream()
+                .sorted(java.util.Comparator.comparing(GuideAvailabilityRuleEntity::getStartLocal))
+                .map(r -> tuple(r.getStartLocal().toString(), r.getWindowMin(), r.isActive()))
+                .toList();
+    }
+
+    @Test
+    void setDayActive_off_flipsEveryRuleOfThatDay_keepsRanges_andOtherDays() {
+        int otherDow = (TODAY_DOW + 1) % 7;
+        rule(TODAY_DOW, "09:00", 60, null, null);
+        rule(TODAY_DOW, "14:00", 60, null, null);
+        rule(otherDow, "08:00", 60, null, null);
+
+        List<AvailabilityRuleResponse> result =
+                writeService.setDayActive(guideAId, new RulesActiveRequest(TODAY_DOW, false));
+
+        // Both ranges are kept (never deleted), just inactive — and both flipped together.
+        assertThat(dayState(TODAY_DOW))
+                .containsExactly(tuple("09:00", 60, false), tuple("14:00", 60, false));
+        assertThat(result)
+                .extracting(AvailabilityRuleResponse::startLocal, AvailabilityRuleResponse::active)
+                .containsExactly(tuple("09:00", false), tuple("14:00", false));
+        assertThat(dayState(otherDow)).containsExactly(tuple("08:00", 60, true));
+    }
+
+    @Test
+    void setDayActive_on_restoresEveryRuleOfThatDay_andRematerializes() {
+        rule(TODAY_DOW, "09:00", 60, null, null);
+        rule(TODAY_DOW, "14:00", 60, null, null);
+        writeService.setDayActive(guideAId, new RulesActiveRequest(TODAY_DOW, false));
+        occurrences.deleteAll(); // prove the "on" write re-materializes
+
+        writeService.setDayActive(guideAId, new RulesActiveRequest(TODAY_DOW, true));
+
+        assertThat(dayState(TODAY_DOW))
+                .containsExactly(tuple("09:00", 60, true), tuple("14:00", 60, true));
+        assertThat(occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId)).isNotEmpty();
+    }
+
+    @Test
+    void setDayActive_on_conflictWithAnActiveRule_isRejected_withNoPartialWrites() {
+        // B covers different (but overlapping) dates than A and overlaps A in time; it is inactive,
+        // so A could be created. C is an unrelated inactive range that WOULD activate cleanly.
+        UUID b = rule(TODAY_DOW, "10:00", 120, FIXED_TODAY, FIXED_TODAY.plusDays(30));
+        deactivate(b);
+        rule(TODAY_DOW, "09:00", 120, null, null); // A, active
+        UUID c = rule(TODAY_DOW, "15:00", 60, null, null);
+        deactivate(c);
+
+        assertThatThrownBy(
+                        () ->
+                                writeService.setDayActive(
+                                        guideAId, new RulesActiveRequest(TODAY_DOW, true)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("overlap");
+
+        // All or nothing: C was NOT activated even though only B conflicts.
+        assertThat(dayState(TODAY_DOW))
+                .containsExactly(
+                        tuple("09:00", 120, true),
+                        tuple("10:00", 120, false),
+                        tuple("15:00", 60, false));
+    }
+
+    @Test
+    void setDayActive_on_conflictBetweenTwoRulesActivatedTogether_isRejected() {
+        // Both inactive, different overlapping date ranges, overlapping times: each is fine on its
+        // own, but turning the day on would make them overlap each other.
+        UUID b = rule(TODAY_DOW, "10:00", 120, FIXED_TODAY, FIXED_TODAY.plusDays(30));
+        deactivate(b);
+        UUID a = rule(TODAY_DOW, "09:00", 120, null, null);
+        deactivate(a);
+
+        assertThatThrownBy(
+                        () ->
+                                writeService.setDayActive(
+                                        guideAId, new RulesActiveRequest(TODAY_DOW, true)))
+                .isInstanceOf(ValidationException.class);
+
+        assertThat(dayState(TODAY_DOW))
+                .containsExactly(tuple("09:00", 120, false), tuple("10:00", 120, false));
+    }
+
+    @Test
+    void setDayActive_on_sameDatesOverlap_mergesLikeASingleRuleUpdate() {
+        // Same coalesce group (same effective dates): overlapping ranges merge instead of 422.
+        UUID first = rule(TODAY_DOW, "09:00", 60, null, null);
+        deactivate(first);
+        UUID second = rule(TODAY_DOW, "09:30", 90, null, null); // first is inactive: no merge yet
+        deactivate(second);
+
+        List<AvailabilityRuleResponse> result =
+                writeService.setDayActive(guideAId, new RulesActiveRequest(TODAY_DOW, true));
+
+        assertThat(dayState(TODAY_DOW)).containsExactly(tuple("09:00", 120, true));
+        assertThat(result)
+                .extracting(
+                        AvailabilityRuleResponse::startLocal, AvailabilityRuleResponse::windowMin)
+                .containsExactly(tuple("09:00", 120));
+    }
+
+    @Test
+    void setDayActive_alreadyInState_orEmptyDay_isANoOp() {
+        rule(TODAY_DOW, "09:00", 60, null, null);
+        occurrences.deleteAll();
+
+        List<AvailabilityRuleResponse> same =
+                writeService.setDayActive(guideAId, new RulesActiveRequest(TODAY_DOW, true));
+        List<AvailabilityRuleResponse> empty =
+                writeService.setDayActive(
+                        guideAId, new RulesActiveRequest((TODAY_DOW + 3) % 7, false));
+
+        assertThat(same).extracting(AvailabilityRuleResponse::active).containsExactly(true);
+        assertThat(empty).isEmpty();
+        // Nothing changed, so nothing was re-materialized.
+        assertThat(occurrences.findByGuideIdOrderByDuringStartAtAsc(guideAId)).isEmpty();
+    }
+
+    @Test
+    void setDayActive_invalidInput_isRejected() {
+        assertThatThrownBy(() -> writeService.setDayActive(guideAId, null))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(
+                        () -> writeService.setDayActive(guideAId, new RulesActiveRequest(7, true)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("dayOfWeek");
+        assertThatThrownBy(
+                        () ->
+                                writeService.setDayActive(
+                                        guideAId, new RulesActiveRequest(null, true)))
+                .isInstanceOf(ValidationException.class);
+        assertThatThrownBy(
+                        () ->
+                                writeService.setDayActive(
+                                        guideAId, new RulesActiveRequest(TODAY_DOW, null)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("active");
     }
 
     // ---------------------------------------------------------------------
