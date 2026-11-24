@@ -19,19 +19,28 @@ public interface GuideProfileRepository extends JpaRepository<GuideProfileEntity
      * <p><b>Locks the row first (CTL-139).</b> Under READ COMMITTED a single {@code UPDATE … SET x
      * = (SELECT … FROM reviews)} that waits on a concurrent writer's row lock re-applies with its
      * original statement snapshot, so its sub-selects miss the other transaction's review and the
-     * aggregate undercounts. Taking {@code FOR UPDATE} in a separate statement means the recompute
-     * statement starts only after any concurrent review writer has committed, so it sees that
-     * review. Lock order is always guide then offering (both review writers recompute in that
-     * order), so two writers cannot deadlock on these rows.
+     * aggregate undercounts. Taking a row lock ({@code FOR NO KEY UPDATE}, see {@link
+     * #lockForRatingRecompute}) in a separate statement means the recompute statement starts only
+     * after any concurrent review writer has committed, so it sees that review. Lock order is
+     * always guide then offering (both review writers recompute in that order), and the lock mode
+     * does not conflict with the foreign-key locks the review INSERT already holds, so two writers
+     * cannot deadlock on these rows.
      */
     default void recomputeRatingAggregate(UUID guideId) {
         lockForRatingRecompute(guideId);
         updateRatingAggregate(guideId);
     }
 
-    /** Row lock for {@link #recomputeRatingAggregate}; not meant to be called on its own. */
+    /**
+     * Row lock for {@link #recomputeRatingAggregate}; not meant to be called on its own. {@code FOR
+     * NO KEY UPDATE}, not {@code FOR UPDATE}: the review INSERT that precedes the recompute already
+     * holds a foreign-key {@code KEY SHARE} lock on this row, and {@code FOR UPDATE} conflicts with
+     * another writer's {@code KEY SHARE}, so two writers that both inserted first would deadlock.
+     * {@code FOR NO KEY UPDATE} is compatible with {@code KEY SHARE} yet still conflicts with
+     * itself, so the recomputes are still serialized (CTL-139 review follow-up).
+     */
     @Query(
-            value = "SELECT 1 FROM guide_profiles WHERE id = :guideId FOR UPDATE",
+            value = "SELECT 1 FROM guide_profiles WHERE id = :guideId FOR NO KEY UPDATE",
             nativeQuery = true)
     List<Integer> lockForRatingRecompute(@Param("guideId") UUID guideId);
 

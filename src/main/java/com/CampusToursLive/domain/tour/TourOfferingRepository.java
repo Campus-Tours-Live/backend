@@ -29,9 +29,16 @@ public interface TourOfferingRepository extends JpaRepository<TourOfferingEntity
         updateRatingAggregate(offeringId);
     }
 
-    /** Row lock for {@link #recomputeRatingAggregate}; not meant to be called on its own. */
+    /**
+     * Row lock for {@link #recomputeRatingAggregate}; not meant to be called on its own. {@code FOR
+     * NO KEY UPDATE}, not {@code FOR UPDATE}: the review INSERT that precedes the recompute already
+     * holds a foreign-key {@code KEY SHARE} lock on this row, and {@code FOR UPDATE} conflicts with
+     * another writer's {@code KEY SHARE}, so two writers that both inserted first would deadlock.
+     * {@code FOR NO KEY UPDATE} is compatible with {@code KEY SHARE} yet still conflicts with
+     * itself, so the recomputes are still serialized (CTL-139 review follow-up).
+     */
     @Query(
-            value = "SELECT 1 FROM tour_offerings WHERE id = :offeringId FOR UPDATE",
+            value = "SELECT 1 FROM tour_offerings WHERE id = :offeringId FOR NO KEY UPDATE",
             nativeQuery = true)
     List<Integer> lockForRatingRecompute(@Param("offeringId") UUID offeringId);
 
