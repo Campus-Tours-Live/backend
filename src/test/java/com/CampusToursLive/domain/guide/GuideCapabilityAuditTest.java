@@ -38,6 +38,7 @@ import com.CampusToursLive.web.dto.TourOfferingResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Nested;
@@ -135,6 +136,7 @@ class GuideCapabilityAuditTest {
             UUID uid = UUID.randomUUID();
             UUID gid = UUID.randomUUID();
             UUID oid = UUID.randomUUID();
+            UUID universityId = UUID.randomUUID();
             GuideProfileEntity verified = new GuideProfileEntity();
             verified.setId(gid);
             verified.setStatus(GuideStatus.VERIFIED);
@@ -142,7 +144,13 @@ class GuideCapabilityAuditTest {
             TourOfferingEntity draft = new TourOfferingEntity();
             draft.setId(oid);
             draft.setGuideId(gid);
+            draft.setUniversityId(universityId);
             draft.setStatus(TourStatus.DRAFT);
+            GuideUniversityEntity membership = new GuideUniversityEntity();
+            membership.setGuideProfileId(gid);
+            membership.setUniversityId(universityId);
+            membership.setVerificationStatus(GuideVerificationStatus.VERIFIED);
+            when(guideUniversities.findByGuideProfileId(gid)).thenReturn(List.of(membership));
             when(offerings.findByIdAndGuideId(oid, gid)).thenReturn(Optional.of(draft));
             when(offerings.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
