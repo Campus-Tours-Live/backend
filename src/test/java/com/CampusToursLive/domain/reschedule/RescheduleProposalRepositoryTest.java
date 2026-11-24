@@ -165,6 +165,39 @@ class RescheduleProposalRepositoryTest {
         assertThat(proposals.findByBookingIdOrderByCreatedAtDesc(booking.getId())).hasSize(2);
     }
 
+    @Test
+    void expirePastDue_expiresOnlyPastDuePending_andFreesTheActiveSlot() {
+        Instant now = Instant.now();
+        RescheduleProposalEntity overdue = pending(BookingActor.PARTICIPANT, booking.getId());
+        overdue.setExpiresAt(now.minus(1, ChronoUnit.MINUTES));
+        proposals.saveAndFlush(overdue);
+        RescheduleProposalEntity declined = pending(BookingActor.GUIDE, booking.getId());
+        declined.setStatus(RescheduleStatus.DECLINED);
+        declined.setExpiresAt(now.minus(1, ChronoUnit.HOURS)); // past due, but already resolved
+        proposals.saveAndFlush(declined);
+
+        assertThat(proposals.expirePastDue(now)).isEqualTo(1);
+
+        assertThat(proposals.findById(overdue.getId()).orElseThrow().getStatus())
+                .isEqualTo(RescheduleStatus.EXPIRED);
+        assertThat(proposals.findById(declined.getId()).orElseThrow().getStatus())
+                .isEqualTo(RescheduleStatus.DECLINED);
+        // The expired row left uq_reschedule_active, so a fresh pending proposal is allowed.
+        RescheduleProposalEntity next =
+                proposals.saveAndFlush(pending(BookingActor.PARTICIPANT, booking.getId()));
+        assertThat(next.getId()).isNotNull();
+    }
+
+    @Test
+    void expirePastDue_leavesAPendingProposalThatIsNotYetDue() {
+        RescheduleProposalEntity live = pending(BookingActor.PARTICIPANT, booking.getId());
+        proposals.saveAndFlush(live); // expires in 2 days
+
+        assertThat(proposals.expirePastDue(Instant.now())).isZero();
+        assertThat(proposals.findById(live.getId()).orElseThrow().getStatus())
+                .isEqualTo(RescheduleStatus.PENDING_COUNTERPARTY);
+    }
+
     private static RescheduleProposalEntity pending(BookingActor by, UUID bookingId) {
         RescheduleProposalEntity p = new RescheduleProposalEntity();
         p.setId(UUID.randomUUID());

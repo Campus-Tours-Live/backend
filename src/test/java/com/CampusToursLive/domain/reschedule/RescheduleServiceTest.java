@@ -154,6 +154,55 @@ class RescheduleServiceTest {
         assertThrows(ConflictException.class, () -> propose(null));
     }
 
+    @Test
+    void propose_pastDuePendingProposal_isExpiredFirst_thenANewOneIsCreated() {
+        // CTL-52 lazy expiry: an overdue pending proposal (even an identical replay) must neither
+        // be returned nor block; it is persisted as EXPIRED before the new one is inserted.
+        ready();
+        RescheduleProposalEntity overdue = pending();
+        overdue.setExpiresAt(Instant.now().minus(1, ChronoUnit.MINUTES));
+        when(proposals.findByBookingIdAndStatus(bookingId, RescheduleStatus.PENDING_COUNTERPARTY))
+                .thenReturn(Optional.of(overdue));
+
+        RescheduleProposalResponse created = propose(null);
+
+        assertNotEquals(overdue.getId().toString(), created.id());
+        assertEquals("PENDING_COUNTERPARTY", created.status());
+        ArgumentCaptor<RescheduleProposalEntity> saved =
+                ArgumentCaptor.forClass(RescheduleProposalEntity.class);
+        verify(proposals, times(2)).saveAndFlush(saved.capture());
+        assertSame(overdue, saved.getAllValues().get(0));
+        assertEquals(RescheduleStatus.EXPIRED, overdue.getStatus());
+        assertEquals(
+                RescheduleStatus.PENDING_COUNTERPARTY, saved.getAllValues().get(1).getStatus());
+    }
+
+    @Test
+    void propose_pendingProposalNotYetDue_stillBlocksOrReplays() {
+        ready();
+        RescheduleProposalEntity live = pending();
+        live.setExpiresAt(Instant.now().plus(1, ChronoUnit.MINUTES));
+        when(proposals.findByBookingIdAndStatus(bookingId, RescheduleStatus.PENDING_COUNTERPARTY))
+                .thenReturn(Optional.of(live));
+
+        assertEquals(live.getId().toString(), propose(null).id());
+        assertEquals(RescheduleStatus.PENDING_COUNTERPARTY, live.getStatus());
+        verify(proposals, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void expirePastDueProposals_bulkExpiresAsOfNow() {
+        when(proposals.expirePastDue(any())).thenReturn(3);
+        Instant before = Instant.now();
+
+        assertEquals(3, service.expirePastDueProposals());
+
+        ArgumentCaptor<Instant> now = ArgumentCaptor.forClass(Instant.class);
+        verify(proposals).expirePastDue(now.capture());
+        assertFalse(now.getValue().isBefore(before));
+        assertFalse(now.getValue().isAfter(Instant.now()));
+    }
+
     private void ready() {
         stubBooking(confirmed());
         stubSlotOk();
