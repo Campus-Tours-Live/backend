@@ -120,4 +120,20 @@ public interface BookingRepository extends JpaRepository<BookingEntity, UUID> {
                             + ")",
             nativeQuery = true)
     long countCompletedWithoutReview(@Param("userId") UUID userId);
+
+    /**
+     * CTL-141: a bounded batch of bookings whose tour is over (CONFIRMED or IN_PROGRESS, scheduled
+     * end at or before {@code cutoff}), row-locked for the calling transaction. {@code SKIP LOCKED}
+     * makes concurrent schedulers split the work instead of waiting, and skips a row a guide action
+     * is updating right now (it is picked up on the next tick if still due). No-show, cancelled and
+     * other terminal statuses never match.
+     */
+    @Query(
+            value =
+                    "SELECT * FROM bookings WHERE status IN ('CONFIRMED', 'IN_PROGRESS') "
+                            + "AND scheduled_end_at <= :cutoff "
+                            + "ORDER BY scheduled_end_at, id LIMIT :limit FOR UPDATE SKIP LOCKED",
+            nativeQuery = true)
+    List<BookingEntity> claimEndedBookings(
+            @Param("cutoff") Instant cutoff, @Param("limit") int limit);
 }
