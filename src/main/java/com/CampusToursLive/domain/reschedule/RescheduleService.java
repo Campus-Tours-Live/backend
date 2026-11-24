@@ -78,6 +78,13 @@ public class RescheduleService {
         Optional<RescheduleProposalEntity> active =
                 proposals.findByBookingIdAndStatus(
                         bookingId, RescheduleStatus.PENDING_COUNTERPARTY);
+        if (active.isPresent() && !active.get().getExpiresAt().isAfter(now)) {
+            // CTL-52 lazy expiry: a past-due proposal is EXPIRED, not pending. Persist that first
+            // (flushed, so uq_reschedule_active no longer sees it) and carry on as if none was
+            // pending; it must neither replay nor block a new proposal.
+            expire(active.get());
+            active = Optional.empty();
+        }
         if (active.isPresent()) {
             RescheduleProposalEntity existing = active.get();
             if (existing.getRequestedBy() == requestedBy
@@ -105,6 +112,21 @@ public class RescheduleService {
             throw ConflictException.rescheduleAlreadyPending();
         }
         return toResponse(p);
+    }
+
+    /**
+     * Scheduled sweep (CTL-52): marks every pending proposal past its {@code expiresAt} as {@code
+     * EXPIRED}, so the board reflects expiry without waiting for a read to trigger it. Returns how
+     * many expired. Bookings are never touched; see {@link RescheduleExpiryJob}.
+     */
+    @Transactional
+    public int expirePastDueProposals() {
+        return proposals.expirePastDue(Instant.now());
+    }
+
+    private void expire(RescheduleProposalEntity proposal) {
+        proposal.setStatus(RescheduleStatus.EXPIRED);
+        proposals.saveAndFlush(proposal);
     }
 
     private BookingActor resolveActor(UUID callerUserId, BookingEntity booking) {
