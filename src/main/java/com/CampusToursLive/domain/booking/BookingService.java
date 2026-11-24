@@ -37,7 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Participant booking domain: dashboard reads (CTL-13), the create/cancel writes (CTL-19), and the
  * booking cart (CTL-31 — DRAFT bookings assembled item by item, submitted atomically at checkout).
- * Guide accept/decline, reschedule proposals, and payment integration are still deferred.
+ * Guide accept/decline, payment, and reschedule resolve are still deferred (propose is CTL-50).
  *
  * <p>The {@code guideId} on both {@code BookingEntity} and {@code TourOfferingEntity} is the {@code
  * guide_profiles.id} primary key, not the user id — resolving to a display name requires a two-step
@@ -69,12 +69,8 @@ public class BookingService {
             List.of(BookingStatus.PENDING_PAYMENT_AUTH, BookingStatus.PAYMENT_ACTION_REQUIRED);
 
     /**
-     * Statuses that hold a slot — mirrors the WHERE clause of the DB exclusion constraints.
-     * Package-private (not {@code private}) so {@link SlotGenerationService} can subtract the SAME
-     * set of held bookings from candidate slots — a CONFIRMED-only view (like {@link
-     * BookingRepository
-     * #findByGuideIdAndStatusAndScheduledStartAtGreaterThanEqualOrderByScheduledStartAtAsc}, used
-     * by Task 7) would under-count what actually occupies a guide's calendar.
+     * Statuses that hold a slot (DB exclusion mirrors). Package-private for {@link
+     * SlotGenerationService}; other packages use {@link #slotHoldingStatuses()}.
      */
     static final List<BookingStatus> SLOT_HOLDING_STATUSES =
             List.of(
@@ -83,6 +79,10 @@ public class BookingService {
                     BookingStatus.PAYMENT_ACTION_REQUIRED,
                     BookingStatus.CONFIRMED,
                     BookingStatus.IN_PROGRESS);
+
+    public static List<BookingStatus> slotHoldingStatuses() {
+        return SLOT_HOLDING_STATUSES;
+    }
 
     /** Statuses a participant may cancel from (before the tour starts). */
     private static final List<BookingStatus> PARTICIPANT_CANCELLABLE_STATUSES =
@@ -205,9 +205,13 @@ public class BookingService {
             // the audit row's FK needs the booking row in place, and flushing here is what
             // lets this catch actually see an exclusion-constraint race.
             bookings.saveAndFlush(b);
-        } catch (DataIntegrityViolationException raceLost) {
-            // A concurrent request won the slot between our pre-check and the insert —
-            // the exclusion constraint is the source of truth.
+        } catch (DataIntegrityViolationException ex) {
+            // A concurrent request won the slot between our pre-check and the insert — the
+            // exclusion constraint is the source of truth. Only THAT is a slot race; any other
+            // integrity violation propagates to the generic handler rather than being mislabelled.
+            if (!isSlotConflict(ex)) {
+                throw ex;
+            }
             throw new ValidationException(
                     "That time slot was just taken — please pick another time");
         }
@@ -345,7 +349,12 @@ public class BookingService {
         }
         try {
             bookings.saveAllAndFlush(items);
-        } catch (DataIntegrityViolationException raceLost) {
+        } catch (DataIntegrityViolationException ex) {
+            // Only an exclusion-constraint race is a "slot taken" case; other integrity violations
+            // propagate to the generic handler rather than being mislabelled (CTL-36).
+            if (!isSlotConflict(ex)) {
+                throw ex;
+            }
             throw new ValidationException(
                     "One or more time slots were just taken — please review your cart");
         }
@@ -389,8 +398,7 @@ public class BookingService {
         b.setAcceptanceModeSnap(AcceptanceMode.MANUAL);
         b.setScheduledStartAt(start);
         b.setScheduledEndAt(end);
-        b.setReservedStartAt(start.minus(Duration.ofMinutes(guideSettings.getBufferBeforeMin())));
-        b.setReservedEndAt(end.plus(Duration.ofMinutes(guideSettings.getBufferAfterMin())));
+        applyReservedInterval(b, guideSettings);
         // Price snapshot — no payments yet, so fees and taxes are zero and the guide
         // amount equals the total (see class javadoc).
         b.setBasePriceCents(offering.getPriceCents());
@@ -425,6 +433,35 @@ public class BookingService {
     private static void promoteToPending(BookingEntity b) {
         b.setStatus(BookingStatus.PENDING_GUIDE_ACCEPTANCE);
         b.setGuideResponseDeadlineAt(Instant.now().plus(GUIDE_RESPONSE_WINDOW));
+    }
+
+    /**
+     * Derives the guide-reserved interval from the booking's SCHEDULED interval and the guide's
+     * current buffers (CTL-36). The reserved bounds are ALWAYS a pure function of scheduledStart /
+     * scheduledEnd and the buffers — never set independently — so the create path ({@link
+     * #buildDraftBooking}) and the checkout re-snapshot ({@link #revalidateCartItem}) cannot drift.
+     * Requires scheduledStart and scheduledEnd to already be set on {@code b}.
+     */
+    private static void applyReservedInterval(
+            BookingEntity b, GuideBookingSettingsEntity settings) {
+        b.setReservedStartAt(
+                b.getScheduledStartAt().minus(Duration.ofMinutes(settings.getBufferBeforeMin())));
+        b.setReservedEndAt(
+                b.getScheduledEndAt().plus(Duration.ofMinutes(settings.getBufferAfterMin())));
+    }
+
+    /**
+     * Is this integrity violation the guide/participant overlap EXCLUDE constraint firing — i.e. a
+     * genuine slot race — rather than some other constraint (a booking_number UNIQUE collision, an
+     * FK, a NOT NULL)? Only the former should be re-labelled as a friendly "slot taken" 422; the
+     * rest must surface as the generic 500 so they are not silently mislabelled (CTL-36).
+     */
+    private static boolean isSlotConflict(DataIntegrityViolationException ex) {
+        Throwable cause = ex.getMostSpecificCause();
+        String message = cause != null ? cause.getMessage() : null;
+        return message != null
+                && (message.contains("excl_guide_no_overlap")
+                        || message.contains("excl_participant_no_overlap"));
     }
 
     /** Friendly 422s for conflicts with slot-holding bookings (DB constraints are the backstop). */
@@ -531,10 +568,10 @@ public class BookingService {
         b.setCurrency(offering.getCurrency());
         Instant end = b.getScheduledStartAt().plus(Duration.ofMinutes(offering.getDurationMin()));
         b.setScheduledEndAt(end);
-        b.setReservedStartAt(
-                b.getScheduledStartAt()
-                        .minus(Duration.ofMinutes(guideSettings.getBufferBeforeMin())));
-        b.setReservedEndAt(end.plus(Duration.ofMinutes(guideSettings.getBufferAfterMin())));
+        // Recompute the reserved interval from the (possibly re-snapshotted) scheduled interval and
+        // the guide's CURRENT buffers — scheduledStart is immutable at checkout, but scheduledEnd
+        // and both buffers can change, so reservedStart AND reservedEnd are both re-derived here.
+        applyReservedInterval(b, guideSettings);
 
         // CTL-54 Task 6: re-check containment at checkout — the guide's availability can change
         // (or the re-snapshot above can change the scheduled end) between add-to-cart and

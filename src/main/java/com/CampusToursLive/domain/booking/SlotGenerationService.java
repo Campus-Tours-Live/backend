@@ -8,6 +8,7 @@ import com.CampusToursLive.domain.tour.TourOfferingEntity;
 import com.CampusToursLive.domain.tour.TourOfferingRepository;
 import com.CampusToursLive.error.NotFoundException;
 import com.CampusToursLive.error.ValidationException;
+import com.CampusToursLive.web.dto.OfferingAvailabilityPreviewResponse;
 import com.CampusToursLive.web.dto.SlotResponse;
 import java.time.Clock;
 import java.time.Duration;
@@ -42,6 +43,9 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class SlotGenerationService {
+
+    private static final int DEFAULT_PREVIEW_WINDOW_DAYS = 14;
+    private static final int MAX_PREVIEW_SAMPLE_LIMIT = 10;
 
     private final TourOfferingRepository offerings;
     private final GuideAvailabilityOccurrenceRepository occurrences;
@@ -92,15 +96,29 @@ public class SlotGenerationService {
                 offerings
                         .findDiscoverableById(offeringId)
                         .orElseThrow(() -> new NotFoundException("Tour not found"));
-        UUID guideId = offering.getGuideId();
-        Duration slotLength = Duration.ofMinutes(offering.getDurationMin());
-
         // Loaded ONCE up front and threaded through every step below: it drives the guide's zone
         // (for the from/to filter), the buffer math (subtractHeldBookings) and the notice/advance
         // window (applyNoticeAndAdvanceWindow), so there is exactly one settings read per request
         // and no risk of the steps seeing a guide's settings change mid-computation.
         GuideBookingSettingsEntity guideSettings =
-                settings.findByGuideId(guideId).orElseGet(GuideBookingSettingsEntity::new);
+                settings.findByGuideId(offering.getGuideId())
+                        .orElseGet(GuideBookingSettingsEntity::new);
+
+        return getBookableSlots(offering, guideSettings, from, to);
+    }
+
+    /**
+     * Shared slot pipeline for the participant read and the public preview. The caller has already
+     * loaded one discoverable offering plus its settings, so both paths use an identical timezone
+     * and policy snapshot without issuing a second settings read.
+     */
+    private List<SlotResponse> getBookableSlots(
+            TourOfferingEntity offering,
+            GuideBookingSettingsEntity guideSettings,
+            String from,
+            String to) {
+        UUID guideId = offering.getGuideId();
+        Duration slotLength = Duration.ofMinutes(offering.getDurationMin());
 
         // Zone resolution here is settings-or-default, deliberately WITHOUT the rules-mode
         // heuristic fallback AvailabilityReadService.resolveGuideZone carries. That
@@ -135,6 +153,48 @@ public class SlotGenerationService {
         candidates = applyNoticeAndAdvanceWindow(candidates, guideSettings);
 
         return candidates.stream().map(s -> new SlotResponse(s.start(), s.end())).toList();
+    }
+
+    /**
+     * Lightweight public preview for marketplace/detail UI.
+     *
+     * <p>This intentionally reuses the same internal slot pipeline rather than carrying a second
+     * partial slot engine. The preview is a read model over exactly the same slots a participant
+     * can later book after sign-in, so the UI cannot advertise a time that would be rejected by
+     * booking creation because of buffers, held bookings, notice, or max-advance rules.
+     */
+    @Transactional(readOnly = true)
+    public OfferingAvailabilityPreviewResponse getAvailabilityPreview(
+            UUID offeringId, String from, String to, int sampleLimit) {
+        TourOfferingEntity offering =
+                offerings
+                        .findDiscoverableById(offeringId)
+                        .orElseThrow(() -> new NotFoundException("Tour not found"));
+        GuideBookingSettingsEntity guideSettings =
+                settings.findByGuideId(offering.getGuideId())
+                        .orElseGet(GuideBookingSettingsEntity::new);
+        int normalizedLimit = Math.max(0, Math.min(sampleLimit, MAX_PREVIEW_SAMPLE_LIMIT));
+        String effectiveFrom = from;
+        String effectiveTo = to;
+        if (effectiveFrom == null && effectiveTo == null) {
+            // getBookableSlots parses dates at the guide's local midnight. Derive the default
+            // dates in that same zone: using the UTC clock date near midnight would otherwise
+            // skip the guide's still-current local evening.
+            LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(guideSettings.getTimezone())));
+            effectiveFrom = today.toString();
+            effectiveTo = today.plusDays(DEFAULT_PREVIEW_WINDOW_DAYS).toString();
+        }
+
+        List<SlotResponse> slots =
+                getBookableSlots(offering, guideSettings, effectiveFrom, effectiveTo);
+        List<SlotResponse> sample = slots.stream().limit(normalizedLimit).toList();
+        SlotResponse next = slots.isEmpty() ? null : slots.get(0);
+        return new OfferingAvailabilityPreviewResponse(
+                !slots.isEmpty(),
+                slots.size(),
+                next == null ? null : next.startAt(),
+                next == null ? null : next.endAt(),
+                sample);
     }
 
     // ---------------------------------------------------------------------------
