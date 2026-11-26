@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -59,7 +60,18 @@ class GuideOfferingControllerTest {
         UserEntity u = user();
         TourOfferingResponse row =
                 new TourOfferingResponse(
-                        "o1", "Campus walk", null, null, null, null, null, null, null, null);
+                        "o1",
+                        "Campus walk",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
         when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
         when(offerings.listOwn(u)).thenReturn(List.of(row));
 
@@ -151,7 +163,9 @@ class GuideOfferingControllerTest {
                         null,
                         null,
                         null,
-                        null);
+                        null,
+                        List.of("en-US"),
+                        List.of());
         when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
         when(offerings.create(eq(u), any())).thenReturn(o);
 
@@ -179,12 +193,49 @@ class GuideOfferingControllerTest {
                         null,
                         null,
                         null,
-                        null);
+                        null,
+                        List.of("en-US"),
+                        List.of());
         when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
         when(offerings.activate(u, id)).thenReturn(o);
 
         mvc.perform(post("/guide/offerings/{id}/activate", id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"));
+    }
+
+    @Test
+    void lifecycleRoutes_returnUpdatedOfferings() throws Exception {
+        UserEntity u = user();
+        UUID id = UUID.randomUUID();
+        TourOfferingResponse paused =
+                new TourOfferingResponse(
+                        id.toString(),
+                        "Campus walk",
+                        "campus-walk",
+                        "PAUSED",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of());
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(offerings.update(eq(u), eq(id), any())).thenReturn(paused);
+        when(offerings.pause(u, id)).thenReturn(paused);
+        when(offerings.retire(u, id)).thenReturn(paused);
+        when(offerings.duplicate(u, id)).thenReturn(paused);
+
+        mvc.perform(
+                        patch("/guide/offerings/{id}", id)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"title\":\"Campus walk\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PAUSED"));
+        mvc.perform(post("/guide/offerings/{id}/pause", id)).andExpect(status().isOk());
+        mvc.perform(post("/guide/offerings/{id}/retire", id)).andExpect(status().isOk());
+        mvc.perform(post("/guide/offerings/{id}/duplicate", id)).andExpect(status().isOk());
     }
 }
