@@ -73,6 +73,17 @@ public final class ConflictException extends RuntimeException implements CodedPr
                 Map.of("role", role));
     }
 
+    /**
+     * The booking already has a review — one review per booking is enforced by {@code
+     * UNIQUE(booking_id)}. Carries the booking id so the client can locate the existing review.
+     */
+    public static ConflictException reviewAlreadyExists(String bookingId) {
+        return new ConflictException(
+                "A review already exists for this booking",
+                "REVIEW_ALREADY_EXISTS",
+                Map.of("bookingId", bookingId));
+    }
+
     /** Only a PENDING guide application can be approved or rejected. */
     public static ConflictException guideApplicationNotPending(String currentStatus) {
         return new ConflictException(
