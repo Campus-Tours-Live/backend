@@ -449,6 +449,18 @@ envelope; errors are `application/problem+json`.
 | `GET` `PATCH` | `/guide/profile`                  | Read / upsert the guide profile (+ submit application)    |
 | `GET` `POST`  | `/guide/offerings`                | List / create a guide's tour offerings                    |
 | `POST`        | `/guide/offerings/{id}/activate`  | Publish a draft offering (requires an APPROVED guide)     |
+| `PATCH`       | `/guide/offerings/{id}`           | Edit an owned DRAFT or PAUSED offering                    |
+| `POST`        | `/guide/offerings/{id}/pause`     | Unpublish an owned ACTIVE offering                       |
+| `POST`        | `/guide/offerings/{id}/retire`    | Archive an owned offering                                |
+| `POST`        | `/guide/offerings/{id}/duplicate` | Copy an owned offering into a new draft                  |
+| `GET`         | `/guide/bookings`                 | Guide inbox (`?filter=pending\|upcoming\|past\|all`)      |
+| `GET`         | `/guide/bookings/pending-actions` | Pending acceptance count for the guide dashboard          |
+| `GET`         | `/guide/bookings/{id}`            | One booking with status history                           |
+| `POST`        | `/guide/bookings/{id}/accept`     | Accept a pending booking request                          |
+| `POST`        | `/guide/bookings/{id}/decline`    | Decline a pending booking request (optional reason)       |
+| `POST`        | `/guide/bookings/{id}/cancel`     | Cancel a confirmed tour before start (optional reason)    |
+| `POST`        | `/guide/bookings/{id}/complete`   | Mark a started confirmed tour completed                   |
+| `POST`        | `/guide/bookings/{id}/no-show`    | Mark participant no-show (optional reason)                |
 | `GET`         | `/tours`                          | Public marketplace catalog (ACTIVE offerings only)        |
 | `GET`         | `/tours/{tourId}`                 | Single discoverable tour detail                           |
 | `GET`         | `/bookings/next-tour`             | Soonest upcoming CONFIRMED booking (dashboard card)       |
@@ -466,6 +478,24 @@ envelope; errors are `application/problem+json`.
 | `GET`         | `/universities/{slug}`            | Platform university profile + live-tour stats            |
 | `GET`         | `/meta/tour-topics`               | Controlled vocabulary for tour topics                     |
 | `POST`        | `/admin/guides/{userId}/decision` | Approve / reject a PENDING guide application (ADMIN)      |
+
+### Expired guide booking requests
+
+Guide mutations use `/guide/bookings/{id}/...` (BFF prefix `/v1`), matching the
+frontend guide inbox and detail page. `/bookings/{id}/cancel` remains participant-only;
+the alternative guide paths proposed in draft PR #46 are not part of this contract.
+The guide pending list and badge exclude elapsed response deadlines immediately, without
+waiting for the expiry sweep. Both accept and decline reject expired requests; successful
+responses clear the deadline. Legacy null deadlines remain actionable.
+Guide cancellation and decline retain the existing display status `CANCELLED`; detail
+status history identifies the GUIDE actor and `GUIDE_CANCELLED` / `GUIDE_DECLINED` event.
+
+Pending guide-acceptance requests are expired using their stored response deadline. A scheduled
+transaction claims at most 100 due requests with `FOR UPDATE SKIP LOCKED`, changes their status
+to `EXPIRED`, clears the response deadline, and writes a `SYSTEM` audit event. This releases the
+guide and participant overlap holds without changing payment fields. Optimistic versions prevent
+stale guide actions from overwriting expiry. The job runs every 60 seconds after an initial
+60-second delay; override `booking.expiry.delay-ms` and `booking.expiry.initial-delay-ms` as needed.
 
 > **Role scoping is by authorization, not by path.** Booking and cart live at generic resource
 > paths (`/bookings*`, `/cart*`), _not_ under a `/participant/` prefix. The **PARTICIPANT** role is
