@@ -34,7 +34,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers
-@Import({BookingService.class, SlotGenerationService.class})
+@Import({BookingService.class, SlotGenerationService.class, PostgresParticipantCartLock.class})
 class SeededDemoAvailabilityIntegrationTest {
 
     @Container @ServiceConnection

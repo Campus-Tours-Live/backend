@@ -222,6 +222,7 @@ class GuideCapabilityAuditTest {
         @Mock BookingStatusHistoryRepository statusHistory;
         @Mock GuideAvailabilityOccurrenceRepository availabilityOccurrences;
         @Mock GuideBookingSettingsRepository settings;
+        @Mock com.CampusToursLive.domain.booking.ParticipantCartLock cartLock;
 
         private BookingService service() {
             return new BookingService(
@@ -232,7 +233,8 @@ class GuideCapabilityAuditTest {
                     universities,
                     statusHistory,
                     availabilityOccurrences,
-                    settings);
+                    settings,
+                    cartLock);
         }
 
         @Test

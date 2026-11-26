@@ -106,7 +106,8 @@ public interface ApiExamples {
                     + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
                     + "\"guideResponseDeadline\":null,"
                     + "\"universityName\":\"North Coast University\",\"durationMin\":60,"
-                    + "\"priceCents\":4200,\"currency\":\"USD\"}],"
+                    + "\"priceCents\":4200,\"currentPriceCents\":4200,\"currency\":\"USD\","
+                    + "\"cartStatus\":\"AVAILABLE\"}],"
                     + META
                     + "}";
 
@@ -119,7 +120,8 @@ public interface ApiExamples {
                     + "\"offeringTitle\":\"North Campus highlights\",\"guideName\":\"Maya Chen\","
                     + "\"guideResponseDeadline\":null,"
                     + "\"universityName\":\"North Coast University\",\"durationMin\":60,"
-                    + "\"priceCents\":4200,\"currency\":\"USD\"},"
+                    + "\"priceCents\":4200,\"currentPriceCents\":4200,\"currency\":\"USD\","
+                    + "\"cartStatus\":\"AVAILABLE\"},"
                     + META
                     + "}";
 
