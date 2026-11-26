@@ -99,6 +99,13 @@ public class TourDiscoveryService {
         return rows.map(o -> toSummary(o, lookup));
     }
 
+    /** Maps already-discoverable offerings to catalog cards, preserving order. */
+    @Transactional(readOnly = true)
+    public List<TourSummaryResponse> toSummaries(List<TourOfferingEntity> rows) {
+        Lookup lookup = loadLookup(rows);
+        return rows.stream().map(o -> toSummary(o, lookup)).toList();
+    }
+
     /**
      * One guide's discoverable tours, newest/recommended first — backs the public GET
      * /guides/{id}/tours. Same marketplace-visibility rules and summary shape as {@link #list}; an
