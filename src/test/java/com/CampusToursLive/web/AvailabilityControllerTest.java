@@ -1,7 +1,10 @@
 package com.CampusToursLive.web;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -784,6 +787,72 @@ class AvailabilityControllerTest {
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"dayOfWeek\":1,\"windows\":[]}"))
                 .andExpect(status().isForbidden());
+    }
+
+    // ---------------------------------------------------------------------
+    // Day on/off toggle (CTL-60).
+    // ---------------------------------------------------------------------
+
+    @Test
+    void setDayActive_returnsEnvelope_andPassesTheRequestThrough() throws Exception {
+        UserEntity u = user();
+        UUID guideId = UUID.randomUUID();
+        UUID id = UUID.randomUUID();
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(guideId);
+        guide.setUserId(u.getId());
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(guides.findByUserId(u.getId())).thenReturn(Optional.of(guide));
+        when(availability.setDayActive(eq(guideId), any())).thenReturn(List.of(rule(id)));
+
+        mvc.perform(
+                        post("/availability/rules/active")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"dayOfWeek\":2,\"active\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").value(id.toString()))
+                .andExpect(jsonPath("$.affectedBookings").isArray())
+                .andExpect(jsonPath("$.meta.requestId").exists());
+
+        verify(availability)
+                .setDayActive(
+                        eq(guideId),
+                        argThat(r -> r.dayOfWeek() == 2 && Boolean.FALSE.equals(r.active())));
+    }
+
+    @Test
+    void setDayActive_422_whenServiceRejectsAnOverlappingActivation() throws Exception {
+        UserEntity u = user();
+        UUID guideId = UUID.randomUUID();
+        GuideProfileEntity guide = new GuideProfileEntity();
+        guide.setId(guideId);
+        guide.setUserId(u.getId());
+        when(currentUser.requireRole(UserRole.GUIDE)).thenReturn(u);
+        when(guides.findByUserId(u.getId())).thenReturn(Optional.of(guide));
+        when(availability.setDayActive(eq(guideId), any()))
+                .thenThrow(
+                        new ValidationException(
+                                "Can't turn Tuesday on: two of its ranges overlap"));
+
+        mvc.perform(
+                        post("/availability/rules/active")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"dayOfWeek\":2,\"active\":true}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422));
+    }
+
+    @Test
+    void setDayActive_403_whenNonGuideCaller() throws Exception {
+        when(currentUser.requireRole(UserRole.GUIDE))
+                .thenThrow(new ForbiddenException("Missing required role: GUIDE"));
+
+        mvc.perform(
+                        post("/availability/rules/active")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"dayOfWeek\":2,\"active\":false}"))
+                .andExpect(status().isForbidden());
+        verify(availability, never()).setDayActive(any(), any());
     }
 
     // ---------------------------------------------------------------------

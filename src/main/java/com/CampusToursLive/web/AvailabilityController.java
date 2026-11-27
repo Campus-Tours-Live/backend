@@ -25,6 +25,7 @@ import com.CampusToursLive.web.dto.OverridePreviewResponse;
 import com.CampusToursLive.web.dto.OverrideReplaceRequest;
 import com.CampusToursLive.web.dto.Problem;
 import com.CampusToursLive.web.dto.ResolvedAvailabilityResponse;
+import com.CampusToursLive.web.dto.RulesActiveRequest;
 import com.CampusToursLive.web.dto.RulesReplaceRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -896,6 +897,75 @@ public class AvailabilityController {
         var user = currentUser.requireRole(UserRole.GUIDE);
         UUID guideId = requireGuideId(user);
         List<AvailabilityRuleResponse> data = availability.replaceRules(guideId, req);
+        return AvailabilityWriteResponse.of(data, affectedBookings(user));
+    }
+
+    /**
+     * Atomic day on/off toggle (CTL-60): sets every one of the guide's rules for one day of week to
+     * active or inactive together, in one transaction, so the weekly editor's toggle can never
+     * leave a multi-rule day half-flipped. Owner-scoped like every other route here.
+     */
+    @Operation(
+            summary = "Turn one weekday's availability on or off",
+            description =
+                    "Sets EVERY one of the guide's recurring rules for the given day of week to"
+                            + " active or inactive in ONE transaction under the per-guide advisory"
+                            + " lock: all of them change or none do. Rules are never deleted"
+                            + " (deactivate-preserve), so turning the day back on restores the same"
+                            + " ranges. Activating applies the single-rule overlap rule to the whole"
+                            + " day at once: ranges with the same effective dates are merged, while"
+                            + " overlapping ranges with different, overlapping effective dates are a"
+                            + " 422 raised BEFORE any change. A day already in the requested state,"
+                            + " or with no rules, is a no-op. The write re-materializes the guide's"
+                            + " occurrences in the same transaction and the response surfaces any"
+                            + " newly uncovered future CONFIRMED bookings (advisory; no booking is"
+                            + " mutated).")
+    @ApiResponse(
+            responseCode = "200",
+            description =
+                    "All of the weekday's rules after the toggle (active and inactive), plus any"
+                            + " newly-uncovered bookings (advisory).",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            examples =
+                                    @ExampleObject(
+                                            value = ApiExamples.AVAILABILITY_RULE_LIST_WRITE)))
+    @ApiResponse(
+            responseCode = "401",
+            description = "No valid principal / account not provisioned.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_401)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Caller does not hold the GUIDE role.",
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_403)))
+    @ApiResponse(
+            responseCode = "422",
+            description =
+                    "dayOfWeek missing or out of range (0-6), active missing, or activating would"
+                            + " overlap two of the day's ranges that cover different, overlapping"
+                            + " dates. Raised before any change, so the day is left exactly as it"
+                            + " was."
+                            + NO_GUIDE_PROFILE_422,
+            content =
+                    @Content(
+                            mediaType = "application/json",
+                            schema = @Schema(implementation = Problem.class),
+                            examples = @ExampleObject(value = ApiExamples.PROBLEM_422)))
+    @PostMapping("/rules/active")
+    public AvailabilityWriteResponse<List<AvailabilityRuleResponse>> setDayActive(
+            @RequestBody RulesActiveRequest req) {
+        var user = currentUser.requireRole(UserRole.GUIDE);
+        UUID guideId = requireGuideId(user);
+        List<AvailabilityRuleResponse> data = availability.setDayActive(guideId, req);
         return AvailabilityWriteResponse.of(data, affectedBookings(user));
     }
 
