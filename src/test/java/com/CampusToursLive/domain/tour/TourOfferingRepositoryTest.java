@@ -3,6 +3,7 @@ package com.CampusToursLive.domain.tour;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import jakarta.persistence.EntityManager;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +14,7 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -42,6 +44,7 @@ class TourOfferingRepositoryTest {
     private UUID archivedId;
     private UUID pendingGuideOfferingId;
     private UUID inactiveUniversityOfferingId;
+    private UUID pendingGuideId;
 
     @BeforeEach
     void seedVisibilityFixtures() {
@@ -53,8 +56,7 @@ class TourOfferingRepositoryTest {
         approvedGuideId = insertGuide(activeUniversityId, "VERIFIED");
         UUID pendingGuideUserId = UUID.randomUUID();
         insertUser(pendingGuideUserId, "Pending Guide");
-        UUID pendingGuideId =
-                insertGuideWithUser(activeUniversityId, pendingGuideUserId, "PENDING");
+        pendingGuideId = insertGuideWithUser(activeUniversityId, pendingGuideUserId, "PENDING");
 
         discoverableId =
                 insertOffering(
@@ -152,6 +154,116 @@ class TourOfferingRepositoryTest {
         assertThat(page.getContent())
                 .extracting(TourOfferingEntity::getId)
                 .containsExactly(discoverableId);
+    }
+
+    /**
+     * Paging through rows that tie on every sort key must still visit each row exactly once. The
+     * extra rows tie with {@code discoverableId} on all RECOMMENDED keys: rating 0, review count 0,
+     * and the same {@code created_at} ({@code now()} is fixed per transaction). This mirrors the
+     * service's RECOMMENDED sort, including its {@code id} tiebreaker, and runs it against real
+     * Postgres with the discovery joins. Order-agnostic on purpose: Java's UUID ordering differs
+     * from Postgres's.
+     */
+    @Test
+    void findDiscoverable_idTiebreakerPagesTiedRowsCompletelyWithoutDuplicates() {
+        List<UUID> expected = new ArrayList<>(List.of(discoverableId));
+        for (int i = 0; i < 3; i++) {
+            expected.add(
+                    insertOffering(
+                            approvedGuideId,
+                            activeUniversityId,
+                            searchMarker + " tie",
+                            "tie-" + i + "-" + searchMarker,
+                            "ACTIVE"));
+        }
+        entityManager.flush();
+        Sort recommended =
+                Sort.by(
+                        Sort.Order.desc("avgRating"),
+                        Sort.Order.desc("reviewCount"),
+                        Sort.Order.desc("createdAt"),
+                        Sort.Order.asc("id"));
+
+        List<UUID> paged = new ArrayList<>();
+        for (int p = 0; p < expected.size(); p++) {
+            offerings
+                    .findDiscoverable(
+                            null,
+                            false,
+                            List.of(TourTopic.values()[0]),
+                            searchMarker,
+                            PageRequest.of(p, 1, recommended))
+                    .forEach(o -> paged.add(o.getId()));
+        }
+
+        assertThat(paged).doesNotHaveDuplicates().containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    void findDiscoverableByGuide_returnsOnlyThatGuidesVisibleOfferings() {
+        List<TourOfferingEntity> rows =
+                offerings
+                        .findDiscoverableByGuide(approvedGuideId, PageRequest.of(0, 20))
+                        .getContent();
+        // Only the ACTIVE offering at the ACTIVE university — this guide's draft/paused/archived
+        // and
+        // its inactive-university offering are all excluded.
+        assertThat(rows).extracting(TourOfferingEntity::getId).containsExactly(discoverableId);
+    }
+
+    /**
+     * Same tie-paging guarantee as the catalog, for one guide's list: paging through this guide's
+     * offerings that tie on every RECOMMENDED key (rating 0, count 0, same created_at) with the
+     * service's id tiebreaker must visit each exactly once. Order-agnostic, since Java's UUID
+     * ordering differs from Postgres's.
+     */
+    @Test
+    void findDiscoverableByGuide_idTiebreakerPagesTiedRowsCompletelyWithoutDuplicates() {
+        List<UUID> expected = new ArrayList<>(List.of(discoverableId));
+        for (int i = 0; i < 3; i++) {
+            expected.add(
+                    insertOffering(
+                            approvedGuideId,
+                            activeUniversityId,
+                            searchMarker + " guide-tie",
+                            "guide-tie-" + i + "-" + searchMarker,
+                            "ACTIVE"));
+        }
+        entityManager.flush();
+        Sort recommended =
+                Sort.by(
+                        Sort.Order.desc("avgRating"),
+                        Sort.Order.desc("reviewCount"),
+                        Sort.Order.desc("createdAt"),
+                        Sort.Order.asc("id"));
+
+        List<UUID> paged = new ArrayList<>();
+        for (int p = 0; p < expected.size(); p++) {
+            offerings
+                    .findDiscoverableByGuide(approvedGuideId, PageRequest.of(p, 1, recommended))
+                    .forEach(o -> paged.add(o.getId()));
+        }
+
+        assertThat(paged).doesNotHaveDuplicates().containsExactlyInAnyOrderElementsOf(expected);
+    }
+
+    @Test
+    void findDiscoverableByGuide_pendingGuide_returnsEmpty() {
+        // The pending guide has an ACTIVE offering, but a non-VERIFIED guide is never discoverable.
+        assertThat(
+                        offerings
+                                .findDiscoverableByGuide(pendingGuideId, PageRequest.of(0, 20))
+                                .getContent())
+                .isEmpty();
+    }
+
+    @Test
+    void findDiscoverableByGuide_unknownGuide_returnsEmpty() {
+        assertThat(
+                        offerings
+                                .findDiscoverableByGuide(UUID.randomUUID(), PageRequest.of(0, 20))
+                                .getContent())
+                .isEmpty();
     }
 
     @Test

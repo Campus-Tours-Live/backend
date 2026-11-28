@@ -455,14 +455,17 @@ envelope; errors are `application/problem+json`.
 | `GET`         | `/bookings/upcoming`              | Upcoming active-lifecycle bookings, chronological         |
 | `GET`         | `/bookings/pending-actions`       | Outstanding-action counts (payments, guide, reviews)      |
 | `POST`        | `/bookings`                       | Create a booking for a bookable offering                  |
+| `POST`        | `/bookings/{id}/reschedule-proposals` | Propose a new time for a CONFIRMED booking (CTL-50)   |
 | `POST`        | `/bookings/{id}/cancel`           | Cancel the participant's own upcoming booking             |
 | `GET`         | `/cart`                           | The booking cart (DRAFT bookings — hold no slot)          |
 | `POST`        | `/cart/items`                     | Validate + add a cart item                                |
 | `DELETE`      | `/cart/items/{id}`                | Remove a cart item                                        |
 | `POST`        | `/cart/checkout`                  | Submit the whole cart atomically (all-or-nothing)         |
-| `GET`         | `/universities`                   | University catalog search (`q`, `limit`)                  |
+| `GET`         | `/universities/state-summary`     | Browse-by-state counts (Scorecard directory)              |
+| `GET`         | `/universities?state=`            | One state's universities (Scorecard directory)            |
+| `GET`         | `/universities/{slug}`            | Platform university profile + live-tour stats            |
 | `GET`         | `/meta/tour-topics`               | Controlled vocabulary for tour topics                     |
-| `POST`        | `/admin/guides/{userId}/decision` | Admin approve/reject a guide application                  |
+| `POST`        | `/admin/guides/{userId}/decision` | Approve / reject a PENDING guide application (ADMIN)      |
 
 > **Role scoping is by authorization, not by path.** Booking and cart live at generic resource
 > paths (`/bookings*`, `/cart*`), _not_ under a `/participant/` prefix. The **PARTICIPANT** role is
@@ -504,6 +507,33 @@ curl -s "http://localhost:4000/v1/tours?sort=RECOMMENDED&limit=20" \
 
 See the endpoint tables above for the full request/response contract. Cross-repo integration (BFF
 `/v1` passthrough, frontend) is described in the PR that introduced this endpoint.
+
+### Guide application decision (`POST /admin/guides/{userId}/decision`)
+
+An **ADMIN** approves or rejects a guide whose application is **PENDING**. `{userId}` is the
+guide's **user** id (not the guide profile id).
+
+```json
+{ "decision": "REJECT", "reason": "Student ID photo is unreadable" }
+```
+
+- `decision` is `APPROVE` or `REJECT`. `reason` (≤ 500 chars) is optional for `APPROVE` and
+  required (non-blank) for `REJECT`.
+- **APPROVE** sets the guide to `VERIFIED` (stamping `approved_at`) and marks their PENDING school
+  rows `VERIFIED`. The guide can then publish offerings, and those appear in `GET /tours`.
+- **REJECT** sets the guide and their PENDING school rows to `REJECTED`. There is no API path back
+  to `PENDING` from `REJECTED` yet: `PATCH /guide/profile` forces `submit=false`, and
+  `POST /users/me/roles/guide` rejects accounts that already hold GUIDE (`ROLE_ALREADY_GRANTED`).
+- Every decision writes one `audit_log` row (`GUIDE_APPLICATION_DECIDED`, the admin as actor, the
+  decision and trimmed reason in metadata).
+- The decision is a conditional update on `guide_status = PENDING`, so two admins deciding at once
+  cannot both win — the second gets `409`.
+
+**Responses:** `200` `{ "userId", "status" }` · `401` no token · `403` not an ADMIN · `404` no guide
+profile for that user · `409` `GUIDE_APPLICATION_NOT_PENDING` (already decided; `currentStatus` in
+the body), `GUIDE_SELF_DECISION` (an admin deciding their own application), or
+`GUIDE_UNIVERSITY_NOT_PENDING` (no PENDING school row to verify) · `422` invalid body or a reject
+without a reason.
 
 ---
 
