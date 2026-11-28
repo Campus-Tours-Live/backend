@@ -277,10 +277,4 @@ public class BookingController {
         var user = currentUser.requireRole(UserRole.PARTICIPANT);
         return ApiEnvelope.of(bookingService.cancelBooking(user, id, req));
     }
-
-    // temp controller test
-    @GetMapping("/examtest")
-    public String tempAPTTest() {
-        return "OK";
-    }
 }
