@@ -2,6 +2,8 @@ package com.CampusToursLive.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
@@ -43,6 +45,7 @@ class OpenApiDocsExportTest {
     @MockitoBean private JwtDecoder jwtDecoder;
 
     @Autowired private TestRestTemplate rest;
+    @Autowired private ObjectMapper objectMapper;
 
     @Test
     void exportsGeneratedOpenApiSpec() throws Exception {
@@ -82,5 +85,25 @@ class OpenApiDocsExportTest {
         assertThat(body).doesNotContain("\"/session\"");
         assertThat(body).contains("\"/users/me\"");
         assertThat(body).contains("\"/users/me/role-eligibility\"");
+    }
+
+    @Test
+    void availabilityPreviewResponse_hasSchemaAndExample() throws Exception {
+        ResponseEntity<String> resp = rest.getForEntity("/v3/api-docs", String.class);
+        JsonNode content =
+                objectMapper
+                        .readTree(resp.getBody())
+                        .path("paths")
+                        .path("/tours/{tourId}/availability-preview")
+                        .path("get")
+                        .path("responses")
+                        .path("200")
+                        .path("content")
+                        .path("application/json");
+
+        assertThat(content.has("schema")).isTrue();
+        assertThat(content.path("schema").path("$ref").asText()).contains("ApiEnvelope");
+        assertThat(content.has("example")).isTrue();
+        assertThat(content.path("example").path("data").path("sampleSlots").isArray()).isTrue();
     }
 }

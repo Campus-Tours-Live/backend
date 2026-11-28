@@ -53,6 +53,11 @@ public interface ApiExamples {
             "{\"type\":\"about:blank\",\"title\":\"Not eligible for role: PARTICIPANT\","
                     + "\"status\":409,\"code\":\"ROLE_NOT_ELIGIBLE\",\"role\":\"PARTICIPANT\"}";
 
+    String PROBLEM_409_GUIDE_NOT_PENDING =
+            "{\"type\":\"about:blank\","
+                    + "\"title\":\"Guide application is not pending: VERIFIED\",\"status\":409,"
+                    + "\"code\":\"GUIDE_APPLICATION_NOT_PENDING\",\"currentStatus\":\"VERIFIED\"}";
+
     String PROBLEM_422 =
             "{\"type\":\"about:blank\",\"title\":\"Validation failed\",\"status\":422,"
                     + "\"detail\":\"One or more fields are invalid.\"}";
@@ -336,6 +341,7 @@ public interface ApiExamples {
                     + "\"topic\":\"GENERAL_CAMPUS\","
                     + "\"description\":\"A guided walk through the north campus.\","
                     + "\"languages\":[\"en-US\"],"
+                    + "\"features\":[\"Q_AND_A\"],"
                     + "\"universityId\":\"u1a2c3d4-0000-4000-8000-000000000003\","
                     + "\"universityName\":\"North Coast University\","
                     + "\"universityImageUrl\":\"https://pub-3225b84a9a0b4728b11f261ee52251ba.r2"
@@ -347,6 +353,16 @@ public interface ApiExamples {
                     + "\"guideBio\":\"Third-year student and campus tour lead.\","
                     + "\"durationMin\":60,\"priceCents\":4200,\"currency\":\"USD\","
                     + "\"avgRating\":4.5,\"reviewCount\":12},"
+                    + META
+                    + "}";
+
+    String TOUR_AVAILABILITY_PREVIEW =
+            "{\"data\":{\"hasAvailability\":true,\"totalSlots\":6,"
+                    + "\"nextStartAt\":\"2026-07-14T16:00:00Z\","
+                    + "\"nextEndAt\":\"2026-07-14T16:30:00Z\","
+                    + "\"sampleSlots\":[{\"startAt\":\"2026-07-14T16:00:00Z\","
+                    + "\"endAt\":\"2026-07-14T16:30:00Z\"},{\"startAt\":"
+                    + "\"2026-07-14T16:30:00Z\",\"endAt\":\"2026-07-14T17:00:00Z\"}]},"
                     + META
                     + "}";
 
@@ -423,6 +439,12 @@ public interface ApiExamples {
                     + META
                     + "}";
 
+    String GUIDE_DECISION =
+            "{\"data\":{\"userId\":\"a1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"status\":\"VERIFIED\"},"
+                    + META
+                    + "}";
+
     // --- Enrolment-year rules (CTL-97) ---
 
     String ENROLLMENT_YEARS =
@@ -433,6 +455,18 @@ public interface ApiExamples {
                     + "{\"matches\":[\"bachelor\"],\"years\":6},"
                     + "{\"matches\":[\"associate\",\"certificate\",\"diploma\"],\"years\":3}],"
                     + "\"defaultMaxYearsToGraduate\":8},"
+                    + META
+                    + "}";
+
+    // --- Reschedule (CTL-50) ---
+    String RESCHEDULE_PROPOSAL =
+            "{\"data\":{\"id\":\"r1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"bookingId\":\"b1a2c3d4-0000-4000-8000-000000000001\","
+                    + "\"requestedBy\":\"PARTICIPANT\",\"status\":\"PENDING_COUNTERPARTY\","
+                    + "\"proposedStartAt\":\"2026-08-05T17:00:00Z\","
+                    + "\"proposedEndAt\":\"2026-08-05T18:00:00Z\",\"feeCents\":0,"
+                    + "\"priceDiffCents\":0,\"expiresAt\":\"2026-08-03T17:00:00Z\","
+                    + "\"reason\":\"Class moved.\"},"
                     + META
                     + "}";
 }
